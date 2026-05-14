@@ -55,6 +55,88 @@ export default function App() {
     }
   }, [paymentRecord]);
 
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstallable, setIsInstallable] = useState(false);
+
+  React.useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstallable(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setIsInstallable(false);
+      }
+      setDeferredPrompt(null);
+    }
+  };
+
+  React.useEffect(() => {
+    const manifest = {
+      name: "HM Client Lawyer",
+      short_name: "HM Lawyer",
+      start_url: "/",
+      display: "standalone",
+      background_color: "#18181b",
+      theme_color: "#18181b",
+      icons: [
+        {
+          src: 'data:image/svg+xml;charset=utf-8,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"%3E%3Crect width="192" height="192" fill="%2318181b" rx="20"/%3E%3Ctext x="96" y="105" font-family="Arial, sans-serif" font-size="80" fill="white" font-weight="bold" text-anchor="middle" dominant-baseline="middle"%3EHM%3C/text%3E%3C/svg%3E',
+          sizes: "192x192",
+          type: "image/svg+xml",
+          purpose: "any maskable"
+        },
+        {
+          src: 'data:image/svg+xml;charset=utf-8,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"%3E%3Crect width="512" height="512" fill="%2318181b" rx="50"/%3E%3Ctext x="256" y="280" font-family="Arial, sans-serif" font-size="200" fill="white" font-weight="bold" text-anchor="middle" dominant-baseline="middle"%3EHM%3C/text%3E%3C/svg%3E',
+          sizes: "512x512",
+          type: "image/svg+xml",
+          purpose: "any maskable"
+        }
+      ]
+    };
+
+    const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+    const manifestUrl = URL.createObjectURL(manifestBlob);
+
+    let manifestLink = document.querySelector('link[rel="manifest"]') as HTMLLinkElement;
+    if (!manifestLink) {
+      manifestLink = document.createElement('link');
+      manifestLink.rel = 'manifest';
+      document.head.appendChild(manifestLink);
+    }
+    manifestLink.href = manifestUrl;
+
+    const swCode = `
+      self.addEventListener('install', (event) => {
+        self.skipWaiting();
+      });
+      self.addEventListener('activate', (event) => {
+        event.waitUntil(clients.claim());
+      });
+      self.addEventListener('fetch', (event) => {
+        event.respondWith(
+          fetch(event.request).catch(() => new Response('Offline'))
+        );
+      });
+    `;
+    const swBlob = new Blob([swCode], { type: 'application/javascript' });
+    const swUrl = URL.createObjectURL(swBlob);
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register(swUrl)
+        .then(() => console.log('SW registered with Blob'))
+        .catch(err => console.error('SW registration failed', err));
+    }
+  }, []);
+
   const handleExportData = () => {
     const headers = ['ID', 'Nama Pelanggan', 'Kategori Kes', 'Total Fee', 'Bayaran Terakhir', 'Tarikh', 'Baki Sebelum', 'Baki Terkini', 'Baki Mileage'];
     const csvContent = [
@@ -281,6 +363,15 @@ export default function App() {
             <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded uppercase border border-blue-100">Aktif</span>
           </div>
           <div className="flex gap-2">
+            {isInstallable && (
+              <button 
+                onClick={handleInstallApp}
+                className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 font-medium cursor-pointer flex items-center gap-2"
+              >
+                <Download size={14} />
+                Muat Turun App
+              </button>
+            )}
             <button 
               onClick={handleExportData}
               className="px-3 py-1.5 text-xs border border-zinc-300 rounded hover:bg-zinc-50 font-medium cursor-pointer"
