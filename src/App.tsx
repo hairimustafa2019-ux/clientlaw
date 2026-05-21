@@ -5,7 +5,7 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle } from 'lucide-react';
+import { Search, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, Upload } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { records as initialRecords, CaseRecord } from './data';
 import jsPDF from 'jspdf';
@@ -20,21 +20,40 @@ const formatRM = (amount: number) => {
   }).format(amount);
 };
 
+const parseDateString = (dateStr: string) => {
+  const parts = dateStr.split('/');
+  if (parts.length === 3) {
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    let year = parseInt(parts[2], 10);
+    year += year < 50 ? 2000 : 1900;
+    return new Date(year, month, day).getTime();
+  }
+  return 0; // Fallback
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'records' | 'reports'>('dashboard');
   const [records, setRecords] = useState<CaseRecord[]>(initialRecords);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterKes, setFilterKes] = useState<string>('Semua');
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+  const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
 
   // Modal States
   const [paymentRecord, setPaymentRecord] = useState<CaseRecord | null>(null);
   const [statementRecord, setStatementRecord] = useState<CaseRecord | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<string>('');
+  const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [paymentMethod, setPaymentMethod] = useState<string>('Transfer');
   const [paymentError, setPaymentError] = useState<string>('');
   
   const [editingRecord, setEditingRecord] = useState<CaseRecord | null>(null);
   const [deletingRecord, setDeletingRecord] = useState<CaseRecord | null>(null);
+  const [isDeletingSelected, setIsDeletingSelected] = useState<boolean>(false);
+
+  const [paymentSortColumn, setPaymentSortColumn] = useState<'date' | 'amount' | null>(null);
+  const [paymentSortDirection, setPaymentSortDirection] = useState<'asc' | 'desc'>('desc');
 
   const [isNewRecordModalOpen, setIsNewRecordModalOpen] = useState(false);
   const [newRecordData, setNewRecordData] = useState({
@@ -80,59 +99,9 @@ export default function App() {
   };
 
   React.useEffect(() => {
-    const manifest = {
-      name: "HM Client Lawyer",
-      short_name: "HM Lawyer",
-      start_url: "/",
-      display: "standalone",
-      background_color: "#18181b",
-      theme_color: "#18181b",
-      icons: [
-        {
-          src: 'data:image/svg+xml;charset=utf-8,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"%3E%3Crect width="192" height="192" fill="%2318181b" rx="20"/%3E%3Ctext x="96" y="105" font-family="Arial, sans-serif" font-size="80" fill="white" font-weight="bold" text-anchor="middle" dominant-baseline="middle"%3EHM%3C/text%3E%3C/svg%3E',
-          sizes: "192x192",
-          type: "image/svg+xml",
-          purpose: "any maskable"
-        },
-        {
-          src: 'data:image/svg+xml;charset=utf-8,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"%3E%3Crect width="512" height="512" fill="%2318181b" rx="50"/%3E%3Ctext x="256" y="280" font-family="Arial, sans-serif" font-size="200" fill="white" font-weight="bold" text-anchor="middle" dominant-baseline="middle"%3EHM%3C/text%3E%3C/svg%3E',
-          sizes: "512x512",
-          type: "image/svg+xml",
-          purpose: "any maskable"
-        }
-      ]
-    };
-
-    const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-    const manifestUrl = URL.createObjectURL(manifestBlob);
-
-    let manifestLink = document.querySelector('link[rel="manifest"]') as HTMLLinkElement;
-    if (!manifestLink) {
-      manifestLink = document.createElement('link');
-      manifestLink.rel = 'manifest';
-      document.head.appendChild(manifestLink);
-    }
-    manifestLink.href = manifestUrl;
-
-    const swCode = `
-      self.addEventListener('install', (event) => {
-        self.skipWaiting();
-      });
-      self.addEventListener('activate', (event) => {
-        event.waitUntil(clients.claim());
-      });
-      self.addEventListener('fetch', (event) => {
-        event.respondWith(
-          fetch(event.request).catch(() => new Response('Offline'))
-        );
-      });
-    `;
-    const swBlob = new Blob([swCode], { type: 'application/javascript' });
-    const swUrl = URL.createObjectURL(swBlob);
-
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register(swUrl)
-        .then(() => console.log('SW registered with Blob'))
+      navigator.serviceWorker.register('/sw.js')
+        .then(() => console.log('SW registered successfully'))
         .catch(err => console.error('SW registration failed', err));
     }
   }, []);
@@ -154,6 +123,79 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDownloadTemplate = () => {
+    const headers = "id,nama,kes,jumlahKeseluruhan,bakiSebelum,bayaranTerakhir,bakiFeeTerkini,bakiMileage,tarikh,stat,alamat,telefon,email,totalFee\n";
+    const example = "R001,Ali Bin Abu,Faraid,5000,2000,1000,1000,500,20/05/2024,Aktif,123 Jalan Ampang,012-3456789,ali@example.com,5000\n";
+    const blob = new Blob([headers + example], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "template_rekod_kes.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImportCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const lines = text.split('\n');
+      if (lines.length < 2) return;
+      
+      const newRecordsFromCsv: CaseRecord[] = [];
+      
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        const values = line.split(/(?!\B"[^"]*),(?![^"]*"\B)/).map(v => v.replace(/^"|"$/g, '').trim());
+        if (values.length < 4) continue;
+        
+        try {
+          const totalFee = parseFloat(values[13]) || parseFloat(values[3]) || 0;
+          const newRecord: CaseRecord = {
+            id: values[0] || `CSV${Math.floor(Math.random() * 10000)}`,
+            nama: values[1] || '',
+            kes: values[2] || 'Umum',
+            jumlahKeseluruhan: parseFloat(values[3]) || totalFee,
+            bakiSebelum: parseFloat(values[4]) || 0,
+            bayaranTerakhir: parseFloat(values[5]) || 0,
+            bakiFeeTerkini: parseFloat(values[6]) || 0,
+            bakiMileage: parseFloat(values[7]) || 0,
+            tarikh: values[8] || new Date().toLocaleDateString('ms-MY'),
+            stat: (values[9] as any) || 'Aktif',
+            alamat: values[10] || '',
+            telefon: values[11] || '',
+            email: values[12] || '',
+            totalFee: totalFee,
+            paymentHistory: []
+          };
+          newRecordsFromCsv.push(newRecord);
+        } catch (e) {
+          console.error("Failed to parse row", values, e);
+        }
+      }
+      
+      if (newRecordsFromCsv.length > 0) {
+        setRecords(prev => [...newRecordsFromCsv, ...prev]);
+        alert(`${newRecordsFromCsv.length} rekod telah berjaya diimport!`);
+      } else {
+        alert("Gagal memuatnaik. Sila pastikan format menepati templat.");
+      }
+      
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleAddNewRecord = (e: React.FormEvent) => {
@@ -194,6 +236,12 @@ export default function App() {
     setExpandedRowId(null);
   };
 
+  const handleDeleteSelected = () => {
+    setRecords(prev => prev.filter(rec => !selectedRecords.includes(rec.id)));
+    setSelectedRecords([]);
+    setIsDeletingSelected(false);
+  };
+
   const handleUpdatePayment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!paymentRecord || !paymentAmount) return;
@@ -213,15 +261,26 @@ export default function App() {
 
     setRecords(prev => prev.map(record => {
       if (record.id === paymentRecord.id) {
-        const today = new Date();
-        const dateStr = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear().toString().slice(-2)}`;
+        let dateObj = new Date();
+        if (paymentDate) {
+          dateObj = new Date(paymentDate);
+        }
+        const dateStr = `${dateObj.getDate()}/${dateObj.getMonth() + 1}/${dateObj.getFullYear().toString().slice(-2)}`;
+
+        const newPaymentEntry = {
+          id: `P-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          date: dateStr,
+          amount: amount,
+          method: paymentMethod
+        };
 
         return {
           ...record,
           bayaranTerakhir: amount,
           bakiSebelum: record.bakiFeeTerkini,
           bakiFeeTerkini: Math.max(0, record.bakiFeeTerkini - amount),
-          tarikh: dateStr
+          tarikh: dateStr,
+          paymentHistory: [newPaymentEntry, ...(record.paymentHistory || [])]
         };
       }
       return record;
@@ -229,6 +288,8 @@ export default function App() {
 
     setPaymentRecord(null);
     setPaymentAmount('');
+    setPaymentDate(new Date().toISOString().split('T')[0]);
+    setPaymentMethod('Transfer');
   };
 
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -379,6 +440,26 @@ export default function App() {
               Eksport Data
             </button>
             <button 
+              onClick={handleDownloadTemplate}
+              className="hidden lg:block px-3 py-1.5 text-xs border border-zinc-300 rounded hover:bg-zinc-50 font-medium cursor-pointer"
+            >
+              Muat Turun Templat
+            </button>
+            <input 
+              type="file" 
+              accept=".csv" 
+              ref={fileInputRef} 
+              onChange={handleImportCSV} 
+              className="hidden" 
+            />
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="px-3 py-1.5 flex items-center gap-1 text-xs border border-zinc-300 rounded hover:bg-zinc-50 font-medium cursor-pointer"
+            >
+              <Upload size={14} className="text-zinc-500" />
+              Import CSV
+            </button>
+            <button 
               onClick={() => setIsNewRecordModalOpen(true)}
               className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 font-medium cursor-pointer"
             >
@@ -439,6 +520,15 @@ export default function App() {
                   Senarai Rekod Kes
                 </span>
                 <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                  {selectedRecords.length > 0 && (
+                    <button
+                      onClick={() => setIsDeletingSelected(true)}
+                      className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 font-medium cursor-pointer flex items-center gap-1"
+                    >
+                      <Trash2 size={12} />
+                      Padam Terpilih ({selectedRecords.length})
+                    </button>
+                  )}
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
                       <Search size={12} className="text-zinc-400" />
@@ -475,7 +565,20 @@ export default function App() {
                 <table className="w-full text-left border-collapse whitespace-nowrap">
                   <thead className="sticky top-0 bg-zinc-50 z-10 shadow-sm">
                     <tr className="text-[11px] font-bold text-zinc-500 uppercase border-b border-zinc-200">
-                      <th className="px-4 py-2 border-r border-zinc-200 text-center w-12">#</th>
+                      <th className="px-4 py-2 border-r border-zinc-200 text-center w-12 flex justify-center items-center h-full">
+                        <input 
+                          type="checkbox" 
+                          className="cursor-pointer rounded border-zinc-300 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500"
+                          checked={filteredRecords.length > 0 && selectedRecords.length === filteredRecords.length}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedRecords(filteredRecords.map(r => r.id));
+                            } else {
+                              setSelectedRecords([]);
+                            }
+                          }}
+                        />
+                      </th>
                       <th className="px-4 py-2 border-r border-zinc-200">Nama Pelanggan</th>
                       <th className="px-4 py-2 border-r border-zinc-200">Kategori Kes</th>
                       <th className="px-4 py-2 border-r border-zinc-200 text-right">Total Fee</th>
@@ -483,24 +586,41 @@ export default function App() {
                       <th className="px-4 py-2 border-r border-zinc-200 text-center">Tarikh</th>
                       <th className="px-4 py-2 border-r border-zinc-200 text-right">Baki Sebelum</th>
                       <th className="px-4 py-2 border-r border-zinc-200 text-right">Baki Terkini</th>
-                      <th className="px-4 py-2 text-right">Baki Mileage</th>
+                      <th className="px-4 py-2 border-r border-zinc-200 text-right">Baki Mileage</th>
+                      <th className="px-4 py-2 text-center">Tindakan</th>
                     </tr>
                   </thead>
                   <tbody className="text-xs">
-                    {filteredRecords.length > 0 ? (
-                      filteredRecords.map((record, index) => (
-                        <React.Fragment key={record.id}>
-                          <motion.tr 
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            transition={{ duration: 0.2 }}
-                            onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
-                            className={`border-b border-zinc-100 hover:bg-zinc-100 cursor-pointer transition-colors ${record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-zinc-50/50' : ''} ${record.bakiFeeTerkini > 2000 ? 'bg-amber-50/30' : ''} ${expandedRowId === record.id ? 'bg-zinc-100' : ''}`}
-                          >
-                            <td className="px-4 py-2 border-r border-zinc-100">
-                              <div className="flex items-center justify-center gap-1.5 font-mono text-zinc-400">
-                                {expandedRowId === record.id ? <ChevronDown size={14} className="text-zinc-600" /> : <ChevronRight size={14} className="text-zinc-400" />}
-                                <span>{index + 1}</span>
+                    <AnimatePresence initial={false}>
+                      {filteredRecords.length > 0 ? (
+                        filteredRecords.map((record, index) => (
+                          <React.Fragment key={record.id}>
+                            <motion.tr 
+                              layout="position"
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, x: -10 }}
+                              transition={{ duration: 0.2 }}
+                              onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
+                              className={`border-b border-zinc-100 hover:bg-zinc-100 cursor-pointer transition-colors ${record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-zinc-50/50' : ''} ${record.bakiFeeTerkini > 2000 ? 'bg-amber-50/30' : ''} ${expandedRowId === record.id ? 'bg-zinc-100' : ''}`}
+                            >
+                            <td className="px-4 py-2 border-r border-zinc-100" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center justify-center gap-2 font-mono text-zinc-400">
+                                <input 
+                                  type="checkbox" 
+                                  className="cursor-pointer rounded border-zinc-300 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500 mt-1 pl-2"
+                                  checked={selectedRecords.includes(record.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedRecords(prev => [...prev, record.id]);
+                                    } else {
+                                      setSelectedRecords(prev => prev.filter(id => id !== record.id));
+                                    }
+                                  }}
+                                />
+                                <span className="cursor-pointer" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
+                                  {expandedRowId === record.id ? <ChevronDown size={14} className="text-zinc-600" /> : <ChevronRight size={14} className="text-zinc-400" />}
+                                </span>
                               </div>
                             </td>
                             <td className="px-4 py-2 font-medium border-r border-zinc-100">{record.nama}</td>
@@ -518,8 +638,17 @@ export default function App() {
                             <td className={`px-4 py-2 font-mono font-bold border-r border-zinc-100 text-right ${record.bakiFeeTerkini > 2000 ? 'text-red-500 underline decoration-dotted' : 'text-zinc-700'}`}>
                               {formatRM(record.bakiFeeTerkini)}
                             </td>
-                            <td className="px-4 py-2 font-mono text-right text-amber-600">
+                            <td className="px-4 py-2 font-mono border-r border-zinc-100 text-right text-amber-600">
                               {formatRM(record.bakiMileage)}
+                            </td>
+                            <td className="px-4 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                              <button 
+                                onClick={() => setDeletingRecord(record)}
+                                className="text-zinc-400 hover:text-red-600 transition-colors p-1"
+                                title="Padam Pelanggan"
+                              >
+                                <Trash2 size={14} />
+                              </button>
                             </td>
                           </motion.tr>
                           {expandedRowId === record.id && (
@@ -588,6 +717,109 @@ export default function App() {
                                         </div>
                                       </div>
                                     </div>
+
+                                    {/* Sejarah Bayaran Section */}
+                                    <div className="mt-6 pt-4 border-t border-zinc-100">
+                                      <h4 className="font-bold text-zinc-700 mb-3 flex items-center gap-2">
+                                        <Wallet size={14} className="text-blue-500" />
+                                        Sejarah Bayaran
+                                      </h4>
+                                      {record.paymentHistory && record.paymentHistory.length > 0 ? (
+                                        <div className="overflow-x-auto border border-zinc-200 rounded-sm">
+                                          <table className="w-full text-left text-sm whitespace-nowrap">
+                                            <thead className="bg-zinc-50 text-zinc-500 font-medium text-xs border-b border-zinc-200">
+                                              <tr>
+                                                <th className="px-4 py-2 border-r border-zinc-200">ID Bayaran</th>
+                                                <th 
+                                                  className="px-4 py-2 border-r border-zinc-200 cursor-pointer hover:bg-zinc-100 transition-colors group"
+                                                  onClick={() => {
+                                                    if (paymentSortColumn === 'date') {
+                                                      setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
+                                                    } else {
+                                                      setPaymentSortColumn('date');
+                                                      setPaymentSortDirection('asc');
+                                                    }
+                                                  }}
+                                                >
+                                                  <div className="flex items-center gap-1">
+                                                    Tarikh
+                                                    <span className="text-zinc-400">
+                                                      {paymentSortColumn === 'date' ? (paymentSortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUp size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" />}
+                                                    </span>
+                                                  </div>
+                                                </th>
+                                                <th className="px-4 py-2 border-r border-zinc-200">Kaedah</th>
+                                                <th 
+                                                  className="px-4 py-2 border-r border-zinc-200 cursor-pointer hover:bg-zinc-100 transition-colors group"
+                                                  onClick={() => {
+                                                    if (paymentSortColumn === 'amount') {
+                                                      setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
+                                                    } else {
+                                                      setPaymentSortColumn('amount');
+                                                      setPaymentSortDirection('asc');
+                                                    }
+                                                  }}
+                                                >
+                                                  <div className="flex items-center justify-end gap-1">
+                                                    <span className="text-zinc-400">
+                                                      {paymentSortColumn === 'amount' ? (paymentSortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUp size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" />}
+                                                    </span>
+                                                    Jumlah
+                                                  </div>
+                                                </th>
+                                                <th className="px-4 py-2 text-center w-12">Tindakan</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {[...record.paymentHistory].sort((a, b) => {
+                                                if (!paymentSortColumn) return 0;
+                                                let comparison = 0;
+                                                if (paymentSortColumn === 'date') comparison = parseDateString(a.date) - parseDateString(b.date);
+                                                else if (paymentSortColumn === 'amount') comparison = a.amount - b.amount;
+                                                return paymentSortDirection === 'asc' ? comparison : -comparison;
+                                              }).map((payment) => (
+                                                <tr key={payment.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
+                                                  <td className="px-4 py-2 border-r border-zinc-100 text-zinc-600 font-mono text-xs">{payment.id}</td>
+                                                  <td className="px-4 py-2 border-r border-zinc-100 text-zinc-600">{payment.date}</td>
+                                                  <td className="px-4 py-2 border-r border-zinc-100 text-zinc-600">{payment.method}</td>
+                                                  <td className="px-4 py-2 border-r border-zinc-100 text-right text-emerald-600 font-medium font-mono">
+                                                    +{formatRM(payment.amount)}
+                                                  </td>
+                                                  <td className="px-4 py-2 text-center">
+                                                    <button 
+                                                      onClick={() => {
+                                                        if (window.confirm('Padam rekod bayaran ini?')) {
+                                                          setRecords(prev => prev.map(r => {
+                                                            if (r.id === record.id) {
+                                                              const newHistory = r.paymentHistory.filter(p => p.id !== payment.id);
+                                                              return {
+                                                                ...r,
+                                                                paymentHistory: newHistory,
+                                                                bakiFeeTerkini: r.bakiFeeTerkini + payment.amount,
+                                                                bayaranTerakhir: newHistory.length > 0 ? newHistory[0].amount : 0
+                                                              };
+                                                            }
+                                                            return r;
+                                                          }));
+                                                        }
+                                                      }}
+                                                      className="text-zinc-400 hover:text-red-600 p-1 rounded transition-colors"
+                                                    >
+                                                      <Trash2 size={12} />
+                                                    </button>
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      ) : (
+                                        <div className="text-center p-4 bg-zinc-50 border border-zinc-200 rounded-sm text-zinc-500 text-sm">
+                                          Tiada rekod bayaran buat masa ini.
+                                        </div>
+                                      )}
+                                    </div>
+                                    
                                   </div>
                                 </motion.div>
                               </td>
@@ -596,12 +828,17 @@ export default function App() {
                         </React.Fragment>
                       ))
                     ) : (
-                      <tr>
+                      <motion.tr 
+                        initial={{ opacity: 0 }} 
+                        animate={{ opacity: 1 }} 
+                        exit={{ opacity: 0 }}
+                      >
                         <td colSpan={9} className="px-4 py-8 text-center text-zinc-400 font-medium">
                           Tiada rekod dijumpai.
                         </td>
-                      </tr>
+                      </motion.tr>
                     )}
+                    </AnimatePresence>
                   </tbody>
                 </table>
               </div>
@@ -736,6 +973,43 @@ export default function App() {
                     </button>
                   </div>
                 </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isDeletingSelected && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-sm print:hidden">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-lg shadow-xl border border-zinc-200 w-full max-w-sm overflow-hidden"
+            >
+              <div className="p-6 text-center">
+                <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                  <AlertTriangle size={24} className="text-red-600" />
+                </div>
+                <h3 className="font-bold text-zinc-800 text-lg mb-2">Padam Rekod Terpilih</h3>
+                <p className="text-zinc-500 text-sm mb-6">
+                  Adakah anda pasti untuk memadam <strong className="text-zinc-800">{selectedRecords.length}</strong> rekod yang terpilih? Tindakan ini tidak boleh dikembalikan.
+                </p>
+                <div className="flex justify-center gap-3">
+                  <button 
+                    onClick={() => setIsDeletingSelected(false)}
+                    className="px-4 py-2 text-sm border border-zinc-300 rounded hover:bg-zinc-50 text-zinc-700 font-medium transition-colors cursor-pointer flex-1"
+                  >
+                    Batal
+                  </button>
+                  <button 
+                    onClick={handleDeleteSelected}
+                    className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 font-medium transition-colors cursor-pointer flex-1"
+                  >
+                    Ya, Padam Semua
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
@@ -955,6 +1229,38 @@ export default function App() {
                       <p className="mt-1.5 text-xs text-red-500 font-medium">{paymentError}</p>
                     )}
                   </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                      Tarikh Bayaran
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      className="pl-3 pr-4 py-2 w-full border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800"
+                      value={paymentDate}
+                      onChange={(e) => setPaymentDate(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                      Kaedah Bayaran
+                    </label>
+                    <div className="relative">
+                      <select
+                        required
+                        className="pl-3 pr-8 py-2 w-full border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800 appearance-none bg-white"
+                        value={paymentMethod}
+                        onChange={(e) => setPaymentMethod(e.target.value)}
+                      >
+                        <option value="Cash">Cash</option>
+                        <option value="Transfer">Transfer</option>
+                        <option value="QR">QR</option>
+                      </select>
+                      <div className="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
+                        <ChevronDown size={14} className="text-zinc-400" />
+                      </div>
+                    </div>
+                  </div>
                   <div className="flex justify-end gap-2 pt-4 border-t border-zinc-100 mt-6">
                     <button 
                       type="button" 
@@ -1000,62 +1306,126 @@ export default function App() {
               
               <div className="p-8 overflow-y-auto flex-1 bg-white print:p-0 print:overflow-visible">
                 {/* Printable Area Starts */}
-                <div ref={printRef} className="max-w-xl mx-auto space-y-8 font-sans text-zinc-900">
-                  <div className="text-center pb-6 border-b border-zinc-200">
-                    <div className="text-2xl font-black tracking-tight flex items-center justify-center gap-2 mb-2">
-                       DATAFLOW<span className="text-blue-600">PRO</span>
-                    </div>
-                    <h2 className="text-xl font-semibold uppercase tracking-widest text-zinc-600 mt-2">Penyata Akaun Pelanggan</h2>
-                  </div>
-
-                  <div className="flex justify-between items-start text-sm">
+                <div ref={printRef} className="max-w-2xl mx-auto font-sans text-zinc-900 bg-white print:p-8">
+                  {/* Header */}
+                  <div className="flex justify-between items-start pb-8 border-b-2 border-zinc-900 mb-8">
                     <div>
-                      <p className="font-bold text-zinc-800 text-base mb-1">{statementRecord.nama}</p>
-                      <p className="text-zinc-500">ID Rekod: {statementRecord.id}</p>
-                      <p className="text-zinc-500">Kategori Kes: {statementRecord.kes}</p>
+                      <div className="text-3xl font-black tracking-tighter flex items-center gap-1 mb-1">
+                         HM LAWYER<span className="text-blue-600">.</span>
+                      </div>
+                      <p className="text-sm font-medium text-zinc-500 uppercase tracking-widest">Peguam Syarie * Pesuruhjaya Sumpah</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold text-zinc-800 mb-1">Tarikh Penyata</p>
-                      <p className="text-zinc-500">{new Date().toLocaleDateString('ms-MY', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                      <h2 className="text-2xl font-semibold tracking-tight text-zinc-800 uppercase">Penyata Akaun</h2>
+                      <p className="text-sm font-mono text-zinc-500 mt-1">Ref: {statementRecord.id}</p>
+                      <p className="text-sm font-mono text-zinc-500">Tarikh: {new Date().toLocaleDateString('ms-MY', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
                     </div>
                   </div>
 
-                  <div className="border border-zinc-200 rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-zinc-50 border-b border-zinc-200">
-                        <tr>
-                          <th className="py-3 px-4 text-left font-semibold text-zinc-700">Perkara</th>
-                          <th className="py-3 px-4 text-right font-semibold text-zinc-700">Jumlah (RM)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-100">
-                        <tr>
-                          <td className="py-3 px-4 text-zinc-700">Jumlah Yuran Asal (Total Fee)</td>
-                          <td className="py-3 px-4 text-right font-mono text-zinc-700">{formatRM(statementRecord.totalFee)}</td>
-                        </tr>
-                        <tr>
-                          <td className="py-3 px-4 text-zinc-700">Bayaran Terakhir pada {statementRecord.tarikh}</td>
-                          <td className="py-3 px-4 text-right font-mono text-emerald-600">-{formatRM(statementRecord.bayaranTerakhir)}</td>
-                        </tr>
-                        <tr>
-                          <td className="py-3 px-4 text-zinc-700">Baki Terdahulu (Selepas bayaran sebelumnya)</td>
-                          <td className="py-3 px-4 text-right font-mono text-zinc-700">{formatRM(statementRecord.bakiSebelum)}</td>
-                        </tr>
-                        <tr className="bg-zinc-50/50">
-                          <td className="py-3 px-4 font-semibold text-zinc-800">Baki Terkini Yuran</td>
-                          <td className="py-3 px-4 text-right font-mono font-bold text-red-600">{formatRM(statementRecord.bakiFeeTerkini)}</td>
-                        </tr>
-                        <tr>
-                          <td className="py-3 px-4 text-zinc-700">Baki Mileage (Sekiranya Ada)</td>
-                          <td className="py-3 px-4 text-right font-mono text-amber-600">{formatRM(statementRecord.bakiMileage)}</td>
-                        </tr>
-                      </tbody>
-                    </table>
+                  {/* Client Info */}
+                  <div className="flex justify-between items-start text-sm mb-10 bg-zinc-50 p-6 rounded-lg border border-zinc-100">
+                    <div>
+                      <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Kepada</p>
+                      <p className="font-bold text-zinc-800 text-lg mb-1">{statementRecord.nama}</p>
+                      <p className="text-zinc-600 font-medium">Kategori Kes: {statementRecord.kes}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Ringkasan Baki</p>
+                      <p className="text-3xl font-bold font-mono text-zinc-900">{formatRM(statementRecord.bakiFeeTerkini)}</p>
+                      <p className="text-zinc-500 font-medium text-xs mt-1">Jumlah Perlu Dibayar</p>
+                    </div>
                   </div>
 
-                  <div className="pt-8 text-xs text-center text-zinc-500">
-                    <p>Ini adalah janaan komputer dan tidak memerlukan tandatangan.</p>
-                    <p className="mt-1">Sila hubungi pihak kami sekiranya terdapat sebarang percanggahan.</p>
+                  {/* Cost Breakdown */}
+                  <div className="mb-10">
+                    <h3 className="text-sm font-bold text-zinc-800 uppercase tracking-wider mb-4 border-b border-zinc-200 pb-2">Perincian Kos & Tuntutan</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-5 border border-zinc-200 rounded-lg bg-white shadow-sm">
+                        <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3 border-b border-zinc-100 pb-2">Yuran Profesional</p>
+                        <div className="flex justify-between items-center space-y-2">
+                          <span className="text-sm font-medium text-zinc-700">Jumlah Yuran Keseluruhan</span>
+                          <span className="font-mono font-bold text-zinc-800">{formatRM(statementRecord.totalFee)}</span>
+                        </div>
+                      </div>
+                      <div className="p-5 border border-zinc-200 rounded-lg bg-white shadow-sm">
+                        <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3 border-b border-zinc-100 pb-2">Tuntutan Perjalanan</p>
+                        <div className="flex justify-between items-center space-y-2">
+                          <span className="text-sm font-medium text-zinc-700">Tuntutan Mileage</span>
+                          <span className="font-mono font-bold text-amber-600">{formatRM(statementRecord.bakiMileage)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary Table */}
+                  <div className="mb-10">
+                    <h3 className="text-sm font-bold text-zinc-800 uppercase tracking-wider mb-4 border-b border-zinc-200 pb-2">Ringkasan Yuran</h3>
+                    <div className="border border-zinc-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <tbody className="divide-y divide-zinc-100">
+                          <tr className="hover:bg-zinc-50 transition-colors">
+                            <td className="py-4 px-5 text-zinc-600 font-medium whitespace-nowrap w-2/3">Jumlah Yuran Keseluruhan</td>
+                            <td className="py-4 px-5 text-right font-mono font-bold text-zinc-800">{formatRM(statementRecord.totalFee)}</td>
+                          </tr>
+                          <tr className="hover:bg-zinc-50 transition-colors bg-amber-50/10">
+                            <td className="py-4 px-5 text-zinc-600 font-medium">Baki Mileage / Tuntutan Perjalanan</td>
+                            <td className="py-4 px-5 text-right font-mono text-amber-600 font-medium">{formatRM(statementRecord.bakiMileage)}</td>
+                          </tr>
+                          {statementRecord.paymentHistory && statementRecord.paymentHistory.length > 0 && (
+                            <tr className="hover:bg-zinc-50 transition-colors bg-emerald-50/10">
+                              <td className="py-4 px-5 text-zinc-600 font-medium">Jumlah Pembayaran Diterima</td>
+                              <td className="py-4 px-5 text-right font-mono text-emerald-600 font-medium">
+                                -{formatRM(statementRecord.paymentHistory.reduce((acc, curr) => acc + curr.amount, 0))}
+                              </td>
+                            </tr>
+                          )}
+                          <tr className="bg-zinc-900 text-white">
+                            <td className="py-4 px-5 font-bold text-sm tracking-wide">BAKI TERKINI</td>
+                            <td className="py-4 px-5 text-right font-mono font-bold text-lg">{formatRM(statementRecord.bakiFeeTerkini)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Payment History */}
+                  <div>
+                    <h3 className="text-sm font-bold text-zinc-800 uppercase tracking-wider mb-4 border-b border-zinc-200 pb-2">Rekod Pembayaran</h3>
+                    {statementRecord.paymentHistory && statementRecord.paymentHistory.length > 0 ? (
+                      <div className="border border-zinc-200 rounded-lg overflow-hidden">
+                        <table className="w-full text-sm text-left">
+                          <thead className="bg-zinc-50 border-b border-zinc-200">
+                            <tr>
+                              <th className="py-3 px-5 font-semibold text-zinc-600">Tarikh</th>
+                              <th className="py-3 px-5 font-semibold text-zinc-600">No. Rujukan</th>
+                              <th className="py-3 px-5 font-semibold text-zinc-600">Kaedah Pembayaran</th>
+                              <th className="py-3 px-5 font-semibold text-zinc-600 text-right">Kredit (RM)</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100">
+                            {statementRecord.paymentHistory.map((payment) => (
+                              <tr key={payment.id} className="hover:bg-zinc-50 transition-colors">
+                                <td className="py-3 px-5 text-zinc-800">{payment.date}</td>
+                                <td className="py-3 px-5 text-zinc-500 font-mono text-xs">{payment.id}</td>
+                                <td className="py-3 px-5 text-zinc-600">{payment.method}</td>
+                                <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">{formatRM(payment.amount)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="text-center p-8 border border-dashed border-zinc-300 rounded-lg bg-zinc-50 text-zinc-500 text-sm">
+                        Tiada rekod pembayaran didapati untuk akaun ini.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer */}
+                  <div className="pt-16 mt-16 text-xs text-center text-zinc-400 border-t border-zinc-100">
+                    <p className="font-medium text-zinc-500 text-sm mb-2">Terima kasih atas urusan bersama kami.</p>
+                    <p>Penyata rasmi ini merupakan janaan komputer dan sah tanpa tandatangan fizikal.</p>
+                    <p>Sila kemukakan sebarang pertanyaan mengenai penyata ini dalam tempoh 14 hari dari tarikh dikeluarkan.</p>
                   </div>
                 </div>
                 {/* Printable Area Ends */}

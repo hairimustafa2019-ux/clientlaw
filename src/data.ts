@@ -1,3 +1,10 @@
+export interface PaymentEntry {
+  id: string;
+  date: string;
+  amount: number;
+  method: string;
+}
+
 export interface CaseRecord {
   id: string;
   nama: string;
@@ -8,6 +15,7 @@ export interface CaseRecord {
   bakiSebelum: number;
   bakiFeeTerkini: number;
   bakiMileage: number;
+  paymentHistory?: PaymentEntry[];
 }
 
 export const records: CaseRecord[] = [
