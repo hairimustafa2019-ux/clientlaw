@@ -20,16 +20,40 @@ const formatRM = (amount: number) => {
   }).format(amount);
 };
 
-const parseDateString = (dateStr: string) => {
-  const parts = dateStr.split('/');
+const parseDateObj = (dateStr: string) => {
+  if (!dateStr) return new Date();
+  const parts = dateStr.includes('/') ? dateStr.split('/') : dateStr.split('-');
   if (parts.length === 3) {
-    const day = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10) - 1;
-    let year = parseInt(parts[2], 10);
-    year += year < 50 ? 2000 : 1900;
-    return new Date(year, month, day).getTime();
+    if (dateStr.includes('/')) {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        let year = parseInt(parts[2], 10);
+        year += year < 100 ? (year < 50 ? 2000 : 1900) : 0;
+        return new Date(year, month, day);
+    } else {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        return new Date(year, month, day);
+    }
   }
-  return 0; // Fallback
+  return new Date(); // Fallback
+};
+
+const parseDateString = (dateStr: string) => {
+  return parseDateObj(dateStr).getTime();
+};
+
+const formatDateDMY = (dateStr: string) => {
+  if (!dateStr) return '';
+  const d = parseDateObj(dateStr);
+  return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`;
+};
+
+const formatDateISO = (dateStr: string) => {
+  if (!dateStr) return '';
+  const d = parseDateObj(dateStr);
+  return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
 };
 
 export default function App() {
@@ -165,16 +189,11 @@ export default function App() {
             id: values[0] || `CSV${Math.floor(Math.random() * 10000)}`,
             nama: values[1] || '',
             kes: values[2] || 'Umum',
-            jumlahKeseluruhan: parseFloat(values[3]) || totalFee,
             bakiSebelum: parseFloat(values[4]) || 0,
             bayaranTerakhir: parseFloat(values[5]) || 0,
             bakiFeeTerkini: parseFloat(values[6]) || 0,
             bakiMileage: parseFloat(values[7]) || 0,
-            tarikh: values[8] || new Date().toLocaleDateString('ms-MY'),
-            stat: (values[9] as any) || 'Aktif',
-            alamat: values[10] || '',
-            telefon: values[11] || '',
-            email: values[12] || '',
+            tarikh: formatDateDMY(values[8] || new Date().toISOString().split('T')[0]),
             totalFee: totalFee,
             paymentHistory: []
           };
@@ -211,7 +230,7 @@ export default function App() {
       kes: newRecordData.kes || 'Umum',
       totalFee: totalFee,
       bayaranTerakhir: 0,
-      tarikh: newRecordData.tarikh,
+      tarikh: formatDateDMY(newRecordData.tarikh),
       bakiSebelum: totalFee,
       bakiFeeTerkini: totalFee,
       bakiMileage: bakiMileage
@@ -261,11 +280,7 @@ export default function App() {
 
     setRecords(prev => prev.map(record => {
       if (record.id === paymentRecord.id) {
-        let dateObj = new Date();
-        if (paymentDate) {
-          dateObj = new Date(paymentDate);
-        }
-        const dateStr = `${dateObj.getDate()}/${dateObj.getMonth() + 1}/${dateObj.getFullYear().toString().slice(-2)}`;
+        const dateStr = paymentDate ? formatDateDMY(paymentDate) : formatDateDMY(new Date().toISOString().split('T')[0]);
 
         const newPaymentEntry = {
           id: `P-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -569,12 +584,15 @@ export default function App() {
                         <input 
                           type="checkbox" 
                           className="cursor-pointer rounded border-zinc-300 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500"
-                          checked={filteredRecords.length > 0 && selectedRecords.length === filteredRecords.length}
+                          checked={filteredRecords.length > 0 && filteredRecords.every(r => selectedRecords.includes(r.id))}
                           onChange={(e) => {
                             if (e.target.checked) {
-                              setSelectedRecords(filteredRecords.map(r => r.id));
+                              const newSelected = new Set(selectedRecords);
+                              filteredRecords.forEach(r => newSelected.add(r.id));
+                              setSelectedRecords(Array.from(newSelected));
                             } else {
-                              setSelectedRecords([]);
+                              const filteredIds = new Set(filteredRecords.map(r => r.id));
+                              setSelectedRecords(selectedRecords.filter(id => !filteredIds.has(id)));
                             }
                           }}
                         />
@@ -621,6 +639,7 @@ export default function App() {
                                 <span className="cursor-pointer" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
                                   {expandedRowId === record.id ? <ChevronDown size={14} className="text-zinc-600" /> : <ChevronRight size={14} className="text-zinc-400" />}
                                 </span>
+                                <span>{index + 1}</span>
                               </div>
                             </td>
                             <td className="px-4 py-2 font-medium border-r border-zinc-100">{record.nama}</td>
@@ -633,7 +652,7 @@ export default function App() {
                             <td className="px-4 py-2 font-mono border-r border-zinc-100 text-emerald-600 text-right bg-emerald-50/10">
                               {record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}
                             </td>
-                            <td className="px-4 py-2 border-r border-zinc-100 text-center text-zinc-500">{record.tarikh}</td>
+                            <td className="px-4 py-2 border-r border-zinc-100 text-center text-zinc-500">{formatDateDMY(record.tarikh)}</td>
                             <td className="px-4 py-2 font-mono border-r border-zinc-100 text-right text-zinc-400">{formatRM(record.bakiSebelum)}</td>
                             <td className={`px-4 py-2 font-mono font-bold border-r border-zinc-100 text-right ${record.bakiFeeTerkini > 2000 ? 'text-red-500 underline decoration-dotted' : 'text-zinc-700'}`}>
                               {formatRM(record.bakiFeeTerkini)}
@@ -668,7 +687,7 @@ export default function App() {
                                         <div className="space-y-1.5">
                                           <p className="text-zinc-500 flex justify-between"><span>ID Rekod:</span> <span className="font-mono text-zinc-800">{record.id}</span></p>
                                           <p className="text-zinc-500 flex justify-between"><span>Kategori:</span> <span className="font-medium text-zinc-800">{record.kes}</span></p>
-                                          <p className="text-zinc-500 flex justify-between"><span>Tarikh Kemaskini:</span> <span className="text-zinc-800">{record.tarikh}</span></p>
+                                          <p className="text-zinc-500 flex justify-between"><span>Tarikh Kemaskini:</span> <span className="text-zinc-800">{formatDateDMY(record.tarikh)}</span></p>
                                         </div>
                                       </div>
                                       <div>
@@ -780,7 +799,7 @@ export default function App() {
                                               }).map((payment) => (
                                                 <tr key={payment.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
                                                   <td className="px-4 py-2 border-r border-zinc-100 text-zinc-600 font-mono text-xs">{payment.id}</td>
-                                                  <td className="px-4 py-2 border-r border-zinc-100 text-zinc-600">{payment.date}</td>
+                                                  <td className="px-4 py-2 border-r border-zinc-100 text-zinc-600">{formatDateDMY(payment.date)}</td>
                                                   <td className="px-4 py-2 border-r border-zinc-100 text-zinc-600">{payment.method}</td>
                                                   <td className="px-4 py-2 border-r border-zinc-100 text-right text-emerald-600 font-medium font-mono">
                                                     +{formatRM(payment.amount)}
@@ -912,8 +931,8 @@ export default function App() {
                         type="date"
                         required
                         className="px-3 py-2 w-full border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800"
-                        value={editingRecord.tarikh}
-                        onChange={(e) => setEditingRecord({ ...editingRecord, tarikh: e.target.value })}
+                        value={formatDateISO(editingRecord.tarikh)}
+                        onChange={(e) => setEditingRecord({ ...editingRecord, tarikh: formatDateDMY(e.target.value) })}
                       />
                     </div>
                   </div>
@@ -1318,7 +1337,7 @@ export default function App() {
                     <div className="text-right">
                       <h2 className="text-2xl font-semibold tracking-tight text-zinc-800 uppercase">Penyata Akaun</h2>
                       <p className="text-sm font-mono text-zinc-500 mt-1">Ref: {statementRecord.id}</p>
-                      <p className="text-sm font-mono text-zinc-500">Tarikh: {new Date().toLocaleDateString('ms-MY', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                      <p className="text-sm font-mono text-zinc-500">Tarikh: {formatDateDMY(new Date().toISOString().split('T')[0])}</p>
                     </div>
                   </div>
 
@@ -1405,7 +1424,7 @@ export default function App() {
                           <tbody className="divide-y divide-zinc-100">
                             {statementRecord.paymentHistory.map((payment) => (
                               <tr key={payment.id} className="hover:bg-zinc-50 transition-colors">
-                                <td className="py-3 px-5 text-zinc-800">{payment.date}</td>
+                                <td className="py-3 px-5 text-zinc-800">{formatDateDMY(payment.date)}</td>
                                 <td className="py-3 px-5 text-zinc-500 font-mono text-xs">{payment.id}</td>
                                 <td className="py-3 px-5 text-zinc-600">{payment.method}</td>
                                 <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">{formatRM(payment.amount)}</td>
