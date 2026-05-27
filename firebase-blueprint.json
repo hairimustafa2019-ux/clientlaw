@@ -1,0 +1,31 @@
+{
+  "entities": {
+    "CaseRecord": {
+      "title": "Case Record",
+      "description": "Records for cases.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nama": { "type": "string" },
+        "kes": { "type": "string" },
+        "totalFee": { "type": "number" },
+        "bayaranTerakhir": { "type": "number" },
+        "tarikh": { "type": "string" },
+        "bakiSebelum": { "type": "number" },
+        "bakiFeeTerkini": { "type": "number" },
+        "bakiMileage": { "type": "number" },
+        "paymentHistory": {
+          "type": "array"
+        },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "nama", "kes", "totalFee", "bayaranTerakhir", "tarikh", "bakiSebelum", "bakiFeeTerkini", "bakiMileage", "userId"]
+    }
+  },
+  "firestore": {
+    "users/{userId}/records/{recordId}": {
+      "schema": { "$ref": "#/entities/CaseRecord" },
+      "description": "Case records for a specific user."
+    }
+  }
+}

@@ -3,13 +3,48 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, Upload } from 'lucide-react';
+import { Search, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { records as initialRecords, CaseRecord } from './data';
 import jsPDF from 'jspdf';
 import { toPng } from 'html-to-image';
+import { auth, db, storage } from './firebase';
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, query } from 'firebase/firestore';
+import { ref, uploadString } from 'firebase/storage';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: any;
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 // Formatting currency in Ringgit Malaysia
 const formatRM = (amount: number) => {
@@ -57,8 +92,25 @@ const formatDateISO = (dateStr: string) => {
 };
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'records' | 'reports'>('dashboard');
-  const [records, setRecords] = useState<CaseRecord[]>(initialRecords);
+  const [records, setRecords] = useState<CaseRecord[]>(() => {
+    const saved = localStorage.getItem('localOfflineRecords');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return initialRecords;
+  });
+  const [darkMode, setDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('darkMode') === 'true' || 
+        window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [filterKes, setFilterKes] = useState<string>('Semua');
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
@@ -67,6 +119,7 @@ export default function App() {
   // Modal States
   const [paymentRecord, setPaymentRecord] = useState<CaseRecord | null>(null);
   const [statementRecord, setStatementRecord] = useState<CaseRecord | null>(null);
+  const [receiptData, setReceiptData] = useState<{record: CaseRecord, payment: import('./data').PaymentEntry} | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<string>('');
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [paymentMethod, setPaymentMethod] = useState<string>('Transfer');
@@ -90,6 +143,77 @@ export default function App() {
 
   // Printing Reference
   const printRef = useRef<HTMLDivElement>(null);
+  const receiptPrintRef = useRef<HTMLDivElement>(null);
+  const [isGeneratingReceiptPDF, setIsGeneratingReceiptPDF] = useState(false);
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('darkMode', 'true');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('darkMode', 'false');
+    }
+  }, [darkMode]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!user) {
+      const saved = localStorage.getItem('localOfflineRecords');
+      if (saved) {
+        try {
+          setRecords(JSON.parse(saved));
+        } catch(e) {}
+      } else {
+        setRecords(initialRecords);
+      }
+      return;
+    }
+    const targetPath = `users/${user.uid}/records`;
+    const q = query(collection(db, targetPath));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedRecords: CaseRecord[] = [];
+      snapshot.forEach(doc => {
+        fetchedRecords.push(doc.data() as CaseRecord);
+      });
+      // Fallback: If completely empty, we can just leave it as empty (no initialRecords logic to sync to Firebase unless user imports)
+      setRecords(fetchedRecords);
+    }, (error) => {
+       handleFirestoreError(error, OperationType.GET, targetPath);
+    });
+    return () => unsubscribe();
+  }, [user, authReady]);
+
+  useEffect(() => {
+    if (!user) {
+      localStorage.setItem('localOfflineRecords', JSON.stringify(records));
+    }
+  }, [records, user]);
+
+  const handleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   React.useEffect(() => {
     if (paymentRecord) {
@@ -100,6 +224,35 @@ export default function App() {
 
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstallable, setIsInstallable] = useState(false);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [showExportReminder, setShowExportReminder] = useState(false);
+  const isInitialRecordsRender = useRef(true);
+
+  React.useEffect(() => {
+    if (isInitialRecordsRender.current) {
+      isInitialRecordsRender.current = false;
+      return;
+    }
+    localStorage.setItem('lastModificationDate', Date.now().toString());
+  }, [records]);
+
+  React.useEffect(() => {
+    const lastMod = localStorage.getItem('lastModificationDate');
+    const lastReminder = localStorage.getItem('lastExportReminderDate');
+    const now = Date.now();
+    
+    if (lastMod) {
+      const daysSinceMod = (now - parseInt(lastMod, 10)) / (1000 * 60 * 60 * 24);
+      const daysSinceReminder = lastReminder ? (now - parseInt(lastReminder, 10)) / (1000 * 60 * 60 * 24) : Infinity;
+      
+      if (daysSinceMod >= 7 && daysSinceReminder >= 1) {
+        setShowExportReminder(true);
+        localStorage.setItem('lastExportReminderDate', now.toString());
+      }
+    } else {
+      localStorage.setItem('lastModificationDate', now.toString());
+    }
+  }, []);
 
   React.useEffect(() => {
     const handler = (e: any) => {
@@ -149,6 +302,25 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  const handleBackupToCloud = async () => {
+    if (!user) {
+      alert("Sila log masuk untuk membuat sandaran.");
+      return;
+    }
+    setIsBackingUp(true);
+    try {
+      const backupData = JSON.stringify(records, null, 2);
+      const backupRef = ref(storage, `users/${user.uid}/backups/backup-${Date.now()}.json`);
+      await uploadString(backupRef, backupData, 'raw', { contentType: 'application/json' });
+      alert("Sandaran telah berjaya disimpan di awan (Cloud Storage)!");
+    } catch (error) {
+      console.error("Backup failed", error);
+      alert("Gagal membuat sandaran. Sila cuba lagi.");
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDownloadTemplate = () => {
@@ -164,12 +336,12 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  const handleImportCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       const text = e.target?.result as string;
       const lines = text.split('\n');
       if (lines.length < 2) return;
@@ -185,8 +357,9 @@ export default function App() {
         
         try {
           const totalFee = parseFloat(values[13]) || parseFloat(values[3]) || 0;
-          const newRecord: CaseRecord = {
-            id: values[0] || `CSV${Math.floor(Math.random() * 10000)}`,
+          const id = values[0] || `CSV${Math.floor(Math.random() * 10000)}`;
+          const newRecord: CaseRecord & { userId?: string } = {
+            id,
             nama: values[1] || '',
             kes: values[2] || 'Umum',
             bakiSebelum: parseFloat(values[4]) || 0,
@@ -195,16 +368,26 @@ export default function App() {
             bakiMileage: parseFloat(values[7]) || 0,
             tarikh: formatDateDMY(values[8] || new Date().toISOString().split('T')[0]),
             totalFee: totalFee,
-            paymentHistory: []
+            paymentHistory: [],
+            userId: user ? user.uid : undefined
           };
           newRecordsFromCsv.push(newRecord);
+          
+          if (user) {
+            const targetPath = `users/${user.uid}/records/${id}`;
+            await setDoc(doc(db, 'users', user.uid, 'records', id), newRecord).catch(err => {
+              handleFirestoreError(err, OperationType.WRITE, targetPath);
+            });
+          }
         } catch (e) {
           console.error("Failed to parse row", values, e);
         }
       }
       
       if (newRecordsFromCsv.length > 0) {
-        setRecords(prev => [...newRecordsFromCsv, ...prev]);
+        if (!user) {
+          setRecords(prev => [...newRecordsFromCsv, ...prev]);
+        }
         alert(`${newRecordsFromCsv.length} rekod telah berjaya diimport!`);
       } else {
         alert("Gagal memuatnaik. Sila pastikan format menepati templat.");
@@ -217,15 +400,16 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const handleAddNewRecord = (e: React.FormEvent) => {
+  const handleAddNewRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRecordData.nama || !newRecordData.totalFee) return;
 
     const totalFee = parseFloat(newRecordData.totalFee);
     const bakiMileage = parseFloat(newRecordData.bakiMileage) || 0;
+    const id = `C-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
 
-    const newRecord: CaseRecord = {
-      id: `C-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
+    const newRecord: CaseRecord & { userId?: string } = {
+      id,
       nama: newRecordData.nama,
       kes: newRecordData.kes || 'Umum',
       totalFee: totalFee,
@@ -233,35 +417,77 @@ export default function App() {
       tarikh: formatDateDMY(newRecordData.tarikh),
       bakiSebelum: totalFee,
       bakiFeeTerkini: totalFee,
-      bakiMileage: bakiMileage
+      bakiMileage: bakiMileage,
+      userId: user ? user.uid : undefined,
+      paymentHistory: []
     };
 
-    setRecords(prev => [newRecord, ...prev]);
+    if (user) {
+      const targetPath = `users/${user.uid}/records/${id}`;
+      try {
+          await setDoc(doc(db, 'users', user.uid, 'records', id), newRecord);
+      } catch(err) {
+          handleFirestoreError(err, OperationType.WRITE, targetPath);
+      }
+    } else {
+      setRecords(prev => [newRecord, ...prev]);
+    }
+
     setIsNewRecordModalOpen(false);
     setNewRecordData({ nama: '', kes: '', tarikh: new Date().toISOString().split('T')[0], totalFee: '', bakiMileage: '0' });
   };
 
-  const handleEditRecordSubmit = (e: React.FormEvent) => {
+  const handleEditRecordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingRecord) return;
-    setRecords(prev => prev.map(rec => rec.id === editingRecord.id ? editingRecord : rec));
+    
+    if (user) {
+      const targetPath = `users/${user.uid}/records/${editingRecord.id}`;
+      try {
+          await setDoc(doc(db, 'users', user.uid, 'records', editingRecord.id), { ...editingRecord, userId: user.uid });
+      } catch(err) {
+          handleFirestoreError(err, OperationType.WRITE, targetPath);
+      }
+    } else {
+      setRecords(prev => prev.map(rec => rec.id === editingRecord.id ? editingRecord : rec));
+    }
     setEditingRecord(null);
   };
 
-  const handleDeleteRecord = () => {
+  const handleDeleteRecord = async () => {
     if (!deletingRecord) return;
-    setRecords(prev => prev.filter(rec => rec.id !== deletingRecord.id));
+    if (user) {
+      const targetPath = `users/${user.uid}/records/${deletingRecord.id}`;
+      try {
+          await deleteDoc(doc(db, 'users', user.uid, 'records', deletingRecord.id));
+      } catch(err) {
+          handleFirestoreError(err, OperationType.DELETE, targetPath);
+      }
+    } else {
+      setRecords(prev => prev.filter(rec => rec.id !== deletingRecord.id));
+    }
     setDeletingRecord(null);
     setExpandedRowId(null);
   };
 
-  const handleDeleteSelected = () => {
-    setRecords(prev => prev.filter(rec => !selectedRecords.includes(rec.id)));
+  const handleDeleteSelected = async () => {
+    if (user) {
+      for (const id of selectedRecords) {
+          const targetPath = `users/${user.uid}/records/${id}`;
+          try {
+              await deleteDoc(doc(db, 'users', user.uid, 'records', id));
+          } catch(err) {
+              handleFirestoreError(err, OperationType.DELETE, targetPath);
+          }
+      }
+    } else {
+      setRecords(prev => prev.filter(rec => !selectedRecords.includes(rec.id)));
+    }
     setSelectedRecords([]);
     setIsDeletingSelected(false);
   };
 
-  const handleUpdatePayment = (e: React.FormEvent) => {
+  const handleUpdatePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!paymentRecord || !paymentAmount) return;
 
@@ -278,28 +504,35 @@ export default function App() {
 
     setPaymentError('');
 
-    setRecords(prev => prev.map(record => {
-      if (record.id === paymentRecord.id) {
-        const dateStr = paymentDate ? formatDateDMY(paymentDate) : formatDateDMY(new Date().toISOString().split('T')[0]);
+    const dateStr = paymentDate ? formatDateDMY(paymentDate) : formatDateDMY(new Date().toISOString().split('T')[0]);
 
-        const newPaymentEntry = {
-          id: `P-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          date: dateStr,
-          amount: amount,
-          method: paymentMethod
-        };
+    const newPaymentEntry = {
+        id: `P-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        date: dateStr,
+        amount: amount,
+        method: paymentMethod
+    };
 
-        return {
-          ...record,
-          bayaranTerakhir: amount,
-          bakiSebelum: record.bakiFeeTerkini,
-          bakiFeeTerkini: Math.max(0, record.bakiFeeTerkini - amount),
-          tarikh: dateStr,
-          paymentHistory: [newPaymentEntry, ...(record.paymentHistory || [])]
-        };
+    const updatedRecord = {
+        ...paymentRecord,
+        bayaranTerakhir: amount,
+        bakiSebelum: paymentRecord.bakiFeeTerkini,
+        bakiFeeTerkini: Math.max(0, paymentRecord.bakiFeeTerkini - amount),
+        tarikh: dateStr,
+        paymentHistory: [newPaymentEntry, ...(paymentRecord.paymentHistory || [])],
+        userId: user ? user.uid : undefined
+    };
+
+    if (user) {
+      const targetPath = `users/${user.uid}/records/${paymentRecord.id}`;
+      try {
+          await setDoc(doc(db, 'users', user.uid, 'records', paymentRecord.id), updatedRecord);
+      } catch(err) {
+          handleFirestoreError(err, OperationType.WRITE, targetPath);
       }
-      return record;
-    }));
+    } else {
+      setRecords(prev => prev.map(rec => rec.id === paymentRecord.id ? updatedRecord : rec));
+    }
 
     setPaymentRecord(null);
     setPaymentAmount('');
@@ -342,6 +575,37 @@ export default function App() {
       console.error('Error generating PDF:', error);
     } finally {
       setIsGeneratingPDF(false);
+    }
+  };
+
+  const handleDownloadReceiptPDF = async () => {
+    if (!receiptPrintRef.current || !receiptData) return;
+    
+    setIsGeneratingReceiptPDF(true);
+    try {
+      const imgData = await toPng(receiptPrintRef.current, {
+        cacheBust: true,
+        pixelRatio: 2,
+        backgroundColor: '#ffffff'
+      });
+      
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      
+      const img = new Image();
+      img.src = imgData;
+      await new Promise((resolve) => {
+        img.onload = resolve;
+      });
+      
+      const pdfHeight = (img.height * pdfWidth) / img.width;
+      
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`Resit_${receiptData.record.nama.replace(/\s+/g, '_')}_${receiptData.payment.id}.pdf`);
+    } catch (error) {
+      console.error('Error generating receipt PDF:', error);
+    } finally {
+      setIsGeneratingReceiptPDF(false);
     }
   };
 
@@ -388,12 +652,15 @@ export default function App() {
   }, [records]);
 
   return (
-    <div className="bg-zinc-50 text-zinc-900 font-sans h-screen w-full flex overflow-hidden">
+    <div className="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans h-screen w-full flex overflow-hidden">
       {/* Sidebar Nav */}
-      <aside className="w-56 bg-zinc-900 text-zinc-400 hidden md:flex flex-col border-r border-zinc-800 shrink-0">
-        <div className="p-6 border-b border-zinc-800">
-          <div className="text-white font-bold tracking-tight text-lg">HM Client<span className="text-blue-500"> Lawyer</span></div>
-          <div className="text-[10px] uppercase tracking-widest opacity-50">Sistem Pengurusan</div>
+      <aside className="w-56 bg-zinc-900 dark:bg-zinc-950 text-zinc-400 dark:text-zinc-500 hidden md:flex flex-col border-r border-zinc-800 dark:border-zinc-800 shrink-0">
+        <div className="p-6 border-b border-zinc-800 dark:border-zinc-800">
+          <img src="/logo.png" alt="HM Lawyer Logo" className="h-16 w-auto object-contain mx-auto" onError={(e) => {
+            (e.target as HTMLImageElement).src = ''; 
+            (e.target as HTMLImageElement).alt = 'HM Client Lawyer';
+          }} />
+          <div className="text-[10px] uppercase tracking-widest opacity-50 text-center mt-2">Sistem Pengurusan</div>
         </div>
         <nav className="flex-1 p-4 space-y-1">
           <div 
@@ -429,9 +696,9 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Top Bar */}
-        <header className="h-14 bg-white border-b border-zinc-200 flex items-center justify-between px-6 shrink-0">
+        <header className="h-14 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-6 shrink-0">
           <div className="flex items-center gap-4">
-            <h1 className="text-sm font-semibold text-zinc-700">
+            <h1 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
               Papan Pemuka: <span className="font-mono text-blue-600">
                 {activeTab === 'dashboard' ? 'Sistem Pengurusan Kes & Bayaran' : activeTab === 'records' ? 'Senarai Rekod Pelanggan' : 'Analisis & Laporan Kewangan'}
               </span>
@@ -439,6 +706,30 @@ export default function App() {
             <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded uppercase border border-blue-100">Aktif</span>
           </div>
           <div className="flex gap-2">
+            <button 
+              onClick={() => setDarkMode(!darkMode)}
+              className="p-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+              title={darkMode ? "Tukar ke Mod Siang" : "Tukar ke Mod Gelap"}
+            >
+              {darkMode ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
+            {!user ? (
+              <button 
+                onClick={handleLogin}
+                className="px-3 py-1.5 text-xs bg-zinc-800 text-white rounded hover:bg-zinc-700 font-medium cursor-pointer flex items-center gap-2"
+              >
+                <LogIn size={14} />
+                Log Masuk (Sync)
+              </button>
+            ) : (
+              <button 
+                onClick={handleLogout}
+                className="px-3 py-1.5 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium cursor-pointer flex items-center gap-2 border border-red-200"
+              >
+                <LogOut size={14} />
+                Log Keluar
+              </button>
+            )}
             {isInstallable && (
               <button 
                 onClick={handleInstallApp}
@@ -448,15 +739,25 @@ export default function App() {
                 Muat Turun App
               </button>
             )}
+            {user && (
+              <button 
+                onClick={handleBackupToCloud}
+                disabled={isBackingUp}
+                className="px-3 py-1.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 border border-blue-200 font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50"
+              >
+                {isBackingUp ? <Loader2 size={14} className="animate-spin" /> : <CloudUpload size={14} />}
+                Cloud Backup
+              </button>
+            )}
             <button 
               onClick={handleExportData}
-              className="px-3 py-1.5 text-xs border border-zinc-300 rounded hover:bg-zinc-50 font-medium cursor-pointer"
+              className="px-3 py-1.5 text-xs border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 font-medium cursor-pointer"
             >
               Eksport Data
             </button>
             <button 
               onClick={handleDownloadTemplate}
-              className="hidden lg:block px-3 py-1.5 text-xs border border-zinc-300 rounded hover:bg-zinc-50 font-medium cursor-pointer"
+              className="hidden lg:block px-3 py-1.5 text-xs border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 font-medium cursor-pointer"
             >
               Muat Turun Templat
             </button>
@@ -469,9 +770,9 @@ export default function App() {
             />
             <button 
               onClick={() => fileInputRef.current?.click()}
-              className="px-3 py-1.5 flex items-center gap-1 text-xs border border-zinc-300 rounded hover:bg-zinc-50 font-medium cursor-pointer"
+              className="px-3 py-1.5 flex items-center gap-1 text-xs border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 font-medium cursor-pointer"
             >
-              <Upload size={14} className="text-zinc-500" />
+              <Upload size={14} className="text-zinc-500 dark:text-zinc-400" />
               Import CSV
             </button>
             <button 
@@ -486,40 +787,40 @@ export default function App() {
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {activeTab !== 'records' && (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 p-6 shrink-0">
-              <div className="bg-white border border-zinc-200 p-4 rounded-sm shadow-sm flex flex-col justify-between">
+              <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-4 rounded-sm shadow-sm flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-1">
-                  <div className="text-xs text-zinc-500">Jumlah Kes</div>
-                  <Users size={14} className="text-zinc-400" />
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">Jumlah Kes</div>
+                  <Users size={14} className="text-zinc-400 dark:text-zinc-500" />
                 </div>
-                <div className="text-2xl font-bold text-zinc-800">{stats.totalKes}</div>
-                <div className="text-[10px] text-zinc-400 mt-1">Keseluruhan pangkalan rekod</div>
+                <div className="text-2xl font-bold text-zinc-800 dark:text-zinc-200">{stats.totalKes}</div>
+                <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1">Keseluruhan pangkalan rekod</div>
               </div>
               
-              <div className="bg-white border border-zinc-200 p-4 rounded-sm shadow-sm flex flex-col justify-between">
+              <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-4 rounded-sm shadow-sm flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-1">
-                  <div className="text-xs text-zinc-500">Jumlah Total Fee</div>
-                  <Wallet size={14} className="text-zinc-400" />
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">Jumlah Total Fee</div>
+                  <Wallet size={14} className="text-zinc-400 dark:text-zinc-500" />
                 </div>
-                <div className="text-2xl font-bold text-zinc-800">{formatRM(stats.totalFee)}</div>
-                <div className="text-[10px] text-zinc-400 mt-1">Nilai keseluruhan yuran dibenarkan</div>
+                <div className="text-2xl font-bold text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalFee)}</div>
+                <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1">Nilai keseluruhan yuran dibenarkan</div>
               </div>
 
-              <div className="bg-white border border-zinc-200 p-4 rounded-sm shadow-sm flex flex-col justify-between">
+              <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-4 rounded-sm shadow-sm flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-1">
-                  <div className="text-xs text-zinc-500">Baki Fee Terkini</div>
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">Baki Fee Terkini</div>
                   <CreditCard size={14} className="text-red-400" />
                 </div>
                 <div className="text-2xl font-bold text-red-600">{formatRM(stats.totalBakiTerkini)}</div>
                 <div className="text-[10px] text-red-500/70 mt-1">Perlu dituntut</div>
               </div>
 
-              <div className="bg-white border border-zinc-200 p-4 rounded-sm shadow-sm flex flex-col justify-between">
+              <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-4 rounded-sm shadow-sm flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-1">
-                  <div className="text-xs text-zinc-500">Baki Mileage</div>
-                  <MapPin size={14} className="text-zinc-400" />
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">Baki Mileage</div>
+                  <MapPin size={14} className="text-zinc-400 dark:text-zinc-500" />
                 </div>
-                <div className="text-2xl font-bold text-zinc-800">{formatRM(stats.totalMileage)}</div>
-                <div className="text-[10px] text-zinc-400 mt-1">Tuntutan perjalanan</div>
+                <div className="text-2xl font-bold text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalMileage)}</div>
+                <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1">Tuntutan perjalanan</div>
               </div>
             </div>
           )}
@@ -528,10 +829,10 @@ export default function App() {
           <div className={`flex-1 px-6 pb-6 min-h-0 flex ${activeTab === 'dashboard' ? 'flex-col lg:flex-row' : 'flex-col'} gap-4`}>
             {/* Main Data Table Area */}
             {activeTab !== 'reports' && (
-            <div className="flex-1 bg-white border border-zinc-200 rounded-sm shadow-sm flex flex-col h-full overflow-hidden">
-              <div className="p-3 bg-zinc-50 border-b border-zinc-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                <span className="text-xs font-bold text-zinc-600 uppercase tracking-wider flex items-center gap-2">
-                  <FileText size={14} className="text-zinc-400" />
+            <div className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-sm shadow-sm flex flex-col h-full overflow-hidden">
+              <div className="p-3 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                  <FileText size={14} className="text-zinc-400 dark:text-zinc-500" />
                   Senarai Rekod Kes
                 </span>
                 <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
@@ -546,11 +847,11 @@ export default function App() {
                   )}
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
-                      <Search size={12} className="text-zinc-400" />
+                      <Search size={12} className="text-zinc-400 dark:text-zinc-500" />
                     </div>
                     <input
                       type="text"
-                      className="pl-7 pr-2 py-1 text-xs border border-zinc-300 rounded w-full sm:w-48 bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      className="pl-7 pr-2 py-1 text-xs border border-zinc-300 dark:border-zinc-700 rounded w-full sm:w-48 bg-white dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                       placeholder="Cari nama pelanggan..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
@@ -558,10 +859,10 @@ export default function App() {
                   </div>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
-                      <Filter size={12} className="text-zinc-400" />
+                      <Filter size={12} className="text-zinc-400 dark:text-zinc-500" />
                     </div>
                     <select
-                      className="pl-7 pr-6 py-1 appearance-none text-xs border border-zinc-300 rounded w-full sm:w-36 bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium"
+                      className="pl-7 pr-6 py-1 appearance-none text-xs border border-zinc-300 dark:border-zinc-700 rounded w-full sm:w-36 bg-white dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium"
                       value={filterKes}
                       onChange={(e) => setFilterKes(e.target.value)}
                     >
@@ -570,7 +871,7 @@ export default function App() {
                       ))}
                     </select>
                     <div className="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
-                      <ChevronDown size={12} className="text-zinc-400" />
+                      <ChevronDown size={12} className="text-zinc-400 dark:text-zinc-500" />
                     </div>
                   </div>
                 </div>
@@ -578,12 +879,12 @@ export default function App() {
 
               <div className="overflow-auto flex-1">
                 <table className="w-full text-left border-collapse whitespace-nowrap">
-                  <thead className="sticky top-0 bg-zinc-50 z-10 shadow-sm">
-                    <tr className="text-[11px] font-bold text-zinc-500 uppercase border-b border-zinc-200">
-                      <th className="px-4 py-2 border-r border-zinc-200 text-center w-12 flex justify-center items-center h-full">
+                  <thead className="sticky top-0 bg-zinc-50 dark:bg-zinc-900 z-10 shadow-sm">
+                    <tr className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase border-b border-zinc-200 dark:border-zinc-800">
+                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-center w-12 flex justify-center items-center h-full">
                         <input 
                           type="checkbox" 
-                          className="cursor-pointer rounded border-zinc-300 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500"
+                          className="cursor-pointer rounded border-zinc-300 dark:border-zinc-700 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500"
                           checked={filteredRecords.length > 0 && filteredRecords.every(r => selectedRecords.includes(r.id))}
                           onChange={(e) => {
                             if (e.target.checked) {
@@ -597,14 +898,14 @@ export default function App() {
                           }}
                         />
                       </th>
-                      <th className="px-4 py-2 border-r border-zinc-200">Nama Pelanggan</th>
-                      <th className="px-4 py-2 border-r border-zinc-200">Kategori Kes</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 text-right">Total Fee</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 text-right">Bayaran Terakhir</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 text-center">Tarikh</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 text-right">Baki Sebelum</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 text-right">Baki Terkini</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 text-right">Baki Mileage</th>
+                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800">Nama Pelanggan</th>
+                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800">Kategori Kes</th>
+                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Total Fee</th>
+                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Bayaran Terakhir</th>
+                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-center">Tarikh</th>
+                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Baki Sebelum</th>
+                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Baki Terkini</th>
+                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Baki Mileage</th>
                       <th className="px-4 py-2 text-center">Tindakan</th>
                     </tr>
                   </thead>
@@ -620,13 +921,13 @@ export default function App() {
                               exit={{ opacity: 0, x: -10 }}
                               transition={{ duration: 0.2 }}
                               onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
-                              className={`border-b border-zinc-100 hover:bg-zinc-100 cursor-pointer transition-colors ${record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-zinc-50/50' : ''} ${record.bakiFeeTerkini > 2000 ? 'bg-amber-50/30' : ''} ${expandedRowId === record.id ? 'bg-zinc-100' : ''}`}
+                              className={`border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800/80 cursor-pointer transition-colors ${record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-zinc-50 dark:bg-zinc-900' : ''} ${record.bakiFeeTerkini > 2000 ? 'bg-amber-50/30 dark:bg-amber-900/30' : ''} ${expandedRowId === record.id ? 'bg-zinc-100 dark:bg-zinc-900/50' : ''}`}
                             >
-                            <td className="px-4 py-2 border-r border-zinc-100" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center justify-center gap-2 font-mono text-zinc-400">
+                            <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center justify-center gap-2 font-mono text-zinc-400 dark:text-zinc-500">
                                 <input 
                                   type="checkbox" 
-                                  className="cursor-pointer rounded border-zinc-300 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500 mt-1 pl-2"
+                                  className="cursor-pointer rounded border-zinc-300 dark:border-zinc-700 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500 mt-1 pl-2"
                                   checked={selectedRecords.includes(record.id)}
                                   onChange={(e) => {
                                     if (e.target.checked) {
@@ -637,33 +938,33 @@ export default function App() {
                                   }}
                                 />
                                 <span className="cursor-pointer" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
-                                  {expandedRowId === record.id ? <ChevronDown size={14} className="text-zinc-600" /> : <ChevronRight size={14} className="text-zinc-400" />}
+                                  {expandedRowId === record.id ? <ChevronDown size={14} className="text-zinc-600 dark:text-zinc-400" /> : <ChevronRight size={14} className="text-zinc-400 dark:text-zinc-500" />}
                                 </span>
                                 <span>{index + 1}</span>
                               </div>
                             </td>
-                            <td className="px-4 py-2 font-medium border-r border-zinc-100">{record.nama}</td>
-                            <td className="px-4 py-2 border-r border-zinc-100">
+                            <td className="px-4 py-2 font-medium border-r border-zinc-100 dark:border-zinc-800">{record.nama}</td>
+                            <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800">
                               <span className="text-blue-600 bg-blue-50 px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-blue-100/50">
                                 {record.kes}
                               </span>
                             </td>
-                            <td className="px-4 py-2 font-mono border-r border-zinc-100 text-right">{formatRM(record.totalFee)}</td>
-                            <td className="px-4 py-2 font-mono border-r border-zinc-100 text-emerald-600 text-right bg-emerald-50/10">
+                            <td className="px-4 py-2 font-mono border-r border-zinc-100 dark:border-zinc-800 text-right">{formatRM(record.totalFee)}</td>
+                            <td className="px-4 py-2 font-mono border-r border-zinc-100 dark:border-zinc-800 text-emerald-600 text-right bg-emerald-50/10 dark:bg-emerald-900/20">
                               {record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}
                             </td>
-                            <td className="px-4 py-2 border-r border-zinc-100 text-center text-zinc-500">{formatDateDMY(record.tarikh)}</td>
-                            <td className="px-4 py-2 font-mono border-r border-zinc-100 text-right text-zinc-400">{formatRM(record.bakiSebelum)}</td>
-                            <td className={`px-4 py-2 font-mono font-bold border-r border-zinc-100 text-right ${record.bakiFeeTerkini > 2000 ? 'text-red-500 underline decoration-dotted' : 'text-zinc-700'}`}>
+                            <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800 text-center text-zinc-500 dark:text-zinc-400">{formatDateDMY(record.tarikh)}</td>
+                            <td className="px-4 py-2 font-mono border-r border-zinc-100 dark:border-zinc-800 text-right text-zinc-400 dark:text-zinc-500">{formatRM(record.bakiSebelum)}</td>
+                            <td className={`px-4 py-2 font-mono font-bold border-r border-zinc-100 dark:border-zinc-800 text-right ${record.bakiFeeTerkini > 2000 ? 'text-red-500 underline decoration-dotted' : 'text-zinc-700 dark:text-zinc-300'}`}>
                               {formatRM(record.bakiFeeTerkini)}
                             </td>
-                            <td className="px-4 py-2 font-mono border-r border-zinc-100 text-right text-amber-600">
+                            <td className="px-4 py-2 font-mono border-r border-zinc-100 dark:border-zinc-800 text-right text-amber-600">
                               {formatRM(record.bakiMileage)}
                             </td>
                             <td className="px-4 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                               <button 
                                 onClick={() => setDeletingRecord(record)}
-                                className="text-zinc-400 hover:text-red-600 transition-colors p-1"
+                                className="text-zinc-400 dark:text-zinc-500 hover:text-red-600 transition-colors p-1"
                                 title="Padam Pelanggan"
                               >
                                 <Trash2 size={14} />
@@ -671,37 +972,37 @@ export default function App() {
                             </td>
                           </motion.tr>
                           {expandedRowId === record.id && (
-                            <tr className="border-b border-zinc-200 bg-zinc-50/80">
+                            <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
                               <td colSpan={9} className="p-0">
                                 <motion.div
                                   initial={{ height: 0, opacity: 0 }}
                                   animate={{ height: "auto", opacity: 1 }}
                                   className="overflow-hidden"
                                 >
-                                  <div className="p-4 border-l-2 border-blue-500 m-2 bg-white shadow-sm rounded-sm">
+                                  <div className="p-4 border-l-2 border-blue-500 m-2 bg-white dark:bg-zinc-950 shadow-sm rounded-sm">
                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                                       <div>
-                                        <h4 className="font-bold text-zinc-700 mb-2 border-b border-zinc-100 pb-1 flex items-center gap-2">
-                                          <FileText size={14} className="text-zinc-400"/> Maklumat Kes
+                                        <h4 className="font-bold text-zinc-700 dark:text-zinc-300 mb-2 border-b border-zinc-100 dark:border-zinc-800 pb-1 flex items-center gap-2">
+                                          <FileText size={14} className="text-zinc-400 dark:text-zinc-500"/> Maklumat Kes
                                         </h4>
                                         <div className="space-y-1.5">
-                                          <p className="text-zinc-500 flex justify-between"><span>ID Rekod:</span> <span className="font-mono text-zinc-800">{record.id}</span></p>
-                                          <p className="text-zinc-500 flex justify-between"><span>Kategori:</span> <span className="font-medium text-zinc-800">{record.kes}</span></p>
-                                          <p className="text-zinc-500 flex justify-between"><span>Tarikh Kemaskini:</span> <span className="text-zinc-800">{formatDateDMY(record.tarikh)}</span></p>
+                                          <p className="text-zinc-500 dark:text-zinc-400 flex justify-between"><span>ID Rekod:</span> <span className="font-mono text-zinc-800 dark:text-zinc-200">{record.id}</span></p>
+                                          <p className="text-zinc-500 dark:text-zinc-400 flex justify-between"><span>Kategori:</span> <span className="font-medium text-zinc-800 dark:text-zinc-200">{record.kes}</span></p>
+                                          <p className="text-zinc-500 dark:text-zinc-400 flex justify-between"><span>Tarikh Kemaskini:</span> <span className="text-zinc-800 dark:text-zinc-200">{formatDateDMY(record.tarikh)}</span></p>
                                         </div>
                                       </div>
                                       <div>
-                                        <h4 className="font-bold text-zinc-700 mb-2 border-b border-zinc-100 pb-1 flex items-center gap-2">
-                                          <Wallet size={14} className="text-zinc-400"/> Pecahan Kewangan
+                                        <h4 className="font-bold text-zinc-700 dark:text-zinc-300 mb-2 border-b border-zinc-100 dark:border-zinc-800 pb-1 flex items-center gap-2">
+                                          <Wallet size={14} className="text-zinc-400 dark:text-zinc-500"/> Pecahan Kewangan
                                         </h4>
                                         <div className="space-y-1.5">
-                                          <p className="text-zinc-500 flex justify-between"><span>Jumlah Fee:</span> <span className="font-mono text-zinc-800">{formatRM(record.totalFee)}</span></p>
-                                          <p className="text-zinc-500 flex justify-between"><span>Baki Terdahulu:</span> <span className="font-mono text-zinc-800">{formatRM(record.bakiSebelum)}</span></p>
-                                          <p className="text-zinc-500 flex justify-between"><span>Bayaran Terakhir:</span> <span className="font-mono text-emerald-600">{record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}</span></p>
+                                          <p className="text-zinc-500 dark:text-zinc-400 flex justify-between"><span>Jumlah Fee:</span> <span className="font-mono text-zinc-800 dark:text-zinc-200">{formatRM(record.totalFee)}</span></p>
+                                          <p className="text-zinc-500 dark:text-zinc-400 flex justify-between"><span>Baki Terdahulu:</span> <span className="font-mono text-zinc-800 dark:text-zinc-200">{formatRM(record.bakiSebelum)}</span></p>
+                                          <p className="text-zinc-500 dark:text-zinc-400 flex justify-between"><span>Bayaran Terakhir:</span> <span className="font-mono text-emerald-600">{record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}</span></p>
                                         </div>
                                       </div>
                                       <div className="flex flex-col justify-center gap-2">
-                                        <h4 className="font-bold text-zinc-700 mb-2 border-b border-zinc-100 pb-1 flex items-center gap-2">
+                                        <h4 className="font-bold text-zinc-700 dark:text-zinc-300 mb-2 border-b border-zinc-100 dark:border-zinc-800 pb-1 flex items-center gap-2">
                                           Tindakan
                                         </h4>
                                         <div className="grid grid-cols-2 gap-2">
@@ -713,14 +1014,14 @@ export default function App() {
                                             Kemaskini Bayaran
                                           </button>
                                           <button 
-                                            className="w-full px-2 py-1.5 text-[11px] border border-zinc-300 rounded bg-white hover:bg-zinc-50 text-zinc-700 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                                            className="w-full px-2 py-1.5 text-[11px] border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                                             onClick={() => setStatementRecord(record)}
                                           >
                                             <Printer size={12} />
                                             Jana Penyata
                                           </button>
                                           <button 
-                                            className="w-full px-2 py-1.5 text-[11px] border border-zinc-300 rounded bg-white hover:bg-zinc-50 text-amber-600 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                                            className="w-full px-2 py-1.5 text-[11px] border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-amber-600 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                                             onClick={() => setEditingRecord({...record})}
                                           >
                                             <Edit size={12} />
@@ -738,19 +1039,19 @@ export default function App() {
                                     </div>
 
                                     {/* Sejarah Bayaran Section */}
-                                    <div className="mt-6 pt-4 border-t border-zinc-100">
-                                      <h4 className="font-bold text-zinc-700 mb-3 flex items-center gap-2">
+                                    <div className="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                                      <h4 className="font-bold text-zinc-700 dark:text-zinc-300 mb-3 flex items-center gap-2">
                                         <Wallet size={14} className="text-blue-500" />
                                         Sejarah Bayaran
                                       </h4>
                                       {record.paymentHistory && record.paymentHistory.length > 0 ? (
-                                        <div className="overflow-x-auto border border-zinc-200 rounded-sm">
+                                        <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-sm">
                                           <table className="w-full text-left text-sm whitespace-nowrap">
-                                            <thead className="bg-zinc-50 text-zinc-500 font-medium text-xs border-b border-zinc-200">
+                                            <thead className="bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 font-medium text-xs border-b border-zinc-200 dark:border-zinc-800">
                                               <tr>
-                                                <th className="px-4 py-2 border-r border-zinc-200">ID Bayaran</th>
+                                                <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800">ID Bayaran</th>
                                                 <th 
-                                                  className="px-4 py-2 border-r border-zinc-200 cursor-pointer hover:bg-zinc-100 transition-colors group"
+                                                  className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
                                                   onClick={() => {
                                                     if (paymentSortColumn === 'date') {
                                                       setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
@@ -762,14 +1063,14 @@ export default function App() {
                                                 >
                                                   <div className="flex items-center gap-1">
                                                     Tarikh
-                                                    <span className="text-zinc-400">
+                                                    <span className="text-zinc-400 dark:text-zinc-500">
                                                       {paymentSortColumn === 'date' ? (paymentSortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUp size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" />}
                                                     </span>
                                                   </div>
                                                 </th>
-                                                <th className="px-4 py-2 border-r border-zinc-200">Kaedah</th>
+                                                <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800">Kaedah</th>
                                                 <th 
-                                                  className="px-4 py-2 border-r border-zinc-200 cursor-pointer hover:bg-zinc-100 transition-colors group"
+                                                  className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
                                                   onClick={() => {
                                                     if (paymentSortColumn === 'amount') {
                                                       setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
@@ -780,7 +1081,7 @@ export default function App() {
                                                   }}
                                                 >
                                                   <div className="flex items-center justify-end gap-1">
-                                                    <span className="text-zinc-400">
+                                                    <span className="text-zinc-400 dark:text-zinc-500">
                                                       {paymentSortColumn === 'amount' ? (paymentSortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUp size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" />}
                                                     </span>
                                                     Jumlah
@@ -797,32 +1098,44 @@ export default function App() {
                                                 else if (paymentSortColumn === 'amount') comparison = a.amount - b.amount;
                                                 return paymentSortDirection === 'asc' ? comparison : -comparison;
                                               }).map((payment) => (
-                                                <tr key={payment.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
-                                                  <td className="px-4 py-2 border-r border-zinc-100 text-zinc-600 font-mono text-xs">{payment.id}</td>
-                                                  <td className="px-4 py-2 border-r border-zinc-100 text-zinc-600">{formatDateDMY(payment.date)}</td>
-                                                  <td className="px-4 py-2 border-r border-zinc-100 text-zinc-600">{payment.method}</td>
-                                                  <td className="px-4 py-2 border-r border-zinc-100 text-right text-emerald-600 font-medium font-mono">
+                                                <tr key={payment.id} className="border-b border-zinc-100 dark:border-zinc-800 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 font-mono text-xs">{payment.id}</td>
+                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400">{formatDateDMY(payment.date)}</td>
+                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400">{payment.method}</td>
+                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800 text-right text-emerald-600 font-medium font-mono">
                                                     +{formatRM(payment.amount)}
                                                   </td>
-                                                  <td className="px-4 py-2 text-center">
+                                                  <td className="px-4 py-2 text-center flex justify-center gap-2">
                                                     <button 
-                                                      onClick={() => {
+                                                      title="Papar/Cetak Resit"
+                                                      onClick={() => setReceiptData({record, payment})}
+                                                      className="p-1 text-blue-500 hover:text-blue-700 transition-colors rounded hover:bg-blue-50"
+                                                    >
+                                                      <FileText size={14} />
+                                                    </button>
+                                                    <button 
+                                                      onClick={async () => {
                                                         if (window.confirm('Padam rekod bayaran ini?')) {
-                                                          setRecords(prev => prev.map(r => {
-                                                            if (r.id === record.id) {
-                                                              const newHistory = r.paymentHistory.filter(p => p.id !== payment.id);
-                                                              return {
-                                                                ...r,
-                                                                paymentHistory: newHistory,
-                                                                bakiFeeTerkini: r.bakiFeeTerkini + payment.amount,
-                                                                bayaranTerakhir: newHistory.length > 0 ? newHistory[0].amount : 0
-                                                              };
+                                                          const newHistory = record.paymentHistory.filter(p => p.id !== payment.id);
+                                                          const updatedRecord = {
+                                                            ...record,
+                                                            paymentHistory: newHistory,
+                                                            bakiFeeTerkini: record.bakiFeeTerkini + payment.amount,
+                                                            bayaranTerakhir: newHistory.length > 0 ? newHistory[0].amount : 0
+                                                          };
+                                                          if (user) {
+                                                            const targetPath = `users/${user.uid}/records/${record.id}`;
+                                                            try {
+                                                              await setDoc(doc(db, 'users', user.uid, 'records', record.id), updatedRecord);
+                                                            } catch (err) {
+                                                              handleFirestoreError(err, OperationType.WRITE, targetPath);
                                                             }
-                                                            return r;
-                                                          }));
+                                                          } else {
+                                                            setRecords(prev => prev.map(r => r.id === record.id ? updatedRecord : r));
+                                                          }
                                                         }
                                                       }}
-                                                      className="text-zinc-400 hover:text-red-600 p-1 rounded transition-colors"
+                                                      className="text-zinc-400 dark:text-zinc-500 hover:text-red-600 p-1 rounded transition-colors"
                                                     >
                                                       <Trash2 size={12} />
                                                     </button>
@@ -833,7 +1146,7 @@ export default function App() {
                                           </table>
                                         </div>
                                       ) : (
-                                        <div className="text-center p-4 bg-zinc-50 border border-zinc-200 rounded-sm text-zinc-500 text-sm">
+                                        <div className="text-center p-4 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-sm text-zinc-500 dark:text-zinc-400 text-sm">
                                           Tiada rekod bayaran buat masa ini.
                                         </div>
                                       )}
@@ -852,7 +1165,7 @@ export default function App() {
                         animate={{ opacity: 1 }} 
                         exit={{ opacity: 0 }}
                       >
-                        <td colSpan={9} className="px-4 py-8 text-center text-zinc-400 font-medium">
+                        <td colSpan={9} className="px-4 py-8 text-center text-zinc-400 dark:text-zinc-500 font-medium">
                           Tiada rekod dijumpai.
                         </td>
                       </motion.tr>
@@ -861,12 +1174,12 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
-              <div className="p-3 bg-zinc-50 border-t border-zinc-200 flex justify-between items-center text-[11px] text-zinc-500">
+              <div className="p-3 bg-zinc-50 dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex justify-between items-center text-[11px] text-zinc-500 dark:text-zinc-400">
                 <div>Menunjukkan {filteredRecords.length} daripada {records.length} rekod entri</div>
                 <div className="flex gap-1 hidden sm:flex">
-                  <button className="px-2 py-1 border border-zinc-300 rounded bg-white disabled:opacity-50" disabled>Kembali</button>
-                  <button className="px-2 py-1 border border-zinc-300 rounded bg-zinc-800 text-white">1</button>
-                  <button className="px-2 py-1 border border-zinc-300 rounded bg-white disabled:opacity-50" disabled>Seterusnya</button>
+                  <button className="px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 disabled:opacity-50" disabled>Kembali</button>
+                  <button className="px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-zinc-800 text-white">1</button>
+                  <button className="px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 disabled:opacity-50" disabled>Seterusnya</button>
                 </div>
               </div>
             </div>
@@ -878,32 +1191,32 @@ export default function App() {
       {/* Modals */}
       <AnimatePresence>
         {editingRecord && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-sm print:hidden">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900 dark:bg-zinc-100 backdrop-blur-sm print:hidden">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-lg shadow-xl border border-zinc-200 w-full max-w-md overflow-hidden"
+              className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md overflow-hidden"
             >
-              <div className="flex items-center justify-between p-4 border-b border-zinc-100 bg-zinc-50">
-                <h3 className="font-bold text-zinc-800 flex items-center gap-2">
+              <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
+                <h3 className="font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
                   <Edit size={18} className="text-amber-600" />
                   Edit Rekod Pelanggan
                 </h3>
-                <button onClick={() => setEditingRecord(null)} className="text-zinc-400 hover:text-zinc-600 cursor-pointer">
+                <button onClick={() => setEditingRecord(null)} className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 cursor-pointer">
                   <X size={18} />
                 </button>
               </div>
               <div className="p-6">
                 <form onSubmit={handleEditRecordSubmit} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                    <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                       Nama Pelanggan / Entiti
                     </label>
                     <input
                       type="text"
                       required
-                      className="px-3 py-2 w-full border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800"
+                      className="px-3 py-2 w-full border border-zinc-300 dark:border-zinc-700 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800 dark:text-zinc-200"
                       value={editingRecord.nama}
                       onChange={(e) => setEditingRecord({ ...editingRecord, nama: e.target.value })}
                       autoFocus
@@ -912,25 +1225,25 @@ export default function App() {
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                      <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                         Kategori Kes
                       </label>
                       <input
                         type="text"
                         required
-                        className="px-3 py-2 w-full border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800"
+                        className="px-3 py-2 w-full border border-zinc-300 dark:border-zinc-700 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800 dark:text-zinc-200"
                         value={editingRecord.kes}
                         onChange={(e) => setEditingRecord({ ...editingRecord, kes: e.target.value })}
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                      <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                         Tarikh
                       </label>
                       <input
                         type="date"
                         required
-                        className="px-3 py-2 w-full border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800"
+                        className="px-3 py-2 w-full border border-zinc-300 dark:border-zinc-700 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800 dark:text-zinc-200"
                         value={formatDateISO(editingRecord.tarikh)}
                         onChange={(e) => setEditingRecord({ ...editingRecord, tarikh: formatDateDMY(e.target.value) })}
                       />
@@ -939,7 +1252,7 @@ export default function App() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                      <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                         Total Fee (RM)
                       </label>
                       <input
@@ -947,7 +1260,7 @@ export default function App() {
                         step="0.01"
                         min="0"
                         required
-                        className="px-3 py-2 w-full border border-zinc-300 rounded font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-800"
+                        className="px-3 py-2 w-full border border-zinc-300 dark:border-zinc-700 rounded font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-800 dark:text-zinc-200"
                         value={editingRecord.totalFee}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value) || 0;
@@ -959,28 +1272,28 @@ export default function App() {
                           })
                         }}
                       />
-                      <p className="text-[10px] text-zinc-500 mt-1">Baki fee akan dikira semula secara automatik</p>
+                      <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-1">Baki fee akan dikira semula secara automatik</p>
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                      <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                         Baki Mileage (RM)
                       </label>
                       <input
                         type="number"
                         step="0.01"
                         min="0"
-                        className="px-3 py-2 w-full border border-zinc-300 rounded font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-800"
+                        className="px-3 py-2 w-full border border-zinc-300 dark:border-zinc-700 rounded font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-800 dark:text-zinc-200"
                         value={editingRecord.bakiMileage}
                         onChange={(e) => setEditingRecord({ ...editingRecord, bakiMileage: parseFloat(e.target.value) || 0 })}
                       />
                     </div>
                   </div>
 
-                  <div className="flex justify-end gap-2 pt-4 border-t border-zinc-100 mt-6">
+                  <div className="flex justify-end gap-2 pt-4 border-t border-zinc-100 dark:border-zinc-800 mt-6">
                     <button 
                       type="button"
                       onClick={() => setEditingRecord(null)}
-                      className="px-4 py-2 text-sm text-zinc-600 hover:text-zinc-800 font-medium transition-colors cursor-pointer"
+                      className="px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 font-medium transition-colors cursor-pointer"
                     >
                       Batal
                     </button>
@@ -1000,25 +1313,25 @@ export default function App() {
 
       <AnimatePresence>
         {isDeletingSelected && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-sm print:hidden">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900 dark:bg-zinc-100 backdrop-blur-sm print:hidden">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-lg shadow-xl border border-zinc-200 w-full max-w-sm overflow-hidden"
+              className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-sm overflow-hidden"
             >
               <div className="p-6 text-center">
                 <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
                   <AlertTriangle size={24} className="text-red-600" />
                 </div>
-                <h3 className="font-bold text-zinc-800 text-lg mb-2">Padam Rekod Terpilih</h3>
-                <p className="text-zinc-500 text-sm mb-6">
-                  Adakah anda pasti untuk memadam <strong className="text-zinc-800">{selectedRecords.length}</strong> rekod yang terpilih? Tindakan ini tidak boleh dikembalikan.
+                <h3 className="font-bold text-zinc-800 dark:text-zinc-200 text-lg mb-2">Padam Rekod Terpilih</h3>
+                <p className="text-zinc-500 dark:text-zinc-400 text-sm mb-6">
+                  Adakah anda pasti untuk memadam <strong className="text-zinc-800 dark:text-zinc-200">{selectedRecords.length}</strong> rekod yang terpilih? Tindakan ini tidak boleh dikembalikan.
                 </p>
                 <div className="flex justify-center gap-3">
                   <button 
                     onClick={() => setIsDeletingSelected(false)}
-                    className="px-4 py-2 text-sm border border-zinc-300 rounded hover:bg-zinc-50 text-zinc-700 font-medium transition-colors cursor-pointer flex-1"
+                    className="px-4 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium transition-colors cursor-pointer flex-1"
                   >
                     Batal
                   </button>
@@ -1037,25 +1350,25 @@ export default function App() {
 
       <AnimatePresence>
         {deletingRecord && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-sm print:hidden">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900 dark:bg-zinc-100 backdrop-blur-sm print:hidden">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-lg shadow-xl border border-zinc-200 w-full max-w-sm overflow-hidden"
+              className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-sm overflow-hidden"
             >
               <div className="p-6 text-center">
                 <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
                   <AlertTriangle size={24} className="text-red-600" />
                 </div>
-                <h3 className="font-bold text-zinc-800 text-lg mb-2">Padam Rekod Kes</h3>
-                <p className="text-zinc-500 text-sm mb-6">
-                  Adakah anda pasti untuk memadam rekod kes <strong className="text-zinc-800">{deletingRecord.nama}</strong>? Tindakan ini tidak boleh dikembalikan.
+                <h3 className="font-bold text-zinc-800 dark:text-zinc-200 text-lg mb-2">Padam Rekod Kes</h3>
+                <p className="text-zinc-500 dark:text-zinc-400 text-sm mb-6">
+                  Adakah anda pasti untuk memadam rekod kes <strong className="text-zinc-800 dark:text-zinc-200">{deletingRecord.nama}</strong>? Tindakan ini tidak boleh dikembalikan.
                 </p>
                 <div className="flex justify-center gap-3">
                   <button 
                     onClick={() => setDeletingRecord(null)}
-                    className="px-4 py-2 text-sm border border-zinc-300 rounded hover:bg-zinc-50 text-zinc-700 font-medium transition-colors cursor-pointer flex-1"
+                    className="px-4 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium transition-colors cursor-pointer flex-1"
                   >
                     Batal
                   </button>
@@ -1074,32 +1387,32 @@ export default function App() {
 
       <AnimatePresence>
         {isNewRecordModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-sm print:hidden">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900 dark:bg-zinc-100 backdrop-blur-sm print:hidden">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-lg shadow-xl border border-zinc-200 w-full max-w-md overflow-hidden"
+              className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md overflow-hidden"
             >
-              <div className="flex items-center justify-between p-4 border-b border-zinc-100 bg-zinc-50">
-                <h3 className="font-bold text-zinc-800 flex items-center gap-2">
+              <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
+                <h3 className="font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
                   <Users size={18} className="text-blue-600" />
                   Rekod Pelanggan Baru
                 </h3>
-                <button onClick={() => setIsNewRecordModalOpen(false)} className="text-zinc-400 hover:text-zinc-600 cursor-pointer">
+                <button onClick={() => setIsNewRecordModalOpen(false)} className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 cursor-pointer">
                   <X size={18} />
                 </button>
               </div>
               <div className="p-6">
                 <form onSubmit={handleAddNewRecord} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                    <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                       Nama Pelanggan / Entiti
                     </label>
                     <input
                       type="text"
                       required
-                      className="px-3 py-2 w-full border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800"
+                      className="px-3 py-2 w-full border border-zinc-300 dark:border-zinc-700 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800 dark:text-zinc-200"
                       placeholder="Contoh: Ali bin Abu"
                       value={newRecordData.nama}
                       onChange={(e) => setNewRecordData({ ...newRecordData, nama: e.target.value })}
@@ -1109,26 +1422,26 @@ export default function App() {
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                      <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                         Kategori Kes
                       </label>
                       <input
                         type="text"
                         required
-                        className="px-3 py-2 w-full border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800"
+                        className="px-3 py-2 w-full border border-zinc-300 dark:border-zinc-700 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800 dark:text-zinc-200"
                         placeholder="Contoh: Saman Sivil"
                         value={newRecordData.kes}
                         onChange={(e) => setNewRecordData({ ...newRecordData, kes: e.target.value })}
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                      <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                         Tarikh
                       </label>
                       <input
                         type="date"
                         required
-                        className="px-3 py-2 w-full border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800"
+                        className="px-3 py-2 w-full border border-zinc-300 dark:border-zinc-700 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800 dark:text-zinc-200"
                         value={newRecordData.tarikh}
                         onChange={(e) => setNewRecordData({ ...newRecordData, tarikh: e.target.value })}
                       />
@@ -1137,7 +1450,7 @@ export default function App() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                      <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                         Total Fee (RM)
                       </label>
                       <input
@@ -1145,21 +1458,21 @@ export default function App() {
                         step="0.01"
                         min="0"
                         required
-                        className="px-3 py-2 w-full border border-zinc-300 rounded font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-800"
+                        className="px-3 py-2 w-full border border-zinc-300 dark:border-zinc-700 rounded font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-800 dark:text-zinc-200"
                         placeholder="0.00"
                         value={newRecordData.totalFee}
                         onChange={(e) => setNewRecordData({ ...newRecordData, totalFee: e.target.value })}
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                      <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                         Baki Mileage (RM)
                       </label>
                       <input
                         type="number"
                         step="0.01"
                         min="0"
-                        className="px-3 py-2 w-full border border-zinc-300 rounded font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-800"
+                        className="px-3 py-2 w-full border border-zinc-300 dark:border-zinc-700 rounded font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-800 dark:text-zinc-200"
                         placeholder="0.00"
                         value={newRecordData.bakiMileage}
                         onChange={(e) => setNewRecordData({ ...newRecordData, bakiMileage: e.target.value })}
@@ -1167,11 +1480,11 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="flex justify-end gap-2 pt-4 border-t border-zinc-100 mt-6">
+                  <div className="flex justify-end gap-2 pt-4 border-t border-zinc-100 dark:border-zinc-800 mt-6">
                     <button 
                       type="button"
                       onClick={() => setIsNewRecordModalOpen(false)}
-                      className="px-4 py-2 text-sm text-zinc-600 hover:text-zinc-800 font-medium transition-colors cursor-pointer"
+                      className="px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 font-medium transition-colors cursor-pointer"
                     >
                       Batal
                     </button>
@@ -1191,42 +1504,42 @@ export default function App() {
 
       <AnimatePresence>
         {paymentRecord && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-sm print:hidden">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900 dark:bg-zinc-100 backdrop-blur-sm print:hidden">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-lg shadow-xl border border-zinc-200 w-full max-w-md overflow-hidden"
+              className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md overflow-hidden"
             >
-              <div className="flex items-center justify-between p-4 border-b border-zinc-100 bg-zinc-50">
-                <h3 className="font-bold text-zinc-800 flex items-center gap-2">
+              <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
+                <h3 className="font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
                   <CreditCard size={18} className="text-blue-600" />
                   Kemaskini Bayaran
                 </h3>
-                <button onClick={() => setPaymentRecord(null)} className="text-zinc-400 hover:text-zinc-600">
+                <button onClick={() => setPaymentRecord(null)} className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-600">
                   <X size={18} />
                 </button>
               </div>
               <div className="p-6">
                 <div className="mb-6 p-4 rounded-md bg-blue-50/50 border border-blue-100 space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500">Pelanggan:</span>
-                    <span className="font-semibold text-zinc-800">{paymentRecord.nama}</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">Pelanggan:</span>
+                    <span className="font-semibold text-zinc-800 dark:text-zinc-200">{paymentRecord.nama}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500">Baki Semasa:</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">Baki Semasa:</span>
                     <span className="font-mono font-bold text-red-600">{formatRM(paymentRecord.bakiFeeTerkini)}</span>
                   </div>
                 </div>
                 
                 <form onSubmit={handleUpdatePayment} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                    <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                       Jumlah Bayaran (RM)
                     </label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <span className="text-zinc-500 font-mono text-sm">RM</span>
+                        <span className="text-zinc-500 dark:text-zinc-400 font-mono text-sm">RM</span>
                       </div>
                       <input
                         type="number"
@@ -1234,7 +1547,7 @@ export default function App() {
                         min="0.01"
                         max={paymentRecord.bakiFeeTerkini}
                         required
-                        className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-zinc-300 focus:ring-blue-500/20 focus:border-blue-500'} rounded font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-zinc-800`}
+                        className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-zinc-300 dark:border-zinc-700 focus:ring-blue-500/20 focus:border-blue-500'} rounded font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-zinc-800 dark:text-zinc-200`}
                         placeholder="0.00"
                         value={paymentAmount}
                         onChange={(e) => {
@@ -1249,25 +1562,25 @@ export default function App() {
                     )}
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                    <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                       Tarikh Bayaran
                     </label>
                     <input
                       type="date"
                       required
-                      className="pl-3 pr-4 py-2 w-full border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800"
+                      className="pl-3 pr-4 py-2 w-full border border-zinc-300 dark:border-zinc-700 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800 dark:text-zinc-200"
                       value={paymentDate}
                       onChange={(e) => setPaymentDate(e.target.value)}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-zinc-600 mb-1.5 uppercase tracking-wider">
+                    <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                       Kaedah Bayaran
                     </label>
                     <div className="relative">
                       <select
                         required
-                        className="pl-3 pr-8 py-2 w-full border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800 appearance-none bg-white"
+                        className="pl-3 pr-8 py-2 w-full border border-zinc-300 dark:border-zinc-700 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-800 dark:text-zinc-200 appearance-none bg-white dark:bg-zinc-950"
                         value={paymentMethod}
                         onChange={(e) => setPaymentMethod(e.target.value)}
                       >
@@ -1276,15 +1589,15 @@ export default function App() {
                         <option value="QR">QR</option>
                       </select>
                       <div className="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
-                        <ChevronDown size={14} className="text-zinc-400" />
+                        <ChevronDown size={14} className="text-zinc-400 dark:text-zinc-500" />
                       </div>
                     </div>
                   </div>
-                  <div className="flex justify-end gap-2 pt-4 border-t border-zinc-100 mt-6">
+                  <div className="flex justify-end gap-2 pt-4 border-t border-zinc-100 dark:border-zinc-800 mt-6">
                     <button 
                       type="button" 
                       onClick={() => setPaymentRecord(null)}
-                      className="px-4 py-2 text-sm border border-zinc-300 rounded bg-white hover:bg-zinc-50 text-zinc-700 font-medium"
+                      className="px-4 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium"
                     >
                       Batal
                     </button>
@@ -1306,70 +1619,70 @@ export default function App() {
       {/* Statement Modal & Print Layout */}
       <AnimatePresence>
         {statementRecord && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-sm print:bg-white print:p-0">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900 dark:bg-zinc-100 backdrop-blur-sm print:bg-white print:p-0">
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="bg-white rounded-lg shadow-xl border border-zinc-200 w-full max-w-2xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none"
+              className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-2xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none"
             >
-              <div className="flex items-center justify-between p-4 border-b border-zinc-100 bg-zinc-50 print:hidden">
-                <h3 className="font-bold text-zinc-800 flex items-center gap-2">
-                  <Printer size={18} className="text-zinc-600" />
+              <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 print:hidden">
+                <h3 className="font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
+                  <Printer size={18} className="text-zinc-600 dark:text-zinc-400" />
                   Pratinjau Penyata
                 </h3>
-                <button onClick={() => setStatementRecord(null)} className="text-zinc-400 hover:text-zinc-600">
+                <button onClick={() => setStatementRecord(null)} className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-600">
                   <X size={18} />
                 </button>
               </div>
               
-              <div className="p-8 overflow-y-auto flex-1 bg-white print:p-0 print:overflow-visible">
+              <div className="p-8 overflow-y-auto flex-1 bg-white dark:bg-zinc-950 print:p-0 print:overflow-visible">
                 {/* Printable Area Starts */}
-                <div ref={printRef} className="max-w-2xl mx-auto font-sans text-zinc-900 bg-white print:p-8">
+                <div ref={printRef} className="max-w-2xl mx-auto font-sans text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950 print:p-8">
                   {/* Header */}
-                  <div className="flex justify-between items-start pb-8 border-b-2 border-zinc-900 mb-8">
+                  <div className="flex justify-between items-start pb-8 border-b-2 border-zinc-900 dark:border-zinc-100 mb-8">
                     <div>
-                      <div className="text-3xl font-black tracking-tighter flex items-center gap-1 mb-1">
-                         HM LAWYER<span className="text-blue-600">.</span>
+                      <div className="mb-2">
+                        <img src="/logo.png" alt="HM Logo" className="h-16 w-auto object-contain" onError={e => (e.currentTarget.style.display = 'none')} />
                       </div>
-                      <p className="text-sm font-medium text-zinc-500 uppercase tracking-widest">Peguam Syarie * Pesuruhjaya Sumpah</p>
+                      <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Peguam Syarie * Pesuruhjaya Sumpah</p>
                     </div>
                     <div className="text-right">
-                      <h2 className="text-2xl font-semibold tracking-tight text-zinc-800 uppercase">Penyata Akaun</h2>
-                      <p className="text-sm font-mono text-zinc-500 mt-1">Ref: {statementRecord.id}</p>
-                      <p className="text-sm font-mono text-zinc-500">Tarikh: {formatDateDMY(new Date().toISOString().split('T')[0])}</p>
+                      <h2 className="text-2xl font-semibold tracking-tight text-zinc-800 dark:text-zinc-200 uppercase">Penyata Akaun</h2>
+                      <p className="text-sm font-mono text-zinc-500 dark:text-zinc-400 mt-1">Ref: {statementRecord.id}</p>
+                      <p className="text-sm font-mono text-zinc-500 dark:text-zinc-400">Tarikh: {formatDateDMY(new Date().toISOString().split('T')[0])}</p>
                     </div>
                   </div>
 
                   {/* Client Info */}
-                  <div className="flex justify-between items-start text-sm mb-10 bg-zinc-50 p-6 rounded-lg border border-zinc-100">
+                  <div className="flex justify-between items-start text-sm mb-10 bg-zinc-50 dark:bg-zinc-900 p-6 rounded-lg border border-zinc-100 dark:border-zinc-800">
                     <div>
-                      <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Kepada</p>
-                      <p className="font-bold text-zinc-800 text-lg mb-1">{statementRecord.nama}</p>
-                      <p className="text-zinc-600 font-medium">Kategori Kes: {statementRecord.kes}</p>
+                      <p className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-2">Kepada</p>
+                      <p className="font-bold text-zinc-800 dark:text-zinc-200 text-lg mb-1">{statementRecord.nama}</p>
+                      <p className="text-zinc-600 dark:text-zinc-400 font-medium">Kategori Kes: {statementRecord.kes}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Ringkasan Baki</p>
-                      <p className="text-3xl font-bold font-mono text-zinc-900">{formatRM(statementRecord.bakiFeeTerkini)}</p>
-                      <p className="text-zinc-500 font-medium text-xs mt-1">Jumlah Perlu Dibayar</p>
+                      <p className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-2">Ringkasan Baki</p>
+                      <p className="text-3xl font-bold font-mono text-zinc-900 dark:text-zinc-100">{formatRM(statementRecord.bakiFeeTerkini)}</p>
+                      <p className="text-zinc-500 dark:text-zinc-400 font-medium text-xs mt-1">Jumlah Perlu Dibayar</p>
                     </div>
                   </div>
 
                   {/* Cost Breakdown */}
                   <div className="mb-10">
-                    <h3 className="text-sm font-bold text-zinc-800 uppercase tracking-wider mb-4 border-b border-zinc-200 pb-2">Perincian Kos & Tuntutan</h3>
+                    <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">Perincian Kos & Tuntutan</h3>
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="p-5 border border-zinc-200 rounded-lg bg-white shadow-sm">
-                        <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3 border-b border-zinc-100 pb-2">Yuran Profesional</p>
+                      <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 shadow-sm">
+                        <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-3 border-b border-zinc-100 dark:border-zinc-800 pb-2">Yuran Profesional</p>
                         <div className="flex justify-between items-center space-y-2">
-                          <span className="text-sm font-medium text-zinc-700">Jumlah Yuran Keseluruhan</span>
-                          <span className="font-mono font-bold text-zinc-800">{formatRM(statementRecord.totalFee)}</span>
+                          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Jumlah Yuran Keseluruhan</span>
+                          <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200">{formatRM(statementRecord.totalFee)}</span>
                         </div>
                       </div>
-                      <div className="p-5 border border-zinc-200 rounded-lg bg-white shadow-sm">
-                        <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3 border-b border-zinc-100 pb-2">Tuntutan Perjalanan</p>
+                      <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 shadow-sm">
+                        <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-3 border-b border-zinc-100 dark:border-zinc-800 pb-2">Tuntutan Perjalanan</p>
                         <div className="flex justify-between items-center space-y-2">
-                          <span className="text-sm font-medium text-zinc-700">Tuntutan Mileage</span>
+                          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Tuntutan Mileage</span>
                           <span className="font-mono font-bold text-amber-600">{formatRM(statementRecord.bakiMileage)}</span>
                         </div>
                       </div>
@@ -1378,27 +1691,27 @@ export default function App() {
 
                   {/* Summary Table */}
                   <div className="mb-10">
-                    <h3 className="text-sm font-bold text-zinc-800 uppercase tracking-wider mb-4 border-b border-zinc-200 pb-2">Ringkasan Yuran</h3>
-                    <div className="border border-zinc-200 rounded-lg overflow-hidden">
+                    <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">Ringkasan Yuran</h3>
+                    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
                       <table className="w-full text-sm">
-                        <tbody className="divide-y divide-zinc-100">
-                          <tr className="hover:bg-zinc-50 transition-colors">
-                            <td className="py-4 px-5 text-zinc-600 font-medium whitespace-nowrap w-2/3">Jumlah Yuran Keseluruhan</td>
-                            <td className="py-4 px-5 text-right font-mono font-bold text-zinc-800">{formatRM(statementRecord.totalFee)}</td>
+                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                          <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
+                            <td className="py-4 px-5 text-zinc-600 dark:text-zinc-400 font-medium whitespace-nowrap w-2/3">Jumlah Yuran Keseluruhan</td>
+                            <td className="py-4 px-5 text-right font-mono font-bold text-zinc-800 dark:text-zinc-200">{formatRM(statementRecord.totalFee)}</td>
                           </tr>
-                          <tr className="hover:bg-zinc-50 transition-colors bg-amber-50/10">
-                            <td className="py-4 px-5 text-zinc-600 font-medium">Baki Mileage / Tuntutan Perjalanan</td>
+                          <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors bg-amber-50/10 dark:bg-amber-900/20">
+                            <td className="py-4 px-5 text-zinc-600 dark:text-zinc-400 font-medium">Baki Mileage / Tuntutan Perjalanan</td>
                             <td className="py-4 px-5 text-right font-mono text-amber-600 font-medium">{formatRM(statementRecord.bakiMileage)}</td>
                           </tr>
                           {statementRecord.paymentHistory && statementRecord.paymentHistory.length > 0 && (
-                            <tr className="hover:bg-zinc-50 transition-colors bg-emerald-50/10">
-                              <td className="py-4 px-5 text-zinc-600 font-medium">Jumlah Pembayaran Diterima</td>
+                            <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors bg-emerald-50/10 dark:bg-emerald-900/20">
+                              <td className="py-4 px-5 text-zinc-600 dark:text-zinc-400 font-medium">Jumlah Pembayaran Diterima</td>
                               <td className="py-4 px-5 text-right font-mono text-emerald-600 font-medium">
                                 -{formatRM(statementRecord.paymentHistory.reduce((acc, curr) => acc + curr.amount, 0))}
                               </td>
                             </tr>
                           )}
-                          <tr className="bg-zinc-900 text-white">
+                          <tr className="bg-zinc-900 dark:bg-zinc-100 text-white">
                             <td className="py-4 px-5 font-bold text-sm tracking-wide">BAKI TERKINI</td>
                             <td className="py-4 px-5 text-right font-mono font-bold text-lg">{formatRM(statementRecord.bakiFeeTerkini)}</td>
                           </tr>
@@ -1409,24 +1722,24 @@ export default function App() {
 
                   {/* Payment History */}
                   <div>
-                    <h3 className="text-sm font-bold text-zinc-800 uppercase tracking-wider mb-4 border-b border-zinc-200 pb-2">Rekod Pembayaran</h3>
+                    <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">Rekod Pembayaran</h3>
                     {statementRecord.paymentHistory && statementRecord.paymentHistory.length > 0 ? (
-                      <div className="border border-zinc-200 rounded-lg overflow-hidden">
+                      <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
                         <table className="w-full text-sm text-left">
-                          <thead className="bg-zinc-50 border-b border-zinc-200">
+                          <thead className="bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
                             <tr>
-                              <th className="py-3 px-5 font-semibold text-zinc-600">Tarikh</th>
-                              <th className="py-3 px-5 font-semibold text-zinc-600">No. Rujukan</th>
-                              <th className="py-3 px-5 font-semibold text-zinc-600">Kaedah Pembayaran</th>
-                              <th className="py-3 px-5 font-semibold text-zinc-600 text-right">Kredit (RM)</th>
+                              <th className="py-3 px-5 font-semibold text-zinc-600 dark:text-zinc-400">Tarikh</th>
+                              <th className="py-3 px-5 font-semibold text-zinc-600 dark:text-zinc-400">No. Rujukan</th>
+                              <th className="py-3 px-5 font-semibold text-zinc-600 dark:text-zinc-400">Kaedah Pembayaran</th>
+                              <th className="py-3 px-5 font-semibold text-zinc-600 dark:text-zinc-400 text-right">Kredit (RM)</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-zinc-100">
+                          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                             {statementRecord.paymentHistory.map((payment) => (
-                              <tr key={payment.id} className="hover:bg-zinc-50 transition-colors">
-                                <td className="py-3 px-5 text-zinc-800">{formatDateDMY(payment.date)}</td>
-                                <td className="py-3 px-5 text-zinc-500 font-mono text-xs">{payment.id}</td>
-                                <td className="py-3 px-5 text-zinc-600">{payment.method}</td>
+                              <tr key={payment.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
+                                <td className="py-3 px-5 text-zinc-800 dark:text-zinc-200">{formatDateDMY(payment.date)}</td>
+                                <td className="py-3 px-5 text-zinc-500 dark:text-zinc-400 font-mono text-xs">{payment.id}</td>
+                                <td className="py-3 px-5 text-zinc-600 dark:text-zinc-400">{payment.method}</td>
                                 <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">{formatRM(payment.amount)}</td>
                               </tr>
                             ))}
@@ -1434,15 +1747,15 @@ export default function App() {
                         </table>
                       </div>
                     ) : (
-                      <div className="text-center p-8 border border-dashed border-zinc-300 rounded-lg bg-zinc-50 text-zinc-500 text-sm">
+                      <div className="text-center p-8 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 text-sm">
                         Tiada rekod pembayaran didapati untuk akaun ini.
                       </div>
                     )}
                   </div>
 
                   {/* Footer */}
-                  <div className="pt-16 mt-16 text-xs text-center text-zinc-400 border-t border-zinc-100">
-                    <p className="font-medium text-zinc-500 text-sm mb-2">Terima kasih atas urusan bersama kami.</p>
+                  <div className="pt-16 mt-16 text-xs text-center text-zinc-400 dark:text-zinc-500 border-t border-zinc-100 dark:border-zinc-800">
+                    <p className="font-medium text-zinc-500 dark:text-zinc-400 text-sm mb-2">Terima kasih atas urusan bersama kami.</p>
                     <p>Penyata rasmi ini merupakan janaan komputer dan sah tanpa tandatangan fizikal.</p>
                     <p>Sila kemukakan sebarang pertanyaan mengenai penyata ini dalam tempoh 14 hari dari tarikh dikeluarkan.</p>
                   </div>
@@ -1450,16 +1763,16 @@ export default function App() {
                 {/* Printable Area Ends */}
               </div>
 
-              <div className="p-4 border-t border-zinc-100 bg-zinc-50 flex justify-end gap-2 print:hidden">
+              <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 flex justify-end gap-2 print:hidden">
                 <button 
                   onClick={() => setStatementRecord(null)}
-                  className="px-4 py-2 text-sm border border-zinc-300 rounded bg-white hover:bg-zinc-50 text-zinc-700 font-medium"
+                  className="px-4 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium"
                 >
                   Tutup
                 </button>
                 <button 
                   onClick={handlePrint}
-                  className="px-4 py-2 text-sm border border-zinc-300 rounded bg-white hover:bg-zinc-50 text-zinc-700 font-medium flex items-center gap-2"
+                  className="px-4 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium flex items-center gap-2"
                 >
                   <Printer size={16} />
                   Cetak
@@ -1484,6 +1797,182 @@ export default function App() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {receiptData && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900 dark:bg-zinc-100 backdrop-blur-sm print:bg-white print:p-0">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="bg-white dark:bg-zinc-950 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden print:shadow-none print:max-h-none print:w-full print:max-w-none"
+            >
+              <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center bg-zinc-50 dark:bg-zinc-900 print:hidden">
+                <div>
+                  <h3 className="font-bold text-zinc-800 dark:text-zinc-200">Cetak Resit</h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">Ref: {receiptData.payment.id}</p>
+                </div>
+                <button 
+                  onClick={() => setReceiptData(null)}
+                  className="p-2 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-full transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <div className="p-8 overflow-y-auto flex-1 bg-white dark:bg-zinc-950 print:p-0 print:overflow-visible">
+                {/* Printable Area Starts */}
+                <div ref={receiptPrintRef} className="max-w-2xl mx-auto font-sans text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950 print:p-8">
+                  {/* Header */}
+                  <div className="flex justify-between items-start pb-8 border-b-2 border-zinc-900 dark:border-zinc-100 mb-8">
+                    <div>
+                      <div className="mb-2">
+                        <img src="/logo.png" alt="HM Logo" className="h-[4.5rem] w-auto object-contain" onError={e => (e.currentTarget.style.display = 'none')} />
+                      </div>
+                      <h1 className="text-lg font-bold tracking-tight mb-2">TETUAN HAIRI MUSTAFA & ASSOCIATES</h1>
+                      <div className="text-xs text-zinc-600 dark:text-zinc-400 space-y-0.5 leading-snug font-medium">
+                        <p className="italic uppercase tracking-widest text-zinc-500 dark:text-zinc-400 mb-1">Peguam Syarie * Pesuruhjaya Sumpah</p>
+                        <p>Lot 02, Bangunan Arked MARA</p>
+                        <p>09100 Baling, Kedah</p>
+                        <p>Tel: 010-2434143 / 011-56531310</p>
+                        <p>Email: tetuanhairi@gmail.com</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-start mb-8 text-sm">
+                    <div>
+                      <p className="font-bold uppercase tracking-wider text-zinc-800 dark:text-zinc-200 mb-1">Pelanggan:</p>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">[KATEGORI: SYARIE / UMUM]</p>
+                      <p className="font-bold text-[16px] text-zinc-800 dark:text-zinc-200 uppercase mb-1">{receiptData.record.nama}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200">TARIKH: {formatDateDMY(receiptData.payment.date)}</p>
+                    </div>
+                  </div>
+
+                  <div className="text-center mb-8">
+                    <h2 className="text-2xl font-black tracking-widest uppercase border-b-2 border-zinc-900 dark:border-zinc-100 inline-block px-4 pb-1">Resit</h2>
+                  </div>
+
+                  <div className="border-t-[3px] border-b-[3px] border-zinc-900 dark:border-zinc-100 mb-8">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b-2 border-zinc-900 dark:border-zinc-100">
+                          <th className="py-3 px-4 font-bold text-left uppercase">Item / Perkara</th>
+                          <th className="py-3 px-4 font-bold text-right uppercase w-[200px] border-l-2 border-zinc-900 dark:border-zinc-100">Jumlah (RM)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td className="py-4 px-4 font-medium text-zinc-800 dark:text-zinc-200 uppercase">FEE {formatDateDMY(receiptData.payment.date)}</td>
+                          <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-zinc-900 dark:border-zinc-100">{receiptData.payment.amount.toFixed(2)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex justify-between items-start border-b border-zinc-300 dark:border-zinc-700 pb-12 mb-12">
+                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 uppercase flex items-center gap-2">
+                         Butiran Kes: <span className="underline underline-offset-4">{receiptData.record.kes}</span>
+                     </div>
+                     <div className="text-right space-y-4">
+                         <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                             <span>JUMLAH BAYARAN:</span>
+                             <span className="w-32">RM {receiptData.payment.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                         </div>
+                     </div>
+                  </div>
+
+                  <div className="flex justify-end pt-12">
+                    <div className="text-center">
+                      <div className="w-24 h-24 mx-auto border-4 border-blue-200/50 rounded-full flex items-center justify-center mb-4 text-blue-200 rotate-12 bg-blue-50/30">
+                        <span className="font-black text-xl tracking-tighter mix-blend-multiply opacity-50">STAMP</span>
+                      </div>
+                      <p className="font-bold text-sm text-zinc-900 dark:text-zinc-100 uppercase">Hairi Mustafa & Associates</p>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Peguam Syarie & Pesuruhjaya Sumpah</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-12 pt-6 border-t border-dashed border-zinc-300 dark:border-zinc-700 text-center text-[10px] text-zinc-400 dark:text-zinc-500 italic">
+                    Resit ini dijana oleh komputer, terima kasih atas urusan anda. Ref: {receiptData.payment.id}
+                  </div>
+                </div>
+                {/* Printable Area Ends */}
+              </div>
+
+              <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 flex justify-end gap-3 print:hidden">
+                <button 
+                  onClick={() => setReceiptData(null)}
+                  className="px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 font-medium"
+                >
+                  Tutup
+                </button>
+                <button 
+                  onClick={handlePrint}
+                  className="px-4 py-2 text-sm border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shadow-sm text-zinc-700 dark:text-zinc-300 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 font-medium flex items-center gap-2"
+                >
+                  <Printer size={16} />
+                  Cetak
+                </button>
+                <button 
+                  onClick={handleDownloadReceiptPDF}
+                  disabled={isGeneratingReceiptPDF}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                  {isGeneratingReceiptPDF ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Sedang Menjana...
+                    </>
+                  ) : (
+                    <>
+                      <Download size={16} />
+                      Muat Turun PDF
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showExportReminder && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed bottom-4 right-4 bg-white dark:bg-zinc-950 border border-blue-200 shadow-xl rounded-lg p-5 max-w-sm z-50 flex items-start gap-3"
+          >
+            <div className="bg-blue-50 text-blue-500 rounded-full p-2 shrink-0">
+              <Download size={20} />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-sm font-bold text-zinc-800 dark:text-zinc-200">Peringatan Penyimpanan (Backup)</h4>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 leading-relaxed">Tiada sebarang pengemaskinian rekod selama 7 hari. Anda disarankan untuk mengeksport rekod kes anda sebagai sandaran.</p>
+              <div className="mt-3 flex gap-2">
+                <button 
+                  onClick={() => {
+                    handleExportData();
+                    setShowExportReminder(false);
+                  }}
+                  className="text-xs bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 transition-colors"
+                >
+                  Eksport Sekarang
+                </button>
+                <button 
+                  onClick={() => setShowExportReminder(false)}
+                  className="text-xs border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  Abaikan
+                </button>
+              </div>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

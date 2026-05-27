@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() { return request.auth != null; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    function isValidId(id) { 
+        return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    function isValidCaseRecord(data) {
+        return data.keys().hasAll(["id", "nama", "kes", "totalFee", "bayaranTerakhir", "tarikh", "bakiSebelum", "bakiFeeTerkini", "bakiMileage", "userId"]) &&
+               data.id is string && data.id.size() <= 128 &&
+               data.nama is string && data.nama.size() <= 200 &&
+               data.kes is string && data.kes.size() <= 200 &&
+               data.totalFee is number &&
+               data.bayaranTerakhir is number &&
+               data.tarikh is string && data.tarikh.size() <= 50 &&
+               data.bakiSebelum is number &&
+               data.bakiFeeTerkini is number &&
+               data.bakiMileage is number &&
+               data.userId == request.auth.uid &&
+               (!("paymentHistory" in data) || (data.paymentHistory is list && data.paymentHistory.size() <= 1000));
+    }
+
+    match /users/{userId}/records/{recordId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(recordId) && isValidCaseRecord(incoming()) && incoming().keys().size() <= 12;
+      allow update: if isSignedIn() && request.auth.uid == userId && isValidCaseRecord(incoming()) && incoming().userId == existing().userId &&
+                    (incoming().diff(existing()).affectedKeys().hasOnly([
+                        "nama", "kes", "totalFee", "bayaranTerakhir", "tarikh", "bakiSebelum", "bakiFeeTerkini", "bakiMileage", "paymentHistory"
+                    ]));
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+  }
+}
