@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Printer, Edit, Trash2, Plus, Download, X } from 'lucide-react';
+import { Printer, Edit, Trash2, Plus, Download, X, FileMinus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 
 type ReceiptItem = { perkara: string; harga: number };
 
@@ -123,6 +125,27 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
     }, 100);
   };
 
+  const downloadPDF = async () => {
+    if (!printRef.current) return;
+    try {
+      const canvas = await html2canvas(printRef.current, { scale: 2 });
+      const imgData = canvas.toDataURL('image/jpeg', 1.0);
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+      
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`Resit_${form.nama}_${form.tarikh}.pdf`);
+    } catch (err) {
+      console.error("Failed to generate PDF", err);
+    }
+  };
+
   const resetForm = () => {
     setForm({
       tarikh: new Date().toISOString().split('T')[0],
@@ -168,7 +191,7 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
             </h2>
             
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">Tarikh:</label>
                   <input type="date" className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950" 
@@ -224,7 +247,7 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">Baki Terdahulu (RM):</label>
                   <input type="number" className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950" step="0.01"
@@ -243,14 +266,14 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
                   value={form.butiran} onChange={e => setForm({...form, butiran: e.target.value.toUpperCase()})} />
               </div>
 
-              <div className="flex gap-3 pt-4">
+              <div className="flex flex-col sm:flex-row gap-3 pt-4">
                 <button onClick={() => setShowPreview(true)} className="flex-1 bg-blue-500 text-white py-2.5 rounded font-bold hover:bg-blue-600 transition-colors">
                   PREVIEW
                 </button>
                 <button onClick={handleSubmit} className="flex-1 bg-slate-800 dark:bg-slate-700 text-white py-2.5 rounded font-bold hover:bg-slate-900 transition-colors">
                   SIMPAN & CETAK
                 </button>
-                <button onClick={resetForm} className="px-6 bg-zinc-400 text-white py-2.5 rounded font-bold hover:bg-zinc-500 transition-colors">
+                <button onClick={resetForm} className="sm:px-6 bg-zinc-400 text-white py-2.5 rounded font-bold hover:bg-zinc-500 transition-colors">
                   RESET
                 </button>
               </div>
@@ -321,9 +344,9 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
                 <button onClick={() => setShowPreview(false)} className="p-2 text-zinc-400 hover:text-zinc-600 rounded-full transition-colors"><X size={20} /></button>
               </div>
               
-              <div className="p-8 overflow-y-auto flex-1 bg-white print:p-0 print:overflow-visible">
+              <div className="p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible">
                 {/* Print Area */}
-                <div ref={printRef} className="max-w-2xl mx-auto font-sans text-black bg-white print:p-0">
+                <div ref={printRef} className="max-w-2xl min-w-[500px] sm:min-w-0 mx-auto font-sans text-black bg-white print:p-0">
                   <div className="flex items-center pb-2 border-b-2 border-black mb-4 gap-4">
                     <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-[75px] w-auto" alt="Logo" />
                     <div>
@@ -392,8 +415,9 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
                 </div>
               </div>
               <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 flex justify-end gap-2 print:hidden">
-                <button onClick={() => setShowPreview(false)} className="px-4 py-2 text-sm border border-zinc-300 rounded bg-white text-zinc-700 font-medium">Tutup</button>
-                <button onClick={doPrint} className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 font-medium flex items-center gap-2"><Printer size={16} />Cetak</button>
+                <button onClick={() => setShowPreview(false)} className="px-4 py-2 text-sm border border-zinc-300 rounded bg-white text-zinc-700 font-medium hover:bg-zinc-100 transition-colors">Tutup</button>
+                <button onClick={downloadPDF} className="px-4 py-2 text-sm bg-emerald-600 text-white rounded hover:bg-emerald-700 font-medium flex items-center gap-2 transition-colors"><Download size={16} />Muat Turun PDF</button>
+                <button onClick={doPrint} className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 font-medium flex items-center gap-2 transition-colors"><Printer size={16} />Cetak</button>
               </div>
             </motion.div>
           </div>

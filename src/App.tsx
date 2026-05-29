@@ -6,7 +6,7 @@
 import StandaloneReceipts from './components/StandaloneReceipts';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun } from 'lucide-react';
+import { Search, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, BarChart2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { records as initialRecords, CaseRecord } from './data';
 import jsPDF from 'jspdf';
@@ -655,7 +655,7 @@ export default function App() {
   }, [records]);
 
   return (
-    <div className="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans h-screen w-full flex overflow-hidden">
+    <div className="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans h-[100dvh] w-full flex flex-col md:flex-row overflow-hidden">
       {/* Sidebar Nav */}
       <aside className="w-56 bg-zinc-900 dark:bg-zinc-950 text-zinc-400 dark:text-zinc-500 hidden md:flex flex-col border-r border-zinc-800 dark:border-zinc-800 shrink-0 print:hidden">
         <div className="p-6 border-b border-zinc-800 dark:border-zinc-800">
@@ -706,19 +706,19 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Top Bar */}
-        <header className="h-14 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-6 shrink-0 print:hidden">
-          <div className="flex items-center gap-4">
-            <h1 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              Papan Pemuka: <span className="font-mono text-blue-600">
-                {activeTab === 'dashboard' ? 'Sistem Pengurusan Kes & Bayaran' : activeTab === 'records' ? 'Senarai Rekod Pelanggan' : activeTab === 'reports' ? 'Analisis & Laporan Kewangan' : 'Jana Resit Bebas'}
+        <header className="h-auto md:h-14 py-3 md:py-0 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 flex flex-col md:flex-row items-start md:items-center justify-between px-4 sm:px-6 shrink-0 gap-3 md:gap-4 print:hidden">
+          <div className="flex items-center gap-2 sm:gap-4 w-full md:w-auto overflow-hidden">
+            <h1 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 truncate">
+              Papan Pemuka: <span className="font-mono text-blue-600 hidden sm:inline">
+                {activeTab === 'dashboard' ? 'Sistem Pengurusan Kes & Bayaran' : activeTab === 'records' ? 'Senarai Rekod' : activeTab === 'reports' ? 'Analisis & Laporan' : 'Jana Resit'}
               </span>
             </h1>
-            <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded uppercase border border-blue-100">Aktif</span>
+            <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded uppercase border border-blue-100 shrink-0">Aktif</span>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 overflow-x-auto w-full md:w-auto pb-1 md:pb-0 hide-scrollbar no-scrollbar items-center">
             <button 
               onClick={() => setDarkMode(!darkMode)}
-              className="p-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+              className="p-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shrink-0"
               title={darkMode ? "Tukar ke Mod Siang" : "Tukar ke Mod Gelap"}
             >
               {darkMode ? <Sun size={14} /> : <Moon size={14} />}
@@ -726,50 +726,50 @@ export default function App() {
             {!user ? (
               <button 
                 onClick={handleLogin}
-                className="px-3 py-1.5 text-xs bg-zinc-800 text-white rounded hover:bg-zinc-700 font-medium cursor-pointer flex items-center gap-2"
+                className="px-3 py-1.5 text-xs bg-zinc-800 text-white rounded hover:bg-zinc-700 font-medium cursor-pointer flex items-center gap-2 shrink-0"
               >
                 <LogIn size={14} />
-                Log Masuk (Sync)
+                <span className="hidden sm:inline">Log Masuk (Sync)</span>
               </button>
             ) : (
               <button 
                 onClick={handleLogout}
-                className="px-3 py-1.5 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium cursor-pointer flex items-center gap-2 border border-red-200"
+                className="px-3 py-1.5 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium cursor-pointer flex items-center gap-2 border border-red-200 shrink-0"
               >
                 <LogOut size={14} />
-                Log Keluar
+                <span className="hidden sm:inline">Log Keluar</span>
               </button>
             )}
             {isInstallable && (
               <button 
                 onClick={handleInstallApp}
-                className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 font-medium cursor-pointer flex items-center gap-2"
+                className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 font-medium cursor-pointer flex items-center gap-2 shrink-0"
               >
                 <Download size={14} />
-                Muat Turun App
+                <span className="hidden sm:inline">Muat Turun App</span>
               </button>
             )}
             {user && (
               <button 
                 onClick={handleBackupToCloud}
                 disabled={isBackingUp}
-                className="px-3 py-1.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 border border-blue-200 font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                className="px-3 py-1.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 border border-blue-200 font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 shrink-0"
               >
                 {isBackingUp ? <Loader2 size={14} className="animate-spin" /> : <CloudUpload size={14} />}
-                Cloud Backup
+                <span className="hidden sm:inline">Cloud Backup</span>
               </button>
             )}
             <button 
               onClick={handleExportData}
-              className="px-3 py-1.5 text-xs border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 font-medium cursor-pointer"
+              className="px-3 py-1.5 text-xs border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0"
             >
-              Eksport Data
+              Eksport <span className="hidden sm:inline">Data</span>
             </button>
             <button 
               onClick={handleDownloadTemplate}
-              className="hidden lg:block px-3 py-1.5 text-xs border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 font-medium cursor-pointer"
+              className="hidden lg:block px-3 py-1.5 text-xs border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0"
             >
-              Muat Turun Templat
+              Templat
             </button>
             <input 
               type="file" 
@@ -780,14 +780,14 @@ export default function App() {
             />
             <button 
               onClick={() => fileInputRef.current?.click()}
-              className="px-3 py-1.5 flex items-center gap-1 text-xs border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 font-medium cursor-pointer"
+              className="px-3 py-1.5 flex items-center gap-1 text-xs border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0"
             >
               <Upload size={14} className="text-zinc-500 dark:text-zinc-400" />
-              Import CSV
+              Import <span className="hidden sm:inline">CSV</span>
             </button>
             <button 
               onClick={() => setIsNewRecordModalOpen(true)}
-              className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 font-medium cursor-pointer"
+              className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 font-medium cursor-pointer shrink-0"
             >
               Rekod Baru
             </button>
@@ -796,7 +796,7 @@ export default function App() {
 
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {activeTab !== 'records' && activeTab !== 'standalone' && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 p-6 shrink-0 print:hidden">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 md:p-6 shrink-0 print:hidden">
               <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-4 rounded-sm shadow-sm flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-1">
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">Jumlah Kes</div>
@@ -836,11 +836,11 @@ export default function App() {
           )}
 
           {/* Dashboard Content: Chart and Table */}
-          <div className={`flex-1 px-6 pb-6 min-h-0 flex ${activeTab === 'dashboard' ? 'flex-col lg:flex-row' : 'flex-col'} gap-4 print:hidden`}>
+          <div className={`flex-1 px-2 sm:px-4 md:px-6 pb-2 sm:pb-4 md:pb-6 min-h-0 flex ${activeTab === 'dashboard' ? 'flex-col lg:flex-row' : 'flex-col'} gap-4 print:hidden`}>
             {/* Main Data Table Area */}
             {activeTab !== 'reports' && activeTab !== 'standalone' && (
             <div className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-sm shadow-sm flex flex-col h-full overflow-hidden">
-              <div className="p-3 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+              <div className="p-2 sm:p-3 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                 <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider flex items-center gap-2">
                   <FileText size={14} className="text-zinc-400 dark:text-zinc-500" />
                   Senarai Rekod Kes
@@ -1218,9 +1218,9 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md overflow-hidden"
+              className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden"
             >
-              <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
+              <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 shrink-0">
                 <h3 className="font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
                   <Edit size={18} className="text-amber-600" />
                   Edit Rekod Pelanggan
@@ -1229,7 +1229,7 @@ export default function App() {
                   <X size={18} />
                 </button>
               </div>
-              <div className="p-6">
+              <div className="p-6 overflow-y-auto">
                 <form onSubmit={handleEditRecordSubmit} className="space-y-4">
                   <div>
                     <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
@@ -1245,7 +1245,7 @@ export default function App() {
                     />
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                         Kategori Kes
@@ -1272,7 +1272,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                         Total Fee (RM)
@@ -1414,9 +1414,9 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md overflow-hidden"
+              className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden"
             >
-              <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
+              <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 shrink-0">
                 <h3 className="font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
                   <Users size={18} className="text-blue-600" />
                   Rekod Pelanggan Baru
@@ -1425,7 +1425,7 @@ export default function App() {
                   <X size={18} />
                 </button>
               </div>
-              <div className="p-6">
+              <div className="p-6 overflow-y-auto">
                 <form onSubmit={handleAddNewRecord} className="space-y-4">
                   <div>
                     <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
@@ -1442,7 +1442,7 @@ export default function App() {
                     />
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                         Kategori Kes
@@ -1470,7 +1470,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                         Total Fee (RM)
@@ -1531,9 +1531,9 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md overflow-hidden"
+              className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden"
             >
-              <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
+              <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 shrink-0">
                 <h3 className="font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
                   <CreditCard size={18} className="text-blue-600" />
                   Kemaskini Bayaran
@@ -1542,7 +1542,7 @@ export default function App() {
                   <X size={18} />
                 </button>
               </div>
-              <div className="p-6">
+              <div className="p-6 overflow-y-auto">
                 <div className="mb-6 p-4 rounded-md bg-blue-50/50 border border-blue-100 space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-zinc-500 dark:text-zinc-400">Pelanggan:</span>
@@ -1658,9 +1658,9 @@ export default function App() {
                 </button>
               </div>
               
-              <div className="p-8 overflow-y-auto flex-1 bg-white dark:bg-zinc-950 print:p-0 print:overflow-visible">
+              <div className="p-8 overflow-y-auto overflow-x-auto flex-1 bg-white dark:bg-zinc-950 print:p-0 print:overflow-visible">
                 {/* Printable Area Starts */}
-                <div ref={printRef} className="max-w-2xl mx-auto font-sans text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950 print:p-8">
+                <div ref={printRef} className="max-w-2xl min-w-[500px] sm:min-w-0 mx-auto font-sans text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950 print:p-8">
                   {/* Header */}
                   <div className="flex justify-between items-start pb-8 border-b-2 border-zinc-900 dark:border-zinc-100 mb-8">
                     <div>
@@ -1693,7 +1693,7 @@ export default function App() {
                   {/* Cost Breakdown */}
                   <div className="mb-10">
                     <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">Perincian Kos & Tuntutan</h3>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 shadow-sm">
                         <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-3 border-b border-zinc-100 dark:border-zinc-800 pb-2">Yuran Profesional</p>
                         <div className="flex justify-between items-center space-y-2">
@@ -1714,8 +1714,8 @@ export default function App() {
                   {/* Summary Table */}
                   <div className="mb-10">
                     <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">Ringkasan Yuran</h3>
-                    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
+                    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-x-auto">
+                      <table className="w-full text-sm min-w-[300px]">
                         <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                           <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
                             <td className="py-4 px-5 text-zinc-600 dark:text-zinc-400 font-medium whitespace-nowrap w-2/3">Jumlah Yuran Keseluruhan</td>
@@ -1746,8 +1746,8 @@ export default function App() {
                   <div>
                     <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">Rekod Pembayaran</h3>
                     {statementRecord.paymentHistory && statementRecord.paymentHistory.length > 0 ? (
-                      <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-                        <table className="w-full text-sm text-left">
+                      <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-x-auto">
+                        <table className="w-full text-sm text-left min-w-[500px]">
                           <thead className="bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
                             <tr>
                               <th className="py-3 px-5 font-semibold text-zinc-600 dark:text-zinc-400">Tarikh</th>
@@ -1844,9 +1844,9 @@ export default function App() {
                 </button>
               </div>
               
-              <div className="p-8 overflow-y-auto flex-1 bg-white dark:bg-zinc-950 print:p-0 print:overflow-visible">
+              <div className="p-8 overflow-y-auto overflow-x-auto flex-1 bg-white dark:bg-zinc-950 print:p-0 print:overflow-visible">
                 {/* Printable Area Starts */}
-                <div ref={receiptPrintRef} className="max-w-2xl mx-auto font-sans text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950 print:p-8">
+                <div ref={receiptPrintRef} className="max-w-2xl min-w-[500px] sm:min-w-0 mx-auto font-sans text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950 print:p-8">
                   {/* Header */}
                   <div className="flex justify-between items-start pb-8 border-b-2 border-zinc-900 dark:border-zinc-100 mb-8">
                     <div>
@@ -2014,6 +2014,34 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Mobile Bottom Nav */}
+      <nav className="md:hidden bg-zinc-900 dark:bg-zinc-950 text-zinc-400 border-t border-zinc-800 flex justify-around p-2 shrink-0 z-40 print:hidden">
+        <button 
+          onClick={() => setActiveTab('dashboard')} 
+          className={`flex flex-col items-center p-2 text-[10px] w-1/4 ${activeTab === 'dashboard' ? 'text-white' : 'hover:text-white'}`}
+        >
+          <Home size={20} className="mb-1" /> Papan Pemuka
+        </button>
+        <button 
+          onClick={() => setActiveTab('records')} 
+          className={`flex flex-col items-center p-2 text-[10px] w-1/4 ${activeTab === 'records' ? 'text-white' : 'hover:text-white'}`}
+        >
+          <Users size={20} className="mb-1" /> Rekod Kes
+        </button>
+        <button 
+          onClick={() => setActiveTab('reports')} 
+          className={`flex flex-col items-center p-2 text-[10px] w-1/4 ${activeTab === 'reports' ? 'text-white' : 'hover:text-white'}`}
+        >
+          <BarChart2 size={20} className="mb-1" /> Laporan
+        </button>
+        <button 
+          onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }} 
+          className={`flex flex-col items-center p-2 text-[10px] w-1/4 ${activeTab === 'standalone' ? 'text-white' : 'hover:text-white'}`}
+        >
+          <FileText size={20} className="mb-1" /> Resit
+        </button>
+      </nav>
     </div>
   );
 }
