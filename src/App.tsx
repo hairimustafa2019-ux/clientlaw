@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import StandaloneReceipts from './components/StandaloneReceipts';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun } from 'lucide-react';
@@ -94,7 +95,7 @@ const formatDateISO = (dateStr: string) => {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'records' | 'reports'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'records' | 'reports' | 'standalone'>('dashboard');
   const [records, setRecords] = useState<CaseRecord[]>(() => {
     const saved = localStorage.getItem('localOfflineRecords');
     if (saved) {
@@ -129,6 +130,8 @@ export default function App() {
   const [deletingRecord, setDeletingRecord] = useState<CaseRecord | null>(null);
   const [isDeletingSelected, setIsDeletingSelected] = useState<boolean>(false);
 
+  const [standaloneInitialRecord, setStandaloneInitialRecord] = useState<CaseRecord | null>(null);
+  
   const [paymentSortColumn, setPaymentSortColumn] = useState<'date' | 'amount' | null>(null);
   const [paymentSortDirection, setPaymentSortDirection] = useState<'asc' | 'desc'>('desc');
 
@@ -654,7 +657,7 @@ export default function App() {
   return (
     <div className="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans h-screen w-full flex overflow-hidden">
       {/* Sidebar Nav */}
-      <aside className="w-56 bg-zinc-900 dark:bg-zinc-950 text-zinc-400 dark:text-zinc-500 hidden md:flex flex-col border-r border-zinc-800 dark:border-zinc-800 shrink-0">
+      <aside className="w-56 bg-zinc-900 dark:bg-zinc-950 text-zinc-400 dark:text-zinc-500 hidden md:flex flex-col border-r border-zinc-800 dark:border-zinc-800 shrink-0 print:hidden">
         <div className="p-6 border-b border-zinc-800 dark:border-zinc-800">
           <img src="/logo.png" alt="HM Lawyer Logo" className="h-16 w-auto object-contain mx-auto" onError={(e) => {
             (e.target as HTMLImageElement).src = ''; 
@@ -684,6 +687,13 @@ export default function App() {
             {activeTab === 'reports' && <div className="w-2 h-2 bg-blue-500 rounded-full"></div>}
             Laporan Kewangan
           </div>
+          <div 
+            onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }}
+            className={`px-3 py-2 rounded text-sm flex items-center gap-3 cursor-pointer transition-colors ${activeTab === 'standalone' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}
+          >
+            {activeTab === 'standalone' && <div className="w-2 h-2 bg-blue-500 rounded-full"></div>}
+            Resit Bebas
+          </div>
         </nav>
         <div className="p-4 border-t border-zinc-800 text-[11px] space-y-2">
           <div className="flex justify-between"><span>Status Server</span><span className="text-emerald-500">Aktif</span></div>
@@ -696,11 +706,11 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Top Bar */}
-        <header className="h-14 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-6 shrink-0">
+        <header className="h-14 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-6 shrink-0 print:hidden">
           <div className="flex items-center gap-4">
             <h1 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
               Papan Pemuka: <span className="font-mono text-blue-600">
-                {activeTab === 'dashboard' ? 'Sistem Pengurusan Kes & Bayaran' : activeTab === 'records' ? 'Senarai Rekod Pelanggan' : 'Analisis & Laporan Kewangan'}
+                {activeTab === 'dashboard' ? 'Sistem Pengurusan Kes & Bayaran' : activeTab === 'records' ? 'Senarai Rekod Pelanggan' : activeTab === 'reports' ? 'Analisis & Laporan Kewangan' : 'Jana Resit Bebas'}
               </span>
             </h1>
             <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded uppercase border border-blue-100">Aktif</span>
@@ -785,8 +795,8 @@ export default function App() {
         </header>
 
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          {activeTab !== 'records' && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 p-6 shrink-0">
+          {activeTab !== 'records' && activeTab !== 'standalone' && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 p-6 shrink-0 print:hidden">
               <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-4 rounded-sm shadow-sm flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-1">
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">Jumlah Kes</div>
@@ -826,9 +836,9 @@ export default function App() {
           )}
 
           {/* Dashboard Content: Chart and Table */}
-          <div className={`flex-1 px-6 pb-6 min-h-0 flex ${activeTab === 'dashboard' ? 'flex-col lg:flex-row' : 'flex-col'} gap-4`}>
+          <div className={`flex-1 px-6 pb-6 min-h-0 flex ${activeTab === 'dashboard' ? 'flex-col lg:flex-row' : 'flex-col'} gap-4 print:hidden`}>
             {/* Main Data Table Area */}
-            {activeTab !== 'reports' && (
+            {activeTab !== 'reports' && activeTab !== 'standalone' && (
             <div className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-sm shadow-sm flex flex-col h-full overflow-hidden">
               <div className="p-3 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                 <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider flex items-center gap-2">
@@ -1005,30 +1015,40 @@ export default function App() {
                                         <h4 className="font-bold text-zinc-700 dark:text-zinc-300 mb-2 border-b border-zinc-100 dark:border-zinc-800 pb-1 flex items-center gap-2">
                                           Tindakan
                                         </h4>
-                                        <div className="grid grid-cols-2 gap-2">
+                                        <div className="flex flex-wrap gap-2">
                                           <button 
-                                            className="w-full px-2 py-1.5 text-[11px] bg-blue-600 text-white rounded hover:bg-blue-700 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                                            className="flex-1 min-w-[120px] px-2 py-1.5 text-[11px] bg-blue-600 text-white rounded hover:bg-blue-700 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                                             onClick={() => setPaymentRecord(record)}
                                           >
                                             <CreditCard size={12} />
                                             Kemaskini Bayaran
                                           </button>
                                           <button 
-                                            className="w-full px-2 py-1.5 text-[11px] border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                                            className="flex-1 min-w-[120px] px-2 py-1.5 text-[11px] border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                                             onClick={() => setStatementRecord(record)}
                                           >
                                             <Printer size={12} />
                                             Jana Penyata
                                           </button>
                                           <button 
-                                            className="w-full px-2 py-1.5 text-[11px] border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-amber-600 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                                            className="flex-1 min-w-[120px] px-2 py-1.5 text-[11px] border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-blue-600 dark:text-blue-400 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                                            onClick={() => {
+                                              setStandaloneInitialRecord(record);
+                                              setActiveTab('standalone');
+                                            }}
+                                          >
+                                            <FileText size={12} />
+                                            Resit Bebas
+                                          </button>
+                                          <button 
+                                            className="flex-1 min-w-[120px] px-2 py-1.5 text-[11px] border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-amber-600 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                                             onClick={() => setEditingRecord({...record})}
                                           >
                                             <Edit size={12} />
                                             Edit Rekod
                                           </button>
                                           <button 
-                                            className="w-full px-2 py-1.5 text-[11px] border border-red-200 rounded bg-red-50 hover:bg-red-100 text-red-600 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                                            className="flex-1 min-w-[120px] px-2 py-1.5 text-[11px] border border-red-200 rounded bg-red-50 hover:bg-red-100 text-red-600 font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                                             onClick={() => setDeletingRecord(record)}
                                           >
                                             <Trash2 size={12} />
@@ -1185,6 +1205,8 @@ export default function App() {
             </div>
             )}
           </div>
+          
+          {activeTab === 'standalone' && <StandaloneReceipts initialData={standaloneInitialRecord} />}
         </div>
       </main>
 
@@ -1829,7 +1851,7 @@ export default function App() {
                   <div className="flex justify-between items-start pb-8 border-b-2 border-zinc-900 dark:border-zinc-100 mb-8">
                     <div>
                       <div className="mb-2">
-                        <img src="/logo.png" alt="HM Logo" className="h-[4.5rem] w-auto object-contain" onError={e => (e.currentTarget.style.display = 'none')} />
+                        <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-[75px] w-auto mr-4" alt="Logo" />
                       </div>
                       <h1 className="text-lg font-bold tracking-tight mb-2">TETUAN HAIRI MUSTAFA & ASSOCIATES</h1>
                       <div className="text-xs text-zinc-600 dark:text-zinc-400 space-y-0.5 leading-snug font-medium">
@@ -1878,19 +1900,36 @@ export default function App() {
                      <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 uppercase flex items-center gap-2">
                          Butiran Kes: <span className="underline underline-offset-4">{receiptData.record.kes}</span>
                      </div>
-                     <div className="text-right space-y-4">
-                         <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
-                             <span>JUMLAH BAYARAN:</span>
-                             <span className="w-32">RM {receiptData.payment.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-                         </div>
-                     </div>
+                     {(()=>{
+                         const sortedPayments = [...(receiptData.record.paymentHistory || [])].sort((a, b) => parseDateString(a.date) - parseDateString(b.date));
+                         const paymentIndex = sortedPayments.findIndex(p => p.id === receiptData.payment.id);
+                         const paymentsAfter = sortedPayments.slice(paymentIndex + 1);
+                         const sumAfter = paymentsAfter.reduce((sum, p) => sum + p.amount, 0);
+                         const bakiTerkini = receiptData.record.bakiFeeTerkini + sumAfter;
+                         const bakiTerdahulu = bakiTerkini + receiptData.payment.amount;
+                         
+                         return (
+                           <div className="text-right space-y-4">
+                               <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                                   <span>JUMLAH BAYARAN:</span>
+                                   <span className="w-32">RM {receiptData.payment.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                               </div>
+                               <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                                   <span>BAKI TERDAHULU:</span>
+                                   <span className="w-32">RM {bakiTerdahulu.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                               </div>
+                               <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12 pt-3 border-t border-zinc-900 dark:border-zinc-100">
+                                   <span>BAKI TERKINI:</span>
+                                   <span className="w-32">RM {bakiTerkini.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                               </div>
+                           </div>
+                         );
+                     })()}
                   </div>
 
                   <div className="flex justify-end pt-12">
                     <div className="text-center">
-                      <div className="w-24 h-24 mx-auto border-4 border-blue-200/50 rounded-full flex items-center justify-center mb-4 text-blue-200 rotate-12 bg-blue-50/30">
-                        <span className="font-black text-xl tracking-tighter mix-blend-multiply opacity-50">STAMP</span>
-                      </div>
+                      <img src="https://arleta.site/interactivelink/2510/cop-bulat.png" alt="Cop Rasmi" className="block mx-auto max-h-[85px] w-auto -mb-1" />
                       <p className="font-bold text-sm text-zinc-900 dark:text-zinc-100 uppercase">Hairi Mustafa & Associates</p>
                       <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Peguam Syarie & Pesuruhjaya Sumpah</p>
                     </div>

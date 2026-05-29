@@ -1,2 +1,9 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
+
+@media print {
+  @page {
+    size: A5;
+    margin: 1cm;
+  }
+}
