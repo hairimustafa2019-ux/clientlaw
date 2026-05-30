@@ -492,10 +492,10 @@ export default function App() {
 
   const handleUpdatePayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!paymentRecord || !paymentAmount) return;
+    if (!paymentRecord) return;
 
     const amount = parseFloat(paymentAmount);
-    if (isNaN(amount) || amount <= 0) {
+    if (!paymentAmount || isNaN(amount) || amount <= 0) {
       setPaymentError('Sila masukkan jumlah yang sah dan lebih besar daripada RM 0.00');
       return;
     }
@@ -835,10 +835,52 @@ export default function App() {
             </div>
           )}
 
-          {/* Dashboard Content: Chart and Table */}
-          <div className={`flex-1 px-2 sm:px-4 md:px-6 pb-2 sm:pb-4 md:pb-6 min-h-0 flex ${activeTab === 'dashboard' ? 'flex-col lg:flex-row' : 'flex-col'} gap-4 print:hidden`}>
+          {/* Dashboard Content / Record Table */}
+          <div className={`flex-1 px-2 sm:px-4 md:px-6 pb-2 sm:pb-4 md:pb-6 min-h-0 flex flex-col gap-4 print:hidden`}>
+            
+            {/* Dashboard and Reports View: Charts */}
+            {(activeTab === 'dashboard' || activeTab === 'reports') && (
+              <div className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-sm shadow-sm flex flex-col p-4 overflow-hidden">
+                <h3 className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-4 flex items-center gap-2 shrink-0">
+                  <PieChart size={14} className="text-blue-500" />
+                  Baki Terkini Mengikut Kategori Kes
+                </h3>
+                <div className="flex-1 min-h-[300px] w-full -mt-2 md:-mt-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#52525b" opacity={0.3} />
+                      <XAxis 
+                        dataKey="name" 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fontSize: 12, fill: '#71717a' }} 
+                        dy={10}
+                      />
+                      <YAxis 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fontSize: 12, fill: '#71717a' }} 
+                        tickFormatter={(value) => `RM${value}`}
+                        dx={-10}
+                      />
+                      <Tooltip 
+                        cursor={{ fill: '#f4f4f5', opacity: 0.05 }}
+                        contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '6px', color: '#fff', fontSize: '12px' }}
+                        formatter={(value: number) => [`RM ${value.toFixed(2)}`, 'Baki Tertunggak']}
+                      />
+                      <Bar dataKey="baki" fill="#2563eb" radius={[4, 4, 0, 0]} maxBarSize={60}>
+                        {chartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#2563eb' : '#3b82f6'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
             {/* Main Data Table Area */}
-            {activeTab !== 'reports' && activeTab !== 'standalone' && (
+            {activeTab === 'records' && (
             <div className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-sm shadow-sm flex flex-col h-full overflow-hidden">
               <div className="p-2 sm:p-3 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                 <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider flex items-center gap-2">
@@ -891,7 +933,7 @@ export default function App() {
                 <table className="w-full text-left border-collapse whitespace-nowrap">
                   <thead className="sticky top-0 bg-zinc-50 dark:bg-zinc-900 z-10 shadow-sm">
                     <tr className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase border-b border-zinc-200 dark:border-zinc-800">
-                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-center w-12 flex justify-center items-center h-full">
+                      <th className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 text-center w-12 flex justify-center items-center h-full">
                         <input 
                           type="checkbox" 
                           className="cursor-pointer rounded border-zinc-300 dark:border-zinc-700 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500"
@@ -908,15 +950,15 @@ export default function App() {
                           }}
                         />
                       </th>
-                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800">Nama Pelanggan</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800">Kategori Kes</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Total Fee</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Bayaran Terakhir</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-center">Tarikh</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Baki Sebelum</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Baki Terkini</th>
-                      <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Baki Mileage</th>
-                      <th className="px-4 py-2 text-center">Tindakan</th>
+                      <th className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800">Nama Pelanggan</th>
+                      <th className="hidden sm:table-cell px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800">Kategori Kes</th>
+                      <th className="hidden lg:table-cell px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Total Fee</th>
+                      <th className="hidden xl:table-cell px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Bayaran Terakhir</th>
+                      <th className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 text-center">Tarikh</th>
+                      <th className="hidden xl:table-cell px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Baki Sebelum</th>
+                      <th className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Baki Terkini</th>
+                      <th className="hidden lg:table-cell px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Baki Mileage</th>
+                      <th className="px-2 sm:px-4 py-1.5 sm:py-2 text-center">Tindakan</th>
                     </tr>
                   </thead>
                   <tbody className="text-xs">
@@ -933,11 +975,11 @@ export default function App() {
                               onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
                               className={`border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800/80 cursor-pointer transition-colors ${record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-zinc-50 dark:bg-zinc-900' : ''} ${record.bakiFeeTerkini > 2000 ? 'bg-amber-50/30 dark:bg-amber-900/30' : ''} ${expandedRowId === record.id ? 'bg-zinc-100 dark:bg-zinc-900/50' : ''}`}
                             >
-                            <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center justify-center gap-2 font-mono text-zinc-400 dark:text-zinc-500">
+                            <td className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center justify-center gap-1 sm:gap-2 font-mono text-zinc-400 dark:text-zinc-500">
                                 <input 
                                   type="checkbox" 
-                                  className="cursor-pointer rounded border-zinc-300 dark:border-zinc-700 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500 mt-1 pl-2"
+                                  className="cursor-pointer rounded border-zinc-300 dark:border-zinc-700 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500 mt-1 pl-1 sm:pl-2"
                                   checked={selectedRecords.includes(record.id)}
                                   onChange={(e) => {
                                     if (e.target.checked) {
@@ -950,28 +992,28 @@ export default function App() {
                                 <span className="cursor-pointer" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
                                   {expandedRowId === record.id ? <ChevronDown size={14} className="text-zinc-600 dark:text-zinc-400" /> : <ChevronRight size={14} className="text-zinc-400 dark:text-zinc-500" />}
                                 </span>
-                                <span>{index + 1}</span>
+                                <span className="hidden sm:inline">{index + 1}</span>
                               </div>
                             </td>
-                            <td className="px-4 py-2 font-medium border-r border-zinc-100 dark:border-zinc-800">{record.nama}</td>
-                            <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800">
+                            <td className="px-2 sm:px-4 py-1.5 sm:py-2 font-medium border-r border-zinc-100 dark:border-zinc-800 truncate max-w-[120px] sm:max-w-none">{record.nama}</td>
+                            <td className="hidden sm:table-cell px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800">
                               <span className="text-blue-600 bg-blue-50 px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-blue-100/50">
                                 {record.kes}
                               </span>
                             </td>
-                            <td className="px-4 py-2 font-mono border-r border-zinc-100 dark:border-zinc-800 text-right">{formatRM(record.totalFee)}</td>
-                            <td className="px-4 py-2 font-mono border-r border-zinc-100 dark:border-zinc-800 text-emerald-600 text-right bg-emerald-50/10 dark:bg-emerald-900/20">
+                            <td className="hidden lg:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono border-r border-zinc-100 dark:border-zinc-800 text-right">{formatRM(record.totalFee)}</td>
+                            <td className="hidden xl:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono border-r border-zinc-100 dark:border-zinc-800 text-emerald-600 text-right bg-emerald-50/10 dark:bg-emerald-900/20">
                               {record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}
                             </td>
-                            <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800 text-center text-zinc-500 dark:text-zinc-400">{formatDateDMY(record.tarikh)}</td>
-                            <td className="px-4 py-2 font-mono border-r border-zinc-100 dark:border-zinc-800 text-right text-zinc-400 dark:text-zinc-500">{formatRM(record.bakiSebelum)}</td>
-                            <td className={`px-4 py-2 font-mono font-bold border-r border-zinc-100 dark:border-zinc-800 text-right ${record.bakiFeeTerkini > 2000 ? 'text-red-500 underline decoration-dotted' : 'text-zinc-700 dark:text-zinc-300'}`}>
+                            <td className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800 text-center text-zinc-500 dark:text-zinc-400">{formatDateDMY(record.tarikh)}</td>
+                            <td className="hidden xl:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono border-r border-zinc-100 dark:border-zinc-800 text-right text-zinc-400 dark:text-zinc-500">{formatRM(record.bakiSebelum)}</td>
+                            <td className={`px-2 sm:px-4 py-1.5 sm:py-2 font-mono font-bold border-r border-zinc-100 dark:border-zinc-800 text-right ${record.bakiFeeTerkini > 2000 ? 'text-red-500 underline decoration-dotted' : 'text-zinc-700 dark:text-zinc-300'}`}>
                               {formatRM(record.bakiFeeTerkini)}
                             </td>
-                            <td className="px-4 py-2 font-mono border-r border-zinc-100 dark:border-zinc-800 text-right text-amber-600">
+                            <td className="hidden lg:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono border-r border-zinc-100 dark:border-zinc-800 text-right text-amber-600">
                               {formatRM(record.bakiMileage)}
                             </td>
-                            <td className="px-4 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                            <td className="px-2 sm:px-4 py-1.5 sm:py-2 text-center" onClick={(e) => e.stopPropagation()}>
                               <button 
                                 onClick={() => setDeletingRecord(record)}
                                 className="text-zinc-400 dark:text-zinc-500 hover:text-red-600 transition-colors p-1"
@@ -983,7 +1025,7 @@ export default function App() {
                           </motion.tr>
                           {expandedRowId === record.id && (
                             <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
-                              <td colSpan={9} className="p-0">
+                              <td colSpan={10} className="p-0">
                                 <motion.div
                                   initial={{ height: 0, opacity: 0 }}
                                   animate={{ height: "auto", opacity: 1 }}
@@ -1069,9 +1111,9 @@ export default function App() {
                                           <table className="w-full text-left text-sm whitespace-nowrap">
                                             <thead className="bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 font-medium text-xs border-b border-zinc-200 dark:border-zinc-800">
                                               <tr>
-                                                <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800">ID Bayaran</th>
+                                                <th className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800">ID Bayaran</th>
                                                 <th 
-                                                  className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
+                                                  className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
                                                   onClick={() => {
                                                     if (paymentSortColumn === 'date') {
                                                       setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1088,9 +1130,9 @@ export default function App() {
                                                     </span>
                                                   </div>
                                                 </th>
-                                                <th className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800">Kaedah</th>
+                                                <th className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800">Kaedah</th>
                                                 <th 
-                                                  className="px-4 py-2 border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
+                                                  className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
                                                   onClick={() => {
                                                     if (paymentSortColumn === 'amount') {
                                                       setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1107,7 +1149,7 @@ export default function App() {
                                                     Jumlah
                                                   </div>
                                                 </th>
-                                                <th className="px-4 py-2 text-center w-12">Tindakan</th>
+                                                <th className="px-2 sm:px-4 py-1.5 sm:py-2 text-center w-12">Tindakan</th>
                                               </tr>
                                             </thead>
                                             <tbody>
@@ -1119,13 +1161,13 @@ export default function App() {
                                                 return paymentSortDirection === 'asc' ? comparison : -comparison;
                                               }).map((payment) => (
                                                 <tr key={payment.id} className="border-b border-zinc-100 dark:border-zinc-800 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-800">
-                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 font-mono text-xs">{payment.id}</td>
-                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400">{formatDateDMY(payment.date)}</td>
-                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400">{payment.method}</td>
-                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800 text-right text-emerald-600 font-medium font-mono">
+                                                  <td className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 font-mono text-xs">{payment.id}</td>
+                                                  <td className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400">{formatDateDMY(payment.date)}</td>
+                                                  <td className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400">{payment.method}</td>
+                                                  <td className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800 text-right text-emerald-600 font-medium font-mono">
                                                     +{formatRM(payment.amount)}
                                                   </td>
-                                                  <td className="px-4 py-2 text-center flex justify-center gap-2">
+                                                  <td className="px-2 sm:px-4 py-1.5 sm:py-2 text-center flex justify-center gap-2">
                                                     <button 
                                                       title="Papar/Cetak Resit"
                                                       onClick={() => setReceiptData({record, payment})}
@@ -1185,7 +1227,7 @@ export default function App() {
                         animate={{ opacity: 1 }} 
                         exit={{ opacity: 0 }}
                       >
-                        <td colSpan={9} className="px-4 py-8 text-center text-zinc-400 dark:text-zinc-500 font-medium">
+                        <td colSpan={10} className="px-4 py-8 text-center text-zinc-400 dark:text-zinc-500 font-medium">
                           Tiada rekod dijumpai.
                         </td>
                       </motion.tr>
