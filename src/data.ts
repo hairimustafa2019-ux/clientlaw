@@ -2,6 +2,7 @@ export interface PaymentEntry {
   id: string;
   date: string;
   amount: number;
+  mileageAmount?: number;
   method: string;
 }
 

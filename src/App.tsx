@@ -122,6 +122,7 @@ export default function App() {
   const [statementRecord, setStatementRecord] = useState<CaseRecord | null>(null);
   const [receiptData, setReceiptData] = useState<{record: CaseRecord, payment: import('./data').PaymentEntry} | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<string>('');
+  const [paymentMileageAmount, setPaymentMileageAmount] = useState<string>('');
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [paymentMethod, setPaymentMethod] = useState<string>('Transfer');
   const [paymentError, setPaymentError] = useState<string>('');
@@ -339,6 +340,47 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  const handleExportLaporanCSV = () => {
+    const headers = [
+      'ID Rekod',
+      'Nama Pelanggan',
+      'Kategori Kes',
+      'Jumlah Fee (RM)',
+      'Baki Fee Sebelum (RM)',
+      'Jumlah Bayaran Fee Terkumpul (RM)',
+      'Baki Fee Terkini (RM)',
+      'Jumlah Bayaran Mileage Terkumpul (RM)',
+      'Baki Mileage Terkini (RM)'
+    ];
+
+    const rows = records.map(record => {
+      const totalFeePayments = record.paymentHistory?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+      const totalMileagePayments = record.paymentHistory?.reduce((sum, p) => sum + (p.mileageAmount || 0), 0) || 0;
+
+      return [
+        `"${record.id}"`,
+        `"${record.nama}"`,
+        `"${record.kes}"`,
+        record.totalFee || 0,
+        record.bakiSebelum || 0,
+        totalFeePayments,
+        record.bakiFeeTerkini || 0,
+        totalMileagePayments,
+        record.bakiMileage || 0
+      ].join(',');
+    });
+
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `laporan_kewangan_${formatDateISO(new Date().toISOString())}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleImportCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -494,14 +536,21 @@ export default function App() {
     e.preventDefault();
     if (!paymentRecord) return;
 
-    const amount = parseFloat(paymentAmount);
-    if (!paymentAmount || isNaN(amount) || amount <= 0) {
-      setPaymentError('Sila masukkan jumlah yang sah dan lebih besar daripada RM 0.00');
+    const feeAmt = parseFloat(paymentAmount || '0');
+    const mileageAmt = parseFloat(paymentMileageAmount || '0');
+
+    if ((isNaN(feeAmt) || feeAmt <= 0) && (isNaN(mileageAmt) || mileageAmt <= 0)) {
+      setPaymentError('Sila masukkan sekurang-kurangnya satu jumlah bayaran yang sah (Fee atau Mileage).');
       return;
     }
 
-    if (amount > paymentRecord.bakiFeeTerkini) {
-      setPaymentError('Jumlah bayaran tidak boleh melebihi baki semasa');
+    if (feeAmt > paymentRecord.bakiFeeTerkini) {
+      setPaymentError('Jumlah bayaran fee tidak boleh melebihi baki fee semasa');
+      return;
+    }
+
+    if (paymentRecord.bakiMileage !== undefined && mileageAmt > paymentRecord.bakiMileage) {
+      setPaymentError('Jumlah bayaran mileage tidak boleh melebihi baki mileage semasa');
       return;
     }
 
@@ -512,15 +561,17 @@ export default function App() {
     const newPaymentEntry = {
         id: `P-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         date: dateStr,
-        amount: amount,
+        amount: feeAmt,
+        mileageAmount: mileageAmt,
         method: paymentMethod
     };
 
     const updatedRecord = {
         ...paymentRecord,
-        bayaranTerakhir: amount,
+        bayaranTerakhir: feeAmt || mileageAmt, 
         bakiSebelum: paymentRecord.bakiFeeTerkini,
-        bakiFeeTerkini: Math.max(0, paymentRecord.bakiFeeTerkini - amount),
+        bakiFeeTerkini: Math.max(0, paymentRecord.bakiFeeTerkini - feeAmt),
+        bakiMileage: Math.max(0, (paymentRecord.bakiMileage || 0) - mileageAmt),
         tarikh: dateStr,
         paymentHistory: [newPaymentEntry, ...(paymentRecord.paymentHistory || [])],
         userId: user ? user.uid : undefined
@@ -539,6 +590,7 @@ export default function App() {
 
     setPaymentRecord(null);
     setPaymentAmount('');
+    setPaymentMileageAmount('');
     setPaymentDate(new Date().toISOString().split('T')[0]);
     setPaymentMethod('Transfer');
   };
@@ -655,7 +707,7 @@ export default function App() {
   }, [records]);
 
   return (
-    <div className="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans h-[100dvh] w-full flex flex-col md:flex-row overflow-hidden">
+    <div className="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans fixed inset-0 flex flex-col md:flex-row overflow-hidden">
       {/* Sidebar Nav */}
       <aside className="w-56 bg-zinc-900 dark:bg-zinc-950 text-zinc-400 dark:text-zinc-500 hidden md:flex flex-col border-r border-zinc-800 dark:border-zinc-800 shrink-0 print:hidden">
         <div className="p-6 border-b border-zinc-800 dark:border-zinc-800">
@@ -704,7 +756,7 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0">
+      <main className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Top Bar */}
         <header className="h-auto md:h-14 py-3 md:py-0 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 flex flex-col md:flex-row items-start md:items-center justify-between px-4 sm:px-6 shrink-0 gap-3 md:gap-4 print:hidden">
           <div className="flex items-center gap-2 sm:gap-4 w-full md:w-auto overflow-hidden">
@@ -715,7 +767,7 @@ export default function App() {
             </h1>
             <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded uppercase border border-blue-100 shrink-0">Aktif</span>
           </div>
-          <div className="flex gap-2 overflow-x-auto w-full md:w-auto pb-1 md:pb-0 hide-scrollbar no-scrollbar items-center">
+          <div className="flex gap-2 flex-wrap sm:flex-nowrap sm:overflow-x-auto w-full md:w-auto pb-1 md:pb-0 hide-scrollbar no-scrollbar items-center">
             <button 
               onClick={() => setDarkMode(!darkMode)}
               className="p-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shrink-0"
@@ -796,8 +848,8 @@ export default function App() {
 
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {activeTab !== 'records' && activeTab !== 'standalone' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 md:p-6 shrink-0 print:hidden">
-              <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-4 rounded-sm shadow-sm flex flex-col justify-between">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-3 sm:p-4 md:p-6 shrink-0 print:hidden">
+              <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-3 sm:p-4 rounded-sm shadow-sm flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-1">
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">Jumlah Kes</div>
                   <Users size={14} className="text-zinc-400 dark:text-zinc-500" />
@@ -806,7 +858,7 @@ export default function App() {
                 <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1">Keseluruhan pangkalan rekod</div>
               </div>
               
-              <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-4 rounded-sm shadow-sm flex flex-col justify-between">
+              <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-3 sm:p-4 rounded-sm shadow-sm flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-1">
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">Jumlah Total Fee</div>
                   <Wallet size={14} className="text-zinc-400 dark:text-zinc-500" />
@@ -815,7 +867,7 @@ export default function App() {
                 <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1">Nilai keseluruhan yuran dibenarkan</div>
               </div>
 
-              <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-4 rounded-sm shadow-sm flex flex-col justify-between">
+              <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-3 sm:p-4 rounded-sm shadow-sm flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-1">
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">Baki Fee Terkini</div>
                   <CreditCard size={14} className="text-red-400" />
@@ -824,7 +876,7 @@ export default function App() {
                 <div className="text-[10px] text-red-500/70 mt-1">Perlu dituntut</div>
               </div>
 
-              <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-4 rounded-sm shadow-sm flex flex-col justify-between">
+              <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-3 sm:p-4 rounded-sm shadow-sm flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-1">
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">Baki Mileage</div>
                   <MapPin size={14} className="text-zinc-400 dark:text-zinc-500" />
@@ -840,14 +892,25 @@ export default function App() {
             
             {/* Dashboard and Reports View: Charts */}
             {(activeTab === 'dashboard' || activeTab === 'reports') && (
-              <div className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-sm shadow-sm flex flex-col p-4 overflow-hidden">
-                <h3 className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-4 flex items-center gap-2 shrink-0">
-                  <PieChart size={14} className="text-blue-500" />
-                  Baki Terkini Mengikut Kategori Kes
-                </h3>
-                <div className="flex-1 min-h-[300px] w-full -mt-2 md:-mt-4">
+              <div className={`bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-sm shadow-sm flex flex-col p-4 overflow-hidden shrink-0 w-full`}>
+                <div className="flex justify-between items-center mb-4 shrink-0">
+                  <h3 className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                    <PieChart size={14} className="text-blue-500" />
+                    Baki Terkini Mengikut Kategori Kes
+                  </h3>
+                  {activeTab === 'reports' && (
+                    <button
+                      onClick={handleExportLaporanCSV}
+                      className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 font-medium flex items-center gap-2 transition-colors"
+                    >
+                      <Download size={14} />
+                      Eksport <span className="hidden sm:inline">CSV</span>
+                    </button>
+                  )}
+                </div>
+                <div className={`${activeTab === 'dashboard' ? 'h-[350px] lg:h-[450px]' : 'flex-1 min-h-[300px]'} w-full mt-0`}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 20 }}>
+                    <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#52525b" opacity={0.3} />
                       <XAxis 
                         dataKey="name" 
@@ -962,24 +1025,25 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="text-xs">
-                    <AnimatePresence initial={false}>
+                    <AnimatePresence>
                       {filteredRecords.length > 0 ? (
                         filteredRecords.map((record, index) => (
                           <React.Fragment key={record.id}>
                             <motion.tr 
                               layout="position"
-                              initial={{ opacity: 0, y: 10 }}
+                              initial={{ opacity: 0, y: 5 }}
                               animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, x: -10 }}
+                              exit={{ opacity: 0, scale: 0.95 }}
                               transition={{ duration: 0.2 }}
                               onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
                               className={`border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800/80 cursor-pointer transition-colors ${record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-zinc-50 dark:bg-zinc-900' : ''} ${record.bakiFeeTerkini > 2000 ? 'bg-amber-50/30 dark:bg-amber-900/30' : ''} ${expandedRowId === record.id ? 'bg-zinc-100 dark:bg-zinc-900/50' : ''}`}
                             >
-                            <td className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800" onClick={(e) => e.stopPropagation()}>
+                            <td className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800">
                               <div className="flex items-center justify-center gap-1 sm:gap-2 font-mono text-zinc-400 dark:text-zinc-500">
                                 <input 
                                   type="checkbox" 
                                   className="cursor-pointer rounded border-zinc-300 dark:border-zinc-700 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500 mt-1 pl-1 sm:pl-2"
+                                  onClick={(e) => e.stopPropagation()}
                                   checked={selectedRecords.includes(record.id)}
                                   onChange={(e) => {
                                     if (e.target.checked) {
@@ -1014,18 +1078,27 @@ export default function App() {
                               {formatRM(record.bakiMileage)}
                             </td>
                             <td className="px-2 sm:px-4 py-1.5 sm:py-2 text-center" onClick={(e) => e.stopPropagation()}>
-                              <button 
-                                onClick={() => setDeletingRecord(record)}
-                                className="text-zinc-400 dark:text-zinc-500 hover:text-red-600 transition-colors p-1"
-                                title="Padam Pelanggan"
-                              >
-                                <Trash2 size={14} />
-                              </button>
+                              <div className="flex items-center justify-center gap-2">
+                                <button 
+                                  onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
+                                  className="text-white bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-[10px] font-bold transition-colors shadow-sm whitespace-nowrap"
+                                  title="Urus Rekod"
+                                >
+                                  {expandedRowId === record.id ? 'Tutup' : 'Urus'}
+                                </button>
+                                <button 
+                                  onClick={() => setDeletingRecord(record)}
+                                  className="text-zinc-600 dark:text-zinc-400 hover:text-red-600 transition-colors bg-zinc-100 dark:bg-zinc-800 p-1.5 rounded-sm"
+                                  title="Padam Pelanggan"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
                             </td>
                           </motion.tr>
                           {expandedRowId === record.id && (
                             <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
-                              <td colSpan={10} className="p-0">
+                              <td colSpan={10} className="p-0 whitespace-normal">
                                 <motion.div
                                   initial={{ height: 0, opacity: 0 }}
                                   animate={{ height: "auto", opacity: 1 }}
@@ -1146,9 +1219,10 @@ export default function App() {
                                                     <span className="text-zinc-400 dark:text-zinc-500">
                                                       {paymentSortColumn === 'amount' ? (paymentSortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUp size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" />}
                                                     </span>
-                                                    Jumlah
+                                                    Fee (RM)
                                                   </div>
                                                 </th>
+                                                <th className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Mileage (RM)</th>
                                                 <th className="px-2 sm:px-4 py-1.5 sm:py-2 text-center w-12">Tindakan</th>
                                               </tr>
                                             </thead>
@@ -1157,7 +1231,7 @@ export default function App() {
                                                 if (!paymentSortColumn) return 0;
                                                 let comparison = 0;
                                                 if (paymentSortColumn === 'date') comparison = parseDateString(a.date) - parseDateString(b.date);
-                                                else if (paymentSortColumn === 'amount') comparison = a.amount - b.amount;
+                                                else if (paymentSortColumn === 'amount') comparison = (a.amount || 0) - (b.amount || 0);
                                                 return paymentSortDirection === 'asc' ? comparison : -comparison;
                                               }).map((payment) => (
                                                 <tr key={payment.id} className="border-b border-zinc-100 dark:border-zinc-800 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-800">
@@ -1165,7 +1239,10 @@ export default function App() {
                                                   <td className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400">{formatDateDMY(payment.date)}</td>
                                                   <td className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400">{payment.method}</td>
                                                   <td className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800 text-right text-emerald-600 font-medium font-mono">
-                                                    +{formatRM(payment.amount)}
+                                                    {payment.amount ? '+' + formatRM(payment.amount) : '-'}
+                                                  </td>
+                                                  <td className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-100 dark:border-zinc-800 text-right text-emerald-600 font-medium font-mono">
+                                                    {payment.mileageAmount ? '+' + formatRM(payment.mileageAmount) : '-'}
                                                   </td>
                                                   <td className="px-2 sm:px-4 py-1.5 sm:py-2 text-center flex justify-center gap-2">
                                                     <button 
@@ -1591,15 +1668,21 @@ export default function App() {
                     <span className="font-semibold text-zinc-800 dark:text-zinc-200">{paymentRecord.nama}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500 dark:text-zinc-400">Baki Semasa:</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">Baki Semasa (Fee):</span>
                     <span className="font-mono font-bold text-red-600">{formatRM(paymentRecord.bakiFeeTerkini)}</span>
                   </div>
+                  {(paymentRecord.bakiMileage || 0) > 0 && (
+                    <div className="flex justify-between text-sm pt-2 mt-2 border-t border-blue-100 italic">
+                      <span className="text-zinc-500 dark:text-zinc-400">Baki Semasa (Mileage):</span>
+                      <span className="font-mono font-bold text-red-600">{formatRM(paymentRecord.bakiMileage || 0)}</span>
+                    </div>
+                  )}
                 </div>
                 
                 <form onSubmit={handleUpdatePayment} className="space-y-4">
                   <div>
                     <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
-                      Jumlah Bayaran (RM)
+                      Jumlah Bayaran Fee (RM)
                     </label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -1608,10 +1691,9 @@ export default function App() {
                       <input
                         type="number"
                         step="0.01"
-                        min="0.01"
+                        min="0"
                         max={paymentRecord.bakiFeeTerkini}
-                        required
-                        className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-zinc-300 dark:border-zinc-700 focus:ring-blue-500/20 focus:border-blue-500'} rounded font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-zinc-800 dark:text-zinc-200`}
+                        className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-zinc-300 dark:border-zinc-700 focus:ring-blue-500/20 focus:border-blue-500'} rounded font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-zinc-800 dark:text-zinc-200 bg-white dark:bg-zinc-950`}
                         placeholder="0.00"
                         value={paymentAmount}
                         onChange={(e) => {
@@ -1621,10 +1703,37 @@ export default function App() {
                         autoFocus
                       />
                     </div>
-                    {paymentError && (
-                      <p className="mt-1.5 text-xs text-red-500 font-medium">{paymentError}</p>
-                    )}
                   </div>
+
+                  {(paymentRecord.bakiMileage || 0) > 0 && (
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
+                        Jumlah Bayaran Mileage (RM)
+                      </label>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                          <span className="text-zinc-500 dark:text-zinc-400 font-mono text-sm">RM</span>
+                        </div>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max={paymentRecord.bakiMileage}
+                          className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-zinc-300 dark:border-zinc-700 focus:ring-blue-500/20 focus:border-blue-500'} rounded font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-zinc-800 dark:text-zinc-200 bg-white dark:bg-zinc-950`}
+                          placeholder="0.00"
+                          value={paymentMileageAmount}
+                          onChange={(e) => {
+                            setPaymentMileageAmount(e.target.value);
+                            if (paymentError) setPaymentError('');
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {paymentError && (
+                    <p className="mt-1.5 text-xs text-red-500 font-medium">{paymentError}</p>
+                  )}
                   <div>
                     <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
                       Tarikh Bayaran
@@ -1768,16 +1877,30 @@ export default function App() {
                             <td className="py-4 px-5 text-right font-mono text-amber-600 font-medium">{formatRM(statementRecord.bakiMileage)}</td>
                           </tr>
                           {statementRecord.paymentHistory && statementRecord.paymentHistory.length > 0 && (
-                            <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors bg-emerald-50/10 dark:bg-emerald-900/20">
-                              <td className="py-4 px-5 text-zinc-600 dark:text-zinc-400 font-medium">Jumlah Pembayaran Diterima</td>
-                              <td className="py-4 px-5 text-right font-mono text-emerald-600 font-medium">
-                                -{formatRM(statementRecord.paymentHistory.reduce((acc, curr) => acc + curr.amount, 0))}
-                              </td>
-                            </tr>
+                            <>
+                              <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors bg-emerald-50/10 dark:bg-emerald-900/20">
+                                <td className="py-4 px-5 text-zinc-600 dark:text-zinc-400 font-medium">Jumlah Pembayaran Diterima (Fee)</td>
+                                <td className="py-4 px-5 text-right font-mono text-emerald-600 font-medium">
+                                  -{formatRM(statementRecord.paymentHistory.reduce((acc, curr) => acc + (curr.amount || 0), 0))}
+                                </td>
+                              </tr>
+                              {statementRecord.paymentHistory.some(p => (p.mileageAmount || 0) > 0) && (
+                                <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors bg-emerald-50/10 dark:bg-emerald-900/20 border-t border-zinc-200 dark:border-zinc-800">
+                                  <td className="py-4 px-5 text-zinc-600 dark:text-zinc-400 font-medium">Jumlah Pembayaran Diterima (Mileage)</td>
+                                  <td className="py-4 px-5 text-right font-mono text-emerald-600 font-medium">
+                                    -{formatRM(statementRecord.paymentHistory.reduce((acc, curr) => acc + (curr.mileageAmount || 0), 0))}
+                                  </td>
+                                </tr>
+                              )}
+                            </>
                           )}
                           <tr className="bg-zinc-900 dark:bg-zinc-100 text-white">
-                            <td className="py-4 px-5 font-bold text-sm tracking-wide">BAKI TERKINI</td>
-                            <td className="py-4 px-5 text-right font-mono font-bold text-lg">{formatRM(statementRecord.bakiFeeTerkini)}</td>
+                            <td className="py-3 px-5 font-bold text-sm tracking-wide">BAKI TERKINI (FEE)</td>
+                            <td className="py-3 px-5 text-right font-mono font-bold text-lg">{formatRM(statementRecord.bakiFeeTerkini)}</td>
+                          </tr>
+                          <tr className="bg-zinc-800 dark:bg-zinc-200 text-white border-t border-zinc-700">
+                            <td className="py-3 px-5 font-bold text-sm tracking-wide">BAKI TERKINI (MILEAGE)</td>
+                            <td className="py-3 px-5 text-right font-mono font-bold text-lg">{formatRM(statementRecord.bakiMileage || 0)}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -1794,8 +1917,9 @@ export default function App() {
                             <tr>
                               <th className="py-3 px-5 font-semibold text-zinc-600 dark:text-zinc-400">Tarikh</th>
                               <th className="py-3 px-5 font-semibold text-zinc-600 dark:text-zinc-400">No. Rujukan</th>
-                              <th className="py-3 px-5 font-semibold text-zinc-600 dark:text-zinc-400">Kaedah Pembayaran</th>
-                              <th className="py-3 px-5 font-semibold text-zinc-600 dark:text-zinc-400 text-right">Kredit (RM)</th>
+                              <th className="py-3 px-5 font-semibold text-zinc-600 dark:text-zinc-400">Kaedah</th>
+                              <th className="py-3 px-5 font-semibold text-zinc-600 dark:text-zinc-400 text-right">Fee (RM)</th>
+                              <th className="py-3 px-5 font-semibold text-zinc-600 dark:text-zinc-400 text-right">Mileage (RM)</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -1804,7 +1928,8 @@ export default function App() {
                                 <td className="py-3 px-5 text-zinc-800 dark:text-zinc-200">{formatDateDMY(payment.date)}</td>
                                 <td className="py-3 px-5 text-zinc-500 dark:text-zinc-400 font-mono text-xs">{payment.id}</td>
                                 <td className="py-3 px-5 text-zinc-600 dark:text-zinc-400">{payment.method}</td>
-                                <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">{formatRM(payment.amount)}</td>
+                                <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">{formatRM(payment.amount || 0)}</td>
+                                <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">{formatRM(payment.mileageAmount || 0)}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -1930,10 +2055,24 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        <tr>
-                          <td className="py-4 px-4 font-medium text-zinc-800 dark:text-zinc-200 uppercase">FEE {formatDateDMY(receiptData.payment.date)}</td>
-                          <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-zinc-900 dark:border-zinc-100">{receiptData.payment.amount.toFixed(2)}</td>
-                        </tr>
+                        {(receiptData.payment.amount > 0 || (receiptData.payment.amount === 0 && !receiptData.payment.mileageAmount)) && (
+                          <tr>
+                            <td className="py-4 px-4 font-medium text-zinc-800 dark:text-zinc-200 uppercase">FEE {formatDateDMY(receiptData.payment.date)}</td>
+                            <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-zinc-900 dark:border-zinc-100">{receiptData.payment.amount.toFixed(2)}</td>
+                          </tr>
+                        )}
+                        {!!receiptData.payment.mileageAmount && receiptData.payment.mileageAmount > 0 && (
+                          <tr>
+                            <td className="py-4 px-4 font-medium text-zinc-800 dark:text-zinc-200 uppercase">MILEAGE {formatDateDMY(receiptData.payment.date)}</td>
+                            <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-zinc-900 dark:border-zinc-100">{receiptData.payment.mileageAmount.toFixed(2)}</td>
+                          </tr>
+                        )}
+                        {(receiptData.payment.amount > 0 && !!receiptData.payment.mileageAmount && receiptData.payment.mileageAmount > 0) && (
+                          <tr className="border-t-2 border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
+                            <td className="py-4 px-4 font-bold text-zinc-800 dark:text-zinc-200 text-right uppercase">JUMLAH KESELURUHAN (RM)</td>
+                            <td className="py-4 px-4 font-mono font-bold text-right border-l-2 border-zinc-900 dark:border-zinc-100">{(receiptData.payment.amount + receiptData.payment.mileageAmount).toFixed(2)}</td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -1946,24 +2085,51 @@ export default function App() {
                          const sortedPayments = [...(receiptData.record.paymentHistory || [])].sort((a, b) => parseDateString(a.date) - parseDateString(b.date));
                          const paymentIndex = sortedPayments.findIndex(p => p.id === receiptData.payment.id);
                          const paymentsAfter = sortedPayments.slice(paymentIndex + 1);
-                         const sumAfter = paymentsAfter.reduce((sum, p) => sum + p.amount, 0);
-                         const bakiTerkini = receiptData.record.bakiFeeTerkini + sumAfter;
-                         const bakiTerdahulu = bakiTerkini + receiptData.payment.amount;
+
+                         const sumAfterFee = paymentsAfter.reduce((sum, p) => sum + (p.amount || 0), 0);
+                         const bakiTerkiniFee = receiptData.record.bakiFeeTerkini + sumAfterFee;
+                         const bakiTerdahuluFee = bakiTerkiniFee + (receiptData.payment.amount || 0);
+
+                         const hasMileageReceipt = !!receiptData.payment.mileageAmount && receiptData.payment.mileageAmount > 0;
+                         const sumAfterMileage = paymentsAfter.reduce((sum, p) => sum + (p.mileageAmount || 0), 0);
+                         const bakiTerkiniMileage = receiptData.record.bakiMileage !== undefined ? receiptData.record.bakiMileage + sumAfterMileage : 0;
+                         const bakiTerdahuluMileage = bakiTerkiniMileage + (receiptData.payment.mileageAmount || 0);
                          
                          return (
                            <div className="text-right space-y-4">
-                               <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
-                                   <span>JUMLAH BAYARAN:</span>
-                                   <span className="w-32">RM {receiptData.payment.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-                               </div>
-                               <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
-                                   <span>BAKI TERDAHULU:</span>
-                                   <span className="w-32">RM {bakiTerdahulu.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-                               </div>
-                               <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12 pt-3 border-t border-zinc-900 dark:border-zinc-100">
-                                   <span>BAKI TERKINI:</span>
-                                   <span className="w-32">RM {bakiTerkini.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-                               </div>
+                               {receiptData.payment.amount > 0 && (
+                                   <>
+                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                                         <span>JUMLAH BAYARAN (FEE):</span>
+                                         <span className="w-32">RM {receiptData.payment.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                     </div>
+                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                                         <span>BAKI TERDAHULU (FEE):</span>
+                                         <span className="w-32">RM {bakiTerdahuluFee.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                     </div>
+                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12 pt-3 border-t border-zinc-900 dark:border-zinc-100 mb-4">
+                                         <span>BAKI TERKINI (FEE):</span>
+                                         <span className="w-32">RM {bakiTerkiniFee.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                     </div>
+                                   </>
+                               )}
+
+                               {hasMileageReceipt && (
+                                   <>
+                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                                         <span>JUMLAH BAYARAN (MILEAGE):</span>
+                                         <span className="w-32">RM {receiptData.payment.mileageAmount!.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                     </div>
+                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                                         <span>BAKI TERDAHULU (MILEAGE):</span>
+                                         <span className="w-32">RM {bakiTerdahuluMileage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                     </div>
+                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12 pt-3 border-t border-zinc-900 dark:border-zinc-100">
+                                         <span>BAKI TERKINI (MILEAGE):</span>
+                                         <span className="w-32">RM {bakiTerkiniMileage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                     </div>
+                                   </>
+                               )}
                            </div>
                          );
                      })()}
@@ -2058,30 +2224,33 @@ export default function App() {
       </AnimatePresence>
 
       {/* Mobile Bottom Nav */}
-      <nav className="md:hidden bg-zinc-900 dark:bg-zinc-950 text-zinc-400 border-t border-zinc-800 flex justify-around p-2 shrink-0 z-40 print:hidden">
+      <nav 
+        className="md:hidden bg-zinc-900 dark:bg-zinc-950 text-zinc-400 border-t border-zinc-800 flex justify-around p-2 pt-3 shrink-0 z-40 print:hidden"
+        style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+      >
         <button 
           onClick={() => setActiveTab('dashboard')} 
-          className={`flex flex-col items-center p-2 text-[10px] w-1/4 ${activeTab === 'dashboard' ? 'text-white' : 'hover:text-white'}`}
+          className={`flex flex-col items-center p-1 text-[9px] w-1/4 text-center ${activeTab === 'dashboard' ? 'text-white' : 'hover:text-white'}`}
         >
           <Home size={20} className="mb-1" /> Papan Pemuka
         </button>
         <button 
           onClick={() => setActiveTab('records')} 
-          className={`flex flex-col items-center p-2 text-[10px] w-1/4 ${activeTab === 'records' ? 'text-white' : 'hover:text-white'}`}
+          className={`flex flex-col items-center p-1 text-[9px] w-1/4 text-center ${activeTab === 'records' ? 'text-white' : 'hover:text-white'}`}
         >
-          <Users size={20} className="mb-1" /> Rekod Kes
+          <Users size={20} className="mb-1" /> Rekod Pelanggan
         </button>
         <button 
           onClick={() => setActiveTab('reports')} 
-          className={`flex flex-col items-center p-2 text-[10px] w-1/4 ${activeTab === 'reports' ? 'text-white' : 'hover:text-white'}`}
+          className={`flex flex-col items-center p-1 text-[9px] w-1/4 text-center ${activeTab === 'reports' ? 'text-white' : 'hover:text-white'}`}
         >
-          <BarChart2 size={20} className="mb-1" /> Laporan
+          <BarChart2 size={20} className="mb-1" /> Laporan Kewangan
         </button>
         <button 
           onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }} 
-          className={`flex flex-col items-center p-2 text-[10px] w-1/4 ${activeTab === 'standalone' ? 'text-white' : 'hover:text-white'}`}
+          className={`flex flex-col items-center p-1 text-[9px] w-1/4 text-center ${activeTab === 'standalone' ? 'text-white' : 'hover:text-white'}`}
         >
-          <FileText size={20} className="mb-1" /> Resit
+          <FileText size={20} className="mb-1" /> Resit Bebas
         </button>
       </nav>
     </div>
