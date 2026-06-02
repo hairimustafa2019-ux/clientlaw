@@ -37,5 +37,10 @@ service cloud.firestore {
                     ]));
       allow delete: if isSignedIn() && request.auth.uid == userId;
     }
+    match /users/{userId}/backups/{backupId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(backupId) && incoming().data is string && incoming().createdAt is number && incoming().keys().size() <= 2;
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
   }
 }

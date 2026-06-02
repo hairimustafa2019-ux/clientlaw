@@ -313,10 +313,13 @@ export default function App() {
     }
     setIsBackingUp(true);
     try {
-      const backupData = JSON.stringify(records, null, 2);
-      const backupRef = ref(storage, `users/${user.uid}/backups/backup-${Date.now()}.json`);
-      await uploadString(backupRef, backupData, 'raw', { contentType: 'application/json' });
-      alert("Sandaran telah berjaya disimpan di awan (Cloud Storage)!");
+      const backupData = JSON.stringify(records);
+      const backupId = `backup-${Date.now()}`;
+      await setDoc(doc(db, `users/${user.uid}/backups`, backupId), {
+        data: backupData,
+        createdAt: Date.now()
+      });
+      alert("Sandaran telah berjaya disimpan di awan (Cloud Backup)!");
     } catch (error) {
       console.error("Backup failed", error);
       alert("Gagal membuat sandaran. Sila cuba lagi.");
