@@ -288,11 +288,11 @@ export default function App() {
   }, []);
 
   const handleExportData = () => {
-    const headers = ['ID', 'Nama Pelanggan', 'Kategori Kes', 'Total Fee', 'Bayaran Terakhir', 'Tarikh', 'Baki Sebelum', 'Baki Terkini', 'Baki Mileage'];
+    const headers = ['Nama', 'Kes', 'Total Fee', 'Bayaran Terakhir', 'Tarikh Akhir', 'Baki Sebelum', 'Baki Fee Terkini', 'Baki Mileage'];
     const csvContent = [
       headers.join(','),
       ...filteredRecords.map(r => 
-        [r.id, `"${r.nama}"`, `"${r.kes}"`, r.totalFee, r.bayaranTerakhir, r.tarikh, r.bakiSebelum, r.bakiFeeTerkini, r.bakiMileage].join(',')
+        [`"${r.nama}"`, `"${r.kes}"`, r.totalFee, r.bayaranTerakhir, r.tarikh, r.bakiSebelum, r.bakiFeeTerkini, r.bakiMileage].join(',')
       )
     ].join('\n');
 
@@ -304,6 +304,21 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const silentBackupToCloud = async (currentRecords: CaseRecord[]) => {
+    if (!user) return;
+    try {
+      const backupData = JSON.stringify(currentRecords);
+      const backupId = `autobackup-${Date.now()}`;
+      await setDoc(doc(db, `users/${user.uid}/backups`, backupId), {
+        data: backupData,
+        createdAt: Date.now()
+      });
+      console.log("Auto-save to cloud successful");
+    } catch (error) {
+      console.error("Auto backup failed", error);
+    }
   };
 
   const handleBackupToCloud = async () => {
@@ -395,7 +410,20 @@ export default function App() {
       if (lines.length < 2) return;
       
       const newRecordsFromCsv: CaseRecord[] = [];
+      const headers = lines[0].toLowerCase().split(',').map(h => h.replace(/^"|"$/g, '').trim());
       
+      const colIndex = {
+        id: headers.findIndex(h => h === 'id' || h.includes('id rekod')),
+        nama: headers.findIndex(h => h.includes('nama')),
+        kes: headers.findIndex(h => h.includes('kes')),
+        totalFee: headers.findIndex(h => h.includes('total fee') || h.includes('jumlah fee')),
+        bayaranTerakhir: headers.findIndex(h => h.includes('bayaran terakhir')),
+        tarikh: headers.findIndex(h => h.includes('tarikh')),
+        bakiSebelum: headers.findIndex(h => h.includes('baki sebelum')),
+        bakiTerkini: headers.findIndex(h => h.includes('baki') && h.includes('terkini') && !h.includes('mileage')),
+        bakiMileage: headers.findIndex(h => h.includes('mileage'))
+      };
+
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
@@ -404,18 +432,41 @@ export default function App() {
         if (values.length < 4) continue;
         
         try {
-          const totalFee = parseFloat(values[13]) || parseFloat(values[3]) || 0;
-          const id = values[0] || `CSV${Math.floor(Math.random() * 10000)}`;
+          const getValue = (idx: number) => idx !== -1 ? values[idx] : undefined;
+          
+          let rawId = getValue(colIndex.id);
+          
+          const rawNama = getValue(colIndex.nama) || '';
+          const rawKes = getValue(colIndex.kes) || 'Umum';
+          
+          // Special fallback for older legacy schemas if columns are completely unmatched
+          const fallbackTotalFeeStr = colIndex.totalFee !== -1 ? getValue(colIndex.totalFee) : values[3];
+          const fallbackTarikh = colIndex.tarikh !== -1 ? getValue(colIndex.tarikh) : (values[8] || values[5]);
+          
+          const rawTotalFee = parseFloat(fallbackTotalFeeStr || '') || parseFloat(values[13] || '') || 0;
+          const rawBayaranTerakhir = parseFloat(getValue(colIndex.bayaranTerakhir) || '') || 0;
+          const rawTarikh = fallbackTarikh || new Date().toISOString().split('T')[0];
+          const rawBakiSebelum = parseFloat(getValue(colIndex.bakiSebelum) || '') || 0;
+          const rawBakiTerkini = parseFloat(getValue(colIndex.bakiTerkini) || '') || 0;
+          const rawBakiMileage = parseFloat(getValue(colIndex.bakiMileage) || '') || 0;
+          
+          // Ensure valid ID for Firestore
+          if (rawId && rawId.includes('/')) {
+             rawId = rawId.replace(/\//g, '-');
+          }
+          
+          const id = rawId || `CSV${Date.now()}${Math.floor(Math.random() * 1000)}`;
+          
           const newRecord: CaseRecord & { userId?: string } = {
             id,
-            nama: values[1] || '',
-            kes: values[2] || 'Umum',
-            bakiSebelum: parseFloat(values[4]) || 0,
-            bayaranTerakhir: parseFloat(values[5]) || 0,
-            bakiFeeTerkini: parseFloat(values[6]) || 0,
-            bakiMileage: parseFloat(values[7]) || 0,
-            tarikh: formatDateDMY(values[8] || new Date().toISOString().split('T')[0]),
-            totalFee: totalFee,
+            nama: rawNama,
+            kes: rawKes,
+            totalFee: rawTotalFee,
+            bayaranTerakhir: rawBayaranTerakhir,
+            tarikh: formatDateDMY(rawTarikh),
+            bakiSebelum: rawBakiSebelum,
+            bakiFeeTerkini: rawBakiTerkini,
+            bakiMileage: rawBakiMileage,
             paymentHistory: [],
             userId: user ? user.uid : undefined
           };
@@ -584,6 +635,8 @@ export default function App() {
       const targetPath = `users/${user.uid}/records/${paymentRecord.id}`;
       try {
           await setDoc(doc(db, 'users', user.uid, 'records', paymentRecord.id), updatedRecord);
+          // Trigger Auto-Save to Cloud
+          silentBackupToCloud(records.map(rec => rec.id === paymentRecord.id ? updatedRecord : rec));
       } catch(err) {
           handleFirestoreError(err, OperationType.WRITE, targetPath);
       }
