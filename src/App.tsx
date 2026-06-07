@@ -7,7 +7,7 @@ import StandaloneReceipts from './components/StandaloneReceipts';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, BarChart2 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { records as initialRecords, CaseRecord } from './data';
 import jsPDF from 'jspdf';
 import { toPng } from 'html-to-image';
@@ -762,6 +762,29 @@ export default function App() {
       .sort((a, b) => b.baki - a.baki);
   }, [records]);
 
+  // Compute chart data for monthly payments (current year)
+  const monthlyPaymentData = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const months = ['Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ogo', 'Sep', 'Okt', 'Nov', 'Dis'];
+    const monthlyTotals = new Array(12).fill(0);
+
+    records.forEach(record => {
+      if (record.paymentHistory) {
+        record.paymentHistory.forEach(payment => {
+          const date = parseDateObj(payment.date);
+          if (date.getFullYear() === currentYear) {
+            monthlyTotals[date.getMonth()] += (payment.amount || 0) + (payment.mileageAmount || 0);
+          }
+        });
+      }
+    });
+
+    return months.map((month, index) => ({
+      name: month,
+      jumlah: monthlyTotals[index]
+    }));
+  }, [records]);
+
   return (
     <div className="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans fixed inset-0 flex flex-col md:flex-row overflow-hidden">
       {/* Sidebar Nav */}
@@ -944,7 +967,7 @@ export default function App() {
           )}
 
           {/* Dashboard Content / Record Table */}
-          <div className={`flex-1 px-2 sm:px-4 md:px-6 pb-2 sm:pb-4 md:pb-6 min-h-0 flex flex-col gap-4 print:hidden`}>
+          <div className={`flex-1 px-2 sm:px-4 md:px-6 pb-2 sm:pb-4 md:pb-6 min-h-0 flex flex-col gap-4 print:hidden overflow-y-auto`}>
             
             {/* Dashboard and Reports View: Charts */}
             {(activeTab === 'dashboard' || activeTab === 'reports') && (
@@ -993,6 +1016,44 @@ export default function App() {
                         ))}
                       </Bar>
                     </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'reports' && (
+              <div className={`bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-sm shadow-sm flex flex-col p-4 overflow-hidden shrink-0 w-full`}>
+                <div className="flex justify-between items-center mb-4 shrink-0">
+                  <h3 className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                    <BarChart2 size={14} className="text-blue-500" />
+                    Jumlah Bayaran Mengikut Bulan ({new Date().getFullYear()})
+                  </h3>
+                </div>
+                <div className="h-[300px] w-full mt-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={monthlyPaymentData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#52525b" opacity={0.3} />
+                      <XAxis 
+                        dataKey="name" 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fontSize: 12, fill: '#71717a' }} 
+                        dy={10}
+                      />
+                      <YAxis 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fontSize: 12, fill: '#71717a' }} 
+                        tickFormatter={(value) => `RM${value}`}
+                        dx={-10}
+                      />
+                      <Tooltip 
+                        cursor={{ fill: '#f4f4f5', opacity: 0.05 }}
+                        contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '6px', color: '#fff', fontSize: '12px' }}
+                        formatter={(value: number) => [`RM ${value.toFixed(2)}`, 'Jumlah Bayaran']}
+                      />
+                      <Line type="monotone" dataKey="jumlah" stroke="#2563eb" strokeWidth={2} activeDot={{ r: 6 }} />
+                    </LineChart>
                   </ResponsiveContainer>
                 </div>
               </div>
