@@ -114,15 +114,6 @@ export default function App() {
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [filterKes, setFilterKes] = useState<string>('Semua');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | null>(null);
-
-  const handleSortToggle = () => {
-    setSortOrder(prev => {
-      if (prev === null) return 'asc';
-      if (prev === 'asc') return 'desc';
-      return null;
-    });
-  };
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
 
@@ -238,7 +229,6 @@ export default function App() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstallable, setIsInstallable] = useState(false);
   const [isBackingUp, setIsBackingUp] = useState(false);
-  const [isExportingSheets, setIsExportingSheets] = useState(false);
   const [showExportReminder, setShowExportReminder] = useState(false);
   const isInitialRecordsRender = useRef(true);
 
@@ -350,74 +340,6 @@ export default function App() {
       alert("Gagal membuat sandaran. Sila cuba lagi.");
     } finally {
       setIsBackingUp(false);
-    }
-  };
-
-  const handleExportToGoogleSheets = async () => {
-    try {
-      setIsExportingSheets(true);
-      const provider = new GoogleAuthProvider();
-      provider.addScope('https://www.googleapis.com/auth/spreadsheets');
-      
-      const result = await signInWithPopup(auth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      const token = credential?.accessToken;
-
-      if (!token) {
-        throw new Error("Tidak berjaya mengambil token Google Sheets.");
-      }
-
-      // Create a spreadsheet
-      const createRes = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          properties: {
-            title: `Rekod Pelanggan - ${new Date().toISOString().split('T')[0]}`
-          }
-        })
-      });
-
-      if (!createRes.ok) throw new Error("Gagal mencipta Google Sheet.");
-
-      const spreadsheet = await createRes.json();
-      const spreadsheetId = spreadsheet.spreadsheetId;
-
-      // Prepare values
-      const headers = ['Nama', 'Kes', 'Total Fee', 'Bayaran Terakhir', 'Tarikh Akhir', 'Baki Sebelum', 'Baki Fee Terkini', 'Baki Mileage'];
-      const values = [
-        headers,
-        ...filteredRecords.map(r => 
-          [r.nama, r.kes, r.totalFee, r.bayaranTerakhir, r.tarikh, r.bakiSebelum, r.bakiFeeTerkini, r.bakiMileage]
-        )
-      ];
-
-      // Update values
-      const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:H?valueInputOption=USER_ENTERED`, {
-        method: "PUT",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          values
-        })
-      });
-
-      if (!updateRes.ok) throw new Error("Gagal memuat naik data ke Google Sheet.");
-
-      alert(`Berjaya! Data telah dieksport ke dalam Google Sheets anda.\nSila semak Google Drive/Sheets anda.`);
-      if (window.confirm("Buka lembaran kerja (spreadsheet) sekarang?")) {
-          window.open(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`, "_blank");
-      }
-    } catch(err: any) {
-      console.error(err);
-      alert(`Ralat: ${err.message || 'Tidak dapat menyambung dengan Google Sheets.'}`);
-    } finally {
-      setIsExportingSheets(false);
     }
   };
 
@@ -810,24 +732,12 @@ export default function App() {
 
   // Filter records
   const filteredRecords = useMemo(() => {
-    const filtered = records.filter(record => {
+    return records.filter(record => {
       const matchesSearch = record.nama.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesKes = filterKes === 'Semua' || record.kes.toLowerCase() === filterKes.toLowerCase();
       return matchesSearch && matchesKes;
     });
-
-    if (sortOrder) {
-      return [...filtered].sort((a, b) => {
-        const nameA = a.nama.toLowerCase();
-        const nameB = b.nama.toLowerCase();
-        if (nameA < nameB) return sortOrder === 'asc' ? -1 : 1;
-        if (nameA > nameB) return sortOrder === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
-
-    return filtered;
-  }, [searchTerm, filterKes, records, sortOrder]);
+  }, [searchTerm, filterKes, records]);
 
   // Extract unique cases for the dropdown
   const uniqueKes = useMemo(() => {
@@ -955,16 +865,6 @@ export default function App() {
               >
                 {isBackingUp ? <Loader2 size={14} className="animate-spin" /> : <CloudUpload size={14} />}
                 <span className="hidden sm:inline">Cloud Backup</span>
-              </button>
-            )}
-            {user && (
-              <button 
-                onClick={handleExportToGoogleSheets}
-                disabled={isExportingSheets}
-                className="px-3 py-1.5 text-xs bg-emerald-50 text-emerald-600 rounded hover:bg-emerald-100 border border-emerald-200 font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 shrink-0"
-              >
-                {isExportingSheets ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
-                <span className="hidden sm:inline">Eksport ke Sheets</span>
               </button>
             )}
             <button 
@@ -1169,17 +1069,7 @@ export default function App() {
                           }}
                         />
                       </th>
-                      <th 
-                        className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group select-none"
-                        onClick={handleSortToggle}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span>Nama Pelanggan</span>
-                          <span className="text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300">
-                            {sortOrder === 'asc' ? <ArrowUp size={14} /> : sortOrder === 'desc' ? <ArrowDown size={14} /> : <div className="w-[14px]"></div>}
-                          </span>
-                        </div>
-                      </th>
+                      <th className="px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800">Nama Pelanggan</th>
                       <th className="hidden sm:table-cell px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800">Kategori Kes</th>
                       <th className="hidden lg:table-cell px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Total Fee</th>
                       <th className="hidden xl:table-cell px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-200 dark:border-zinc-800 text-right">Bayaran Terakhir</th>
