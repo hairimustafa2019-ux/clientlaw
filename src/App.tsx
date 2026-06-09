@@ -206,8 +206,19 @@ export default function App() {
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      if (e.code === 'auth/operation-not-allowed') {
+        alert('Log masuk gagal: Sila pastikan "Google" log masuk diaktifkan dalam Firebase Console (Authentication -> Sign-in method).');
+      } else if (e.code === 'auth/popup-blocked') {
+        alert('Log masuk gagal: Popup disekat oleh pelayar. Sila benarkan popup atau buka aplikasi ini di tab baru.');
+      } else if (e.code === 'auth/popup-closed-by-user') {
+        alert('Log masuk dibatalkan: Anda telah menutup tetingkap popup sebelum log masuk selesai.');
+      } else if (e.code === 'auth/unauthorized-domain') {
+        alert(`Log masuk gagal: Domain ini tidak dibenarkan. Sila tambah domain ini ke dalam senarai "Authorized domains" di Firebase Console.`);
+      } else {
+        alert(`Log masuk gagal: ${e.message}`);
+      }
     }
   };
 
