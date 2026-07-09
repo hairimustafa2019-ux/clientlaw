@@ -12,6 +12,7 @@ export interface CaseRecord {
   kes: string;
   totalFee: number;
   bayaranTerakhir: number;
+  nota?: string;
   tarikh: string;
   bakiSebelum: number;
   bakiFeeTerkini: number;

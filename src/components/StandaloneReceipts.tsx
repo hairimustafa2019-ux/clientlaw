@@ -37,7 +37,7 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
 
   const [form, setForm] = useState<StandaloneReceiptData>({
     tarikh: new Date().toISOString().split('T')[0],
-    kategori: 'DOKUMEN',
+    kategori: 'Fee',
     nama: '',
     alamat: '',
     items: [{ perkara: 'Fee/Deposit', harga: 0 }],
@@ -137,9 +137,22 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
       });
       
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgPropsHeight = (canvas.height * pdfWidth) / canvas.width;
       
-      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      let heightLeft = imgPropsHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgPropsHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft >= 0) {
+        position = heightLeft - imgPropsHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgPropsHeight);
+        heightLeft -= pageHeight;
+      }
+      
       pdf.save(`Resit_${form.nama}_${form.tarikh}.pdf`);
     } catch (err) {
       console.error("Failed to generate PDF", err);
@@ -149,7 +162,7 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
   const resetForm = () => {
     setForm({
       tarikh: new Date().toISOString().split('T')[0],
-      kategori: 'DOKUMEN',
+      kategori: 'Fee',
       nama: '',
       alamat: '',
       items: [{ perkara: 'Fee/Deposit', harga: 0 }],
@@ -199,13 +212,12 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">Kategori:</label>
-                  <input type="text" list="kategoriList" className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950" 
-                    value={form.kategori} onChange={e => setForm({...form, kategori: e.target.value.toUpperCase()})} required />
-                  <datalist id="kategoriList">
-                    <option value="DOKUMEN" />
-                    <option value="LAWYER" />
-                    <option value="PJS" />
-                  </datalist>
+                  <select className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950" 
+                    value={form.kategori} onChange={e => setForm({...form, kategori: e.target.value})} required>
+                    <option value="Fee">Fee</option>
+                    <option value="Mileage">Mileage</option>
+                    <option value="Other">Other</option>
+                  </select>
                 </div>
               </div>
 
@@ -334,19 +346,19 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
 
       <AnimatePresence>
         {showPreview && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/60 dark:bg-black/60 backdrop-blur-sm print:bg-white print:p-0">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/60 dark:bg-black/60 backdrop-blur-sm print:static print:bg-white print:p-0 print:block">
             <motion.div 
               initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
-              className="bg-white dark:bg-zinc-950 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden print:shadow-none print:max-h-none print:w-full print:max-w-none"
+              className="bg-white dark:bg-zinc-950 rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden print:shadow-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
             >
               <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center bg-zinc-50 dark:bg-zinc-900 print:hidden">
                 <h3 className="font-bold text-zinc-800 dark:text-zinc-200">Cetak Resit</h3>
                 <button onClick={() => setShowPreview(false)} className="p-2 text-zinc-400 hover:text-zinc-600 rounded-full transition-colors"><X size={20} /></button>
               </div>
               
-              <div className="p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible">
+              <div className="p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
                 {/* Print Area */}
-                <div ref={printRef} className="max-w-2xl min-w-[500px] sm:min-w-0 mx-auto font-sans text-black bg-white print:p-0">
+                <div ref={printRef} className="w-full min-w-[700px] mx-auto font-sans text-black bg-white print:min-w-0 print:w-full print:p-0">
                   <div className="flex items-center pb-2 border-b-2 border-black mb-4 gap-4">
                     <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-[75px] w-auto" alt="Logo" />
                     <div>
