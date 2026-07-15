@@ -6,7 +6,7 @@
 import StandaloneReceipts from './components/StandaloneReceipts';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, BarChart2, Clock, Zap, Plus } from 'lucide-react';
+import { Search, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { records as initialRecords, CaseRecord } from './data';
 import jsPDF from 'jspdf';
@@ -95,7 +95,7 @@ const formatDateISO = (dateStr: string) => {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'records' | 'reports' | 'standalone'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'records' | 'standalone'>('dashboard');
   const [records, setRecords] = useState<CaseRecord[]>(() => {
     const saved = localStorage.getItem('localOfflineRecords');
     if (saved) {
@@ -130,6 +130,9 @@ export default function App() {
   const [paymentError, setPaymentError] = useState<string>('');
   
   const [editingRecord, setEditingRecord] = useState<CaseRecord | null>(null);
+  const [mileageAdjustmentRecord, setMileageAdjustmentRecord] = useState<CaseRecord | null>(null);
+  const [mileageAdjustmentAmount, setMileageAdjustmentAmount] = useState<string>('');
+  const [mileageAdjustmentType, setMileageAdjustmentType] = useState<'tambah' | 'tolak'>('tambah');
   const [deletingRecord, setDeletingRecord] = useState<CaseRecord | null>(null);
   const [isDeletingSelected, setIsDeletingSelected] = useState<boolean>(false);
 
@@ -372,46 +375,6 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  const handleExportLaporanCSV = () => {
-    const headers = [
-      'ID Rekod',
-      'Nama Pelanggan',
-      'Kategori Kes',
-      'Jumlah Fee (RM)',
-      'Baki Fee Sebelum (RM)',
-      'Jumlah Bayaran Fee Terkumpul (RM)',
-      'Baki Fee Terkini (RM)',
-      'Jumlah Bayaran Mileage Terkumpul (RM)',
-      'Baki Mileage Terkini (RM)'
-    ];
-
-    const rows = records.map(record => {
-      const totalFeePayments = record.paymentHistory?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
-      const totalMileagePayments = record.paymentHistory?.reduce((sum, p) => sum + (p.mileageAmount || 0), 0) || 0;
-
-      return [
-        `"${record.id}"`,
-        `"${record.nama}"`,
-        `"${record.kes}"`,
-        record.totalFee || 0,
-        record.bakiSebelum || 0,
-        totalFeePayments,
-        record.bakiFeeTerkini || 0,
-        totalMileagePayments,
-        record.bakiMileage || 0
-      ].join(',');
-    });
-
-    const csvContent = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `laporan_kewangan_${formatDateISO(new Date().toISOString())}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
 
   const handleImportCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -550,6 +513,40 @@ export default function App() {
     setIsNewRecordModalOpen(false);
     setNewRecordData({ nama: '', kes: '', tarikh: new Date().toISOString().split('T')[0], totalFee: '', bakiMileage: '0',
     nota: '' });
+  };
+
+  const handleMileageAdjustmentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mileageAdjustmentRecord || !mileageAdjustmentAmount) return;
+    
+    const amount = parseFloat(mileageAdjustmentAmount);
+    if (isNaN(amount) || amount <= 0) return;
+
+    let newBakiMileage = mileageAdjustmentRecord.bakiMileage || 0;
+    if (mileageAdjustmentType === 'tambah') {
+        newBakiMileage += amount;
+    } else {
+        newBakiMileage -= amount;
+        if (newBakiMileage < 0) newBakiMileage = 0;
+    }
+
+    const updatedRecord = {
+        ...mileageAdjustmentRecord,
+        bakiMileage: newBakiMileage
+    };
+
+    if (user) {
+      const targetPath = `users/${user.uid}/records/${mileageAdjustmentRecord.id}`;
+      try {
+          await setDoc(doc(db, 'users', user.uid, 'records', mileageAdjustmentRecord.id), { ...updatedRecord, userId: user.uid });
+      } catch(err) {
+          handleFirestoreError(err, OperationType.WRITE, targetPath);
+      }
+    } else {
+      setRecords(prev => prev.map(rec => rec.id === mileageAdjustmentRecord.id ? updatedRecord : rec));
+    }
+    setMileageAdjustmentRecord(null);
+    setMileageAdjustmentAmount('');
   };
 
   const handleEditRecordSubmit = async (e: React.FormEvent) => {
@@ -823,38 +820,32 @@ export default function App() {
       .sort((a, b) => b.baki - a.baki);
   }, [records]);
 
-  // Compute chart data for monthly payments (current year)
-  const monthlyPaymentData = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-    const months = ['Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ogo', 'Sep', 'Okt', 'Nov', 'Dis'];
-    const monthlyTotals = new Array(12).fill(0);
-
-    records.forEach(record => {
-      if (record.paymentHistory) {
-        record.paymentHistory.forEach(payment => {
-          const date = parseDateObj(payment.date);
-          if (date.getFullYear() === currentYear) {
-            monthlyTotals[date.getMonth()] += (payment.amount || 0) + (payment.mileageAmount || 0);
-          }
-        });
-      }
-    });
-
-    return months.map((month, index) => ({
-      name: month,
-      jumlah: monthlyTotals[index]
-    }));
-  }, [records]);
+  // Export functions removed
 
   return (
-    <div className="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans h-screen w-full flex flex-col md:flex-row overflow-hidden print:static print:h-auto print:overflow-visible print:block">
-      {/* Sidebar Nav */}
-      <aside className="w-64 bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-900 flex-col hidden md:flex shrink-0 print:hidden z-10">
-        <div className="p-8">
-          <img src="/logo.png" alt="HM Lawyer" className="h-12 w-auto object-contain" onError={(e) => {
-            (e.target as HTMLImageElement).src = ''; 
-            (e.target as HTMLImageElement).alt = 'HM Lawyer';
-          }} />
+    <div className="flex h-screen w-full bg-zinc-50 dark:bg-black font-sans overflow-hidden text-zinc-900 dark:text-zinc-100">
+      
+      {/* Sidebar for Desktop */}
+      <aside className="w-64 bg-white dark:bg-zinc-950 border-r border-zinc-100 dark:border-zinc-900 hidden md:flex flex-col z-20 shrink-0 print:hidden">
+        <div className="h-16 flex items-center px-6 border-b border-zinc-100 dark:border-zinc-900 shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-inner">
+              <Users size={18} className="text-white" />
+            </div>
+            <span className="font-bold text-lg tracking-tight text-zinc-900 dark:text-white">Lexis<span className="text-blue-600">Track</span></span>
+          </div>
+        </div>
+        
+        <div className="px-6 py-5 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center shrink-0 border border-zinc-200 dark:border-zinc-800">
+              <span className="font-bold text-zinc-600 dark:text-zinc-400">HM</span>
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold truncate text-zinc-900 dark:text-zinc-100">Hairi Mustafa</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">Peguam Syarie</p>
+            </div>
+          </div>
           <div className="text-[10px] uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-500 mt-4 font-medium">Pengurusan Kes</div>
         </div>
         <nav className="flex-1 px-4 space-y-1">
@@ -870,17 +861,12 @@ export default function App() {
           >
             Rekod Pelanggan
           </button>
-          <button 
-            onClick={() => setActiveTab('reports')}
-            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'reports' ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-50 dark:hover:bg-zinc-900/50'}`}
-          >
-            Laporan Kewangan
-          </button>
+
           <button 
             onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }}
             className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'standalone' ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-50 dark:hover:bg-zinc-900/50'}`}
           >
-            Resit Bebas
+            Paparan Resit
           </button>
         </nav>
       </aside>
@@ -891,7 +877,7 @@ export default function App() {
         <header className="h-16 border-b border-zinc-100 dark:border-zinc-900 flex items-center justify-between px-6 sm:px-8 shrink-0 print:hidden z-10 bg-white dark:bg-zinc-950">
           <div className="flex items-center gap-4">
             <h1 className="text-lg font-semibold text-zinc-900 dark:text-white tracking-tight">
-              {activeTab === 'dashboard' ? 'Papan Pemuka' : activeTab === 'records' ? 'Rekod Pelanggan' : activeTab === 'reports' ? 'Laporan Kewangan' : 'Resit Bebas'}
+              {activeTab === 'dashboard' ? 'Papan Pemuka' : activeTab === 'records' ? 'Rekod Pelanggan' : 'Paparan Resit'}
             </h1>
           </div>
           <div className="flex items-center gap-3">
@@ -1062,59 +1048,11 @@ export default function App() {
                          <CreditCard size={20} />
                        </div>
                        <div>
-                         <p className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">Resit Bebas</p>
+                         <p className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">Paparan Resit</p>
                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">Jana resit pembayaran am tanpa memaut ke rekod kes sedia ada.</p>
                        </div>
                      </button>
                    </div>
-                </div>
-              </div>
-            )}
-
-            {/* Dashboard and Reports View: Charts */}
-            {activeTab === 'reports' && (
-              <div className={`bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm flex flex-col p-6 overflow-hidden shrink-0 w-full`}>
-                <div className="flex justify-between items-center mb-6 shrink-0">
-                  <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 tracking-tight flex items-center gap-2">
-                    <BarChart2 size={16} className="text-blue-500" />
-                    Jumlah Bayaran Mengikut Bulan ({new Date().getFullYear()})
-                  </h3>
-                  {activeTab === 'reports' && (
-                    <button
-                      onClick={handleExportLaporanCSV}
-                      className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 transition-all"
-                    >
-                      <Download size={14} />
-                      Eksport <span className="hidden sm:inline">CSV</span>
-                    </button>
-                  )}
-                </div>
-                <div className="h-[300px] w-full mt-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={monthlyPaymentData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#52525b" opacity={0.2} />
-                      <XAxis 
-                        dataKey="name" 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 12, fill: '#a1a1aa' }} 
-                        dy={10}
-                      />
-                      <YAxis 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 12, fill: '#a1a1aa' }} 
-                        tickFormatter={(value) => `RM${value}`}
-                        dx={-10}
-                      />
-                      <Tooltip 
-                        cursor={{ fill: '#f4f4f5', opacity: 0.05 }}
-                        contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
-                        formatter={(value: number) => [`RM ${value.toFixed(2)}`, 'Jumlah Bayaran']}
-                      />
-                      <Line type="monotone" dataKey="jumlah" stroke="#2563eb" strokeWidth={2.5} activeDot={{ r: 6, fill: '#2563eb', stroke: '#fff', strokeWidth: 2 }} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
                 </div>
               </div>
             )}
@@ -1265,8 +1203,17 @@ export default function App() {
                             </td>
                             <td className="hidden md:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 text-center text-zinc-500 font-mono text-[11px]">{formatDateDMY(record.tarikh)}</td>
                             <td className="hidden xl:table-cell px-3 sm:px-4 py-3 font-mono border-r border-zinc-100 dark:border-zinc-800/50 text-right text-zinc-400">{formatRM(record.bakiSebelum)}</td>
-                            <td className={`px-3 sm:px-4 py-3 font-mono font-bold border-r border-zinc-100 dark:border-zinc-800/50 text-right ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-zinc-800 dark:text-zinc-200'}`}>
-                              {formatRM(record.bakiFeeTerkini)}
+                            <td className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">
+                              <div className="flex items-center justify-end gap-2 font-mono font-bold">
+                                {record.bakiFeeTerkini <= 0 ? (
+                                  <span className="text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 font-sans">Selesai</span>
+                                ) : (
+                                  <span className="text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 font-sans">Belum</span>
+                                )}
+                                <span className={record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-zinc-800 dark:text-zinc-200'}>
+                                  {formatRM(record.bakiFeeTerkini)}
+                                </span>
+                              </div>
                             </td>
                             <td className="hidden lg:table-cell px-3 sm:px-4 py-3 font-mono border-r border-zinc-100 dark:border-zinc-800/50 text-right text-amber-600 dark:text-amber-500">
                               {formatRM(record.bakiMileage)}
@@ -1350,7 +1297,18 @@ export default function App() {
                                           }}
                                         >
                                           <FileText size={14} />
-                                          Resit Bebas
+                                          Paparan Resit
+                                        </button>
+                                        <button 
+                                          className="w-full px-4 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-teal-600 dark:text-teal-500 font-medium transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+                                          onClick={() => {
+                                            setMileageAdjustmentRecord({...record});
+                                            setMileageAdjustmentAmount('');
+                                            setMileageAdjustmentType('tambah');
+                                          }}
+                                        >
+                                          <Car size={14} />
+                                          Pelarasan Mileage
                                         </button>
                                         <button 
                                           className="w-full px-4 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-amber-600 dark:text-amber-500 font-medium transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm"
@@ -1609,14 +1567,32 @@ export default function App() {
                       <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
                         Baki Mileage (RM)
                       </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg font-mono text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
-                        value={editingRecord.bakiMileage}
-                        onChange={(e) => setEditingRecord({ ...editingRecord, bakiMileage: parseFloat(e.target.value) || 0 })}
-                      />
+                      <div className="flex items-center gap-2">
+                        <button 
+                          type="button" 
+                          onClick={() => setEditingRecord({...editingRecord, bakiMileage: Math.max(0, (editingRecord.bakiMileage || 0) - 50)})}
+                          className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                          title="Tolak RM50"
+                        >
+                          -50
+                        </button>
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg font-mono text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100 text-center"
+                          value={editingRecord.bakiMileage}
+                          onChange={(e) => setEditingRecord({ ...editingRecord, bakiMileage: parseFloat(e.target.value) || 0 })}
+                        />
+                        <button 
+                          type="button" 
+                          onClick={() => setEditingRecord({...editingRecord, bakiMileage: (editingRecord.bakiMileage || 0) + 50})}
+                          className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                          title="Tambah RM50"
+                        >
+                          +50
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-zinc-500 mt-1.5">Gunakan butang untuk tambah/tolak, atau taip jumlah terus.</p>
                     </div>
                   </div>
 
@@ -1849,6 +1825,93 @@ export default function App() {
       </AnimatePresence>
 
       <AnimatePresence>
+        {mileageAdjustmentRecord && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:hidden">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-sm flex flex-col overflow-hidden"
+            >
+              <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 shrink-0">
+                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                  <Car size={18} className="text-teal-500" />
+                  Pelarasan Mileage
+                </h3>
+                <button onClick={() => setMileageAdjustmentRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-6">
+                <div className="mb-5 p-4 rounded-lg bg-teal-50 dark:bg-teal-900/10 border border-teal-100 dark:border-teal-900/30">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500 dark:text-zinc-400">Baki Semasa (Mileage):</span>
+                    <span className="font-mono font-bold text-teal-700 dark:text-teal-400">{formatRM(mileageAdjustmentRecord.bakiMileage || 0)}</span>
+                  </div>
+                </div>
+                
+                <form onSubmit={handleMileageAdjustmentSubmit} className="space-y-5">
+                  <div className="flex rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800">
+                    <button 
+                      type="button" 
+                      onClick={() => setMileageAdjustmentType('tambah')}
+                      className={`flex-1 py-2.5 text-sm font-medium transition-colors ${mileageAdjustmentType === 'tambah' ? 'bg-teal-500 text-white' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    >
+                      Tambah (+)
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => setMileageAdjustmentType('tolak')}
+                      className={`flex-1 py-2.5 text-sm font-medium transition-colors border-l border-zinc-200 dark:border-zinc-800 ${mileageAdjustmentType === 'tolak' ? 'bg-teal-500 text-white border-transparent' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    >
+                      Tolak (-)
+                    </button>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                      Jumlah Pelarasan (RM)
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <span className="text-zinc-500 dark:text-zinc-400 font-mono text-sm">RM</span>
+                      </div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        required
+                        className="pl-10 pr-4 py-2.5 w-full border border-zinc-200 dark:border-zinc-800 focus:ring-teal-500/20 focus:border-teal-500 rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950"
+                        placeholder="0.00"
+                        value={mileageAdjustmentAmount}
+                        onChange={(e) => setMileageAdjustmentAmount(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button 
+                      type="button"
+                      onClick={() => setMileageAdjustmentRecord(null)}
+                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-colors cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button 
+                      type="submit"
+                      className="px-5 py-2.5 text-sm bg-teal-600 text-white rounded-lg hover:bg-teal-700 font-medium transition-colors cursor-pointer shadow-sm"
+                    >
+                      Simpan
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {paymentRecord && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:hidden">
             <motion.div 
@@ -2438,27 +2501,22 @@ export default function App() {
       >
         <button 
           onClick={() => setActiveTab('dashboard')} 
-          className={`flex flex-col items-center p-1 text-[9px] w-1/4 text-center ${activeTab === 'dashboard' ? 'text-white' : 'hover:text-white'}`}
+          className={`flex flex-col items-center p-1 text-[9px] w-1/3 text-center ${activeTab === 'dashboard' ? 'text-white' : 'hover:text-white'}`}
         >
           <Home size={20} className="mb-1" /> Papan Pemuka
         </button>
         <button 
           onClick={() => setActiveTab('records')} 
-          className={`flex flex-col items-center p-1 text-[9px] w-1/4 text-center ${activeTab === 'records' ? 'text-white' : 'hover:text-white'}`}
+          className={`flex flex-col items-center p-1 text-[9px] w-1/3 text-center ${activeTab === 'records' ? 'text-white' : 'hover:text-white'}`}
         >
           <Users size={20} className="mb-1" /> Rekod Pelanggan
         </button>
-        <button 
-          onClick={() => setActiveTab('reports')} 
-          className={`flex flex-col items-center p-1 text-[9px] w-1/4 text-center ${activeTab === 'reports' ? 'text-white' : 'hover:text-white'}`}
-        >
-          <BarChart2 size={20} className="mb-1" /> Laporan Kewangan
-        </button>
+
         <button 
           onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }} 
-          className={`flex flex-col items-center p-1 text-[9px] w-1/4 text-center ${activeTab === 'standalone' ? 'text-white' : 'hover:text-white'}`}
+          className={`flex flex-col items-center p-1 text-[9px] w-1/3 text-center ${activeTab === 'standalone' ? 'text-white' : 'hover:text-white'}`}
         >
-          <FileText size={20} className="mb-1" /> Resit Bebas
+          <FileText size={20} className="mb-1" /> Paparan Resit
         </button>
       </nav>
     </div>

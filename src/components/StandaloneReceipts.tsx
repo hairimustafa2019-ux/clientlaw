@@ -296,7 +296,7 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
         {/* Database Section */}
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm p-6">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-bold text-zinc-800 dark:text-zinc-200">Senarai Rekod Resit Bebas</h3>
+            <h3 className="text-lg font-bold text-zinc-800 dark:text-zinc-200">Senarai Resit</h3>
             <div className="w-72">
               <input type="text" placeholder="Cari nama pelanggan..." className="w-full px-3 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950"
                 value={searchTxt} onChange={e => setSearchTxt(e.target.value)} />
