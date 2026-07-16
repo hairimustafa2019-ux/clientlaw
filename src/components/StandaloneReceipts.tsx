@@ -35,17 +35,33 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
     localStorage.setItem('hma_receipts', JSON.stringify(records));
   }, [records]);
 
-  const [form, setForm] = useState<StandaloneReceiptData>({
-    tarikh: new Date().toISOString().split('T')[0],
-    kategori: 'Fee',
-    nama: '',
-    alamat: '',
-    items: [{ perkara: 'Fee/Deposit', harga: 0 }],
-    jumlah: 0,
-    bakiTerdahulu: 0,
-    bakiTerkini: 0,
-    butiran: ''
+  const [form, setForm] = useState<StandaloneReceiptData>(() => {
+    const defaultForm = {
+      tarikh: new Date().toISOString().split('T')[0],
+      kategori: 'Fee',
+      nama: '',
+      alamat: '',
+      items: [{ perkara: 'Fee/Deposit', harga: 0 }],
+      jumlah: 0,
+      bakiTerdahulu: 0,
+      bakiTerkini: 0,
+      butiran: ''
+    };
+    const savedDraft = localStorage.getItem('hma_receipt_draft');
+    if (savedDraft) {
+      try {
+        return { ...defaultForm, ...JSON.parse(savedDraft) };
+      } catch (e) {
+        return defaultForm;
+      }
+    }
+    return defaultForm;
   });
+
+  // Simpan draf setiap kali borang berubah
+  useEffect(() => {
+    localStorage.setItem('hma_receipt_draft', JSON.stringify(form));
+  }, [form]);
 
   useEffect(() => {
     if (initialData) {
