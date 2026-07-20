@@ -829,10 +829,8 @@ export default function App() {
       <aside className="w-64 bg-white dark:bg-zinc-950 border-r border-zinc-100 dark:border-zinc-900 hidden md:flex flex-col z-20 shrink-0 print:hidden">
         <div className="h-16 flex items-center px-6 border-b border-zinc-100 dark:border-zinc-900 shrink-0">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-inner">
-              <Users size={18} className="text-white" />
-            </div>
-            <span className="font-bold text-lg tracking-tight text-zinc-900 dark:text-white">Lexis<span className="text-blue-600">Track</span></span>
+            <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-10 w-auto" alt="Logo" />
+            <span className="font-bold text-sm tracking-tight text-zinc-900 dark:text-white uppercase">HAIRI MUSTAFA <span className="text-blue-600">ASSOCIATES</span></span>
           </div>
         </div>
         
