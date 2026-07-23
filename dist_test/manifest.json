@@ -1,0 +1,22 @@
+{
+  "name": "HM Client Lawyer",
+  "short_name": "HM Lawyer",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#18181b",
+  "theme_color": "#18181b",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 192 192\"%3E%3Crect width=\"192\" height=\"192\" fill=\"%2318181b\" rx=\"20\"/%3E%3Ctext x=\"96\" y=\"105\" font-family=\"Arial, sans-serif\" font-size=\"80\" fill=\"white\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"middle\"%3EHM%3C/text%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\"%3E%3Crect width=\"512\" height=\"512\" fill=\"%2318181b\" rx=\"50\"/%3E%3Ctext x=\"256\" y=\"280\" font-family=\"Arial, sans-serif\" font-size=\"200\" fill=\"white\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"middle\"%3EHM%3C/text%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
