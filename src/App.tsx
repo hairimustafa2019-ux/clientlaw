@@ -6,7 +6,7 @@
 import StandaloneReceipts from './components/StandaloneReceipts';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus } from 'lucide-react';
+import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { records as initialRecords, CaseRecord } from './data';
 import jsPDF from 'jspdf';
@@ -95,7 +95,8 @@ const formatDateISO = (dateStr: string) => {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'records' | 'standalone'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'records' | 'standalone' | 'settings'>('dashboard');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [records, setRecords] = useState<CaseRecord[]>(() => {
     const saved = localStorage.getItem('localOfflineRecords');
     if (saved) {
@@ -822,20 +823,173 @@ export default function App() {
 
   // Export functions removed
 
+
+    const renderExpandedDetails = (record: any) => (
+<div className="p-4 sm:p-6 m-2 sm:m-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm">
+  <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8">
+    <div>
+      <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4 flex items-center gap-2">
+        <FileText size={16} className="text-blue-500"/> Maklumat Kes
+      </h4>
+      <div className="space-y-3 text-sm">
+        <p className="flex justify-between items-center"><span className="text-zinc-500">ID Rekod</span> <span className="font-mono text-zinc-900 dark:text-zinc-100 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded">{record.id}</span></p>
+        <p className="flex justify-between items-center"><span className="text-zinc-500">Kategori</span> <span className="font-medium text-zinc-900 dark:text-zinc-100">{record.kes}</span></p>
+        <p className="flex justify-between items-center"><span className="text-zinc-500">Dikemaskini</span> <span className="text-zinc-900 dark:text-zinc-100">{formatDateDMY(record.tarikh)}</span></p>
+        {record.nota && (
+          <div className="pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-800">
+            <p className="text-zinc-500 mb-1">Nota / Ringkasan</p>
+            <p className="text-zinc-900 dark:text-zinc-100 whitespace-pre-line">{record.nota}</p>
+          </div>
+        )}
+      </div>
+    </div>
+    <div>
+      <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4 flex items-center gap-2">
+        <Wallet size={16} className="text-blue-500"/> Pecahan Kewangan
+      </h4>
+      <div className="space-y-3 text-sm">
+        <p className="flex justify-between items-center"><span className="text-zinc-500">Jumlah Fee</span> <span className="font-mono text-zinc-900 dark:text-zinc-100">{formatRM(record.totalFee)}</span></p>
+        <p className="flex justify-between items-center"><span className="text-zinc-500">Baki Terdahulu</span> <span className="font-mono text-zinc-900 dark:text-zinc-100">{formatRM(record.bakiSebelum)}</span></p>
+        <p className="flex justify-between items-center"><span className="text-zinc-500">Bayaran Terakhir</span> <span className="font-mono font-medium text-emerald-600 dark:text-emerald-500">{record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}</span></p>
+        <p className="flex justify-between items-center"><span className="text-zinc-500">Baki Terkini</span> <span className={`font-mono font-bold ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-zinc-100'}`}>{formatRM(record.bakiFeeTerkini)}</span></p>
+        <p className="flex justify-between items-center pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-800"><span className="text-zinc-500">Baki Mileage</span> <span className="font-mono font-medium text-amber-600 dark:text-amber-500">{formatRM(record.bakiMileage)}</span></p>
+      </div>
+    </div>
+    <div>
+      <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4 flex items-center gap-2">
+        <History size={16} className="text-blue-500"/> Rekod Bayaran
+      </h4>
+      {record.paymentHistory && record.paymentHistory.length > 0 ? (
+        <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+          <table className="w-full text-left text-[13px] md:whitespace-nowrap">
+            <thead className="bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 uppercase text-[10px] font-bold tracking-wider">
+              <tr>
+                <th className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">ID</th>
+                <th 
+                  className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group"
+                  onClick={() => {
+                    if (paymentSortColumn === 'date') {
+                      setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
+                    } else {
+                      setPaymentSortColumn('date');
+                      setPaymentSortDirection('asc');
+                    }
+                  }}
+                >
+                  <div className="flex items-center gap-1">
+                    Tarikh
+                    <span className="text-zinc-400">
+                      {paymentSortColumn === 'date' ? (paymentSortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUp size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" />}
+                    </span>
+                  </div>
+                </th>
+                <th className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">Kaedah</th>
+                <th 
+                  className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group text-right"
+                  onClick={() => {
+                    if (paymentSortColumn === 'amount') {
+                      setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
+                    } else {
+                      setPaymentSortColumn('amount');
+                      setPaymentSortDirection('asc');
+                    }
+                  }}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    <span className="text-zinc-400">
+                      {paymentSortColumn === 'amount' ? (paymentSortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUp size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" />}
+                    </span>
+                    Fee (RM)
+                  </div>
+                </th>
+                <th className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 text-right">Mileage (RM)</th>
+                <th className="px-4 py-3 text-center w-12">Tindakan</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...record.paymentHistory].sort((a, b) => {
+                if (!paymentSortColumn) return 0;
+                let comparison = 0;
+                if (paymentSortColumn === 'date') comparison = parseDateString(a.date) - parseDateString(b.date);
+                else if (paymentSortColumn === 'amount') comparison = (a.amount || 0) - (b.amount || 0);
+                return paymentSortDirection === 'asc' ? comparison : -comparison;
+              }).map((payment: any) => (
+                <tr key={payment.id} className="border-b border-zinc-100 dark:border-zinc-800/50 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-500 font-mono text-xs">{payment.id}</td>
+                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-700 dark:text-zinc-300 font-mono text-[11px]">{formatDateDMY(payment.date)}</td>
+                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-700 dark:text-zinc-300 text-xs">{payment.method}</td>
+                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-right text-emerald-600 dark:text-emerald-500 font-medium font-mono text-sm">
+                    {payment.amount ? '+' + formatRM(payment.amount) : '-'}
+                  </td>
+                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-right text-amber-600 dark:text-amber-500 font-medium font-mono text-sm">
+                    {payment.mileageAmount ? '+' + formatRM(payment.mileageAmount) : '-'}
+                  </td>
+                  <td className="px-4 py-2 text-center flex justify-center gap-2">
+                    <button 
+                      title="Papar/Cetak Resit"
+                      onClick={() => setReceiptData({record, payment})}
+                      className="p-1 text-blue-500 hover:text-blue-700 transition-colors rounded hover:bg-blue-50"
+                    >
+                      <FileText size={14} />
+                    </button>
+                    <button 
+                      onClick={async () => {
+                        if (window.confirm('Padam rekod bayaran ini?')) {
+                          const newHistory = record.paymentHistory.filter((p: any) => p.id !== payment.id);
+                          const updatedRecord = {
+                            ...record,
+                            paymentHistory: newHistory,
+                            bakiFeeTerkini: record.bakiFeeTerkini + payment.amount,
+                            bakiMileage: record.bakiMileage + (payment.mileageAmount || 0),
+                            bayaranTerakhir: newHistory.length > 0 ? newHistory[0].amount : 0
+                          };
+                          if (user) {
+                            const targetPath = `users/${user.uid}/records/${record.id}`;
+                            try {
+                              await setDoc(doc(db, 'users', user.uid, 'records', record.id), updatedRecord);
+                            } catch (err: any) {
+                              handleFirestoreError(err, OperationType.WRITE, targetPath);
+                            }
+                          } else {
+                            setRecords((prev: any) => prev.map((r: any) => r.id === record.id ? updatedRecord : r));
+                          }
+                        }
+                      }}
+                      className="text-zinc-400 dark:text-zinc-500 hover:text-red-600 p-1 rounded transition-colors"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="text-center p-4 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-sm text-zinc-500 dark:text-zinc-400 text-sm">
+          Tiada rekod bayaran buat masa ini.
+        </div>
+      )}
+    </div>
+  </div>
+</div>
+  );
+
   return (
     <div className="flex h-screen w-full bg-zinc-50 dark:bg-black font-sans overflow-hidden text-zinc-900 dark:text-zinc-100">
       
       {/* Sidebar for Desktop */}
-      <aside className="w-64 bg-white dark:bg-zinc-950 border-r border-zinc-100 dark:border-zinc-900 hidden md:flex flex-col z-20 shrink-0 print:hidden">
+
+      <aside className="w-64 bg-white dark:bg-zinc-950 border-r border-zinc-100 dark:border-zinc-900 hidden md:flex flex-col z-30 shrink-0 print:hidden relative">
         <div className="h-16 flex items-center px-6 border-b border-zinc-100 dark:border-zinc-900 shrink-0">
           <div className="flex items-center gap-2">
-            <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-10 w-auto" alt="Logo" />
-            <span className="font-bold text-sm tracking-tight text-zinc-900 dark:text-white uppercase">HAIRI MUSTAFA <span className="text-blue-600">ASSOCIATES</span></span>
+            <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-8 w-auto" alt="Logo" />
+            <span className="font-bold text-[12px] tracking-tight text-zinc-900 dark:text-white uppercase leading-tight">HAIRI MUSTAFA <span className="text-blue-600 block">ASSOCIATES</span></span>
           </div>
         </div>
         
         <div className="px-6 py-5 shrink-0">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 overflow-x-auto no-scrollbar mask-edges">
             <div className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center shrink-0 border border-zinc-200 dark:border-zinc-800">
               <span className="font-bold text-zinc-600 dark:text-zinc-400">HM</span>
             </div>
@@ -848,20 +1002,20 @@ export default function App() {
         </div>
         <nav className="flex-1 px-4 space-y-1">
           <button 
-            onClick={() => setActiveTab('dashboard')}
+            onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
             className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'dashboard' ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-50 dark:hover:bg-zinc-900/50'}`}
           >
             Papan Pemuka
           </button>
           <button 
-            onClick={() => setActiveTab('records')}
+            onClick={() => { setActiveTab('records'); setIsMobileMenuOpen(false); }}
             className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'records' ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-50 dark:hover:bg-zinc-900/50'}`}
           >
             Rekod Pelanggan
           </button>
 
           <button 
-            onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }}
+            onClick={() => { { setActiveTab('standalone'); setIsMobileMenuOpen(false); }; setStandaloneInitialRecord(null); }}
             className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'standalone' ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-50 dark:hover:bg-zinc-900/50'}`}
           >
             Paparan Resit
@@ -872,34 +1026,28 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-zinc-950">
         {/* Top Bar */}
-        <header className="h-16 border-b border-zinc-100 dark:border-zinc-900 flex items-center justify-between px-6 sm:px-8 shrink-0 print:hidden z-10 bg-white dark:bg-zinc-950">
-          <div className="flex items-center gap-4">
+        <header className="h-16 border-b border-zinc-100 dark:border-zinc-900 flex items-center justify-between px-4 sm:px-8 shrink-0 print:hidden z-10 bg-white dark:bg-zinc-950">
+          <div className="flex items-center gap-2 sm:gap-4">
             <h1 className="text-lg font-semibold text-zinc-900 dark:text-white tracking-tight">
-              {activeTab === 'dashboard' ? 'Papan Pemuka' : activeTab === 'records' ? 'Rekod Pelanggan' : 'Paparan Resit'}
+              {activeTab === 'dashboard' ? 'Papan Pemuka' : activeTab === 'records' ? 'Rekod Pelanggan' : activeTab === 'settings' ? 'Tetapan' : 'Paparan Resit'}
             </h1>
           </div>
           <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setDarkMode(!darkMode)}
-              className="p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
-              title={darkMode ? "Tukar ke Mod Siang" : "Tukar ke Mod Gelap"}
-            >
+            <button onClick={() => setDarkMode(!darkMode)} className="hidden sm:flex p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors" title={darkMode ? "Tukar ke Mod Siang" : "Tukar ke Mod Gelap"}>
               {darkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
 
             {!user ? (
               <button 
                 onClick={handleLogin}
-                className="px-4 py-2 text-sm bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all"
-              >
+                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
                 <LogIn size={14} />
                 <span className="hidden sm:inline">Log Masuk</span>
               </button>
             ) : (
               <button 
                 onClick={handleLogout}
-                className="px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all"
-              >
+                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
                 <LogOut size={14} />
                 <span className="hidden sm:inline">Log Keluar</span>
               </button>
@@ -907,8 +1055,7 @@ export default function App() {
             {isInstallable && (
               <button 
                 onClick={handleInstallApp}
-                className="px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all"
-              >
+                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
                 <Download size={14} />
                 <span className="hidden sm:inline">Pasang</span>
               </button>
@@ -917,7 +1064,7 @@ export default function App() {
               <button 
                 onClick={handleBackupToCloud}
                 disabled={isBackingUp}
-                className="px-4 py-2 text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 shrink-0 transition-all"
+                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 shrink-0 transition-all"
               >
                 {isBackingUp ? <Loader2 size={14} className="animate-spin" /> : <CloudUpload size={14} />}
                 <span className="hidden sm:inline">Cloud Backup</span>
@@ -925,9 +1072,9 @@ export default function App() {
             )}
             <button 
               onClick={handleExportData}
-              className="px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all"
-            >
-              Eksport
+              className="hidden sm:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
+              <Download size={14} />
+              <span className="hidden sm:inline">Eksport</span>
             </button>
             <input 
               type="file" 
@@ -938,16 +1085,16 @@ export default function App() {
             />
             <button 
               onClick={() => fileInputRef.current?.click()}
-              className="px-4 py-2 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all"
-            >
+              className="hidden sm:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
               <Upload size={14} />
               <span className="hidden sm:inline">Import</span>
             </button>
             <button 
               onClick={() => setIsNewRecordModalOpen(true)}
-              className="px-4 py-2 text-sm bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer shrink-0 transition-all"
+              className="p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center justify-center shrink-0 transition-all"
             >
-              + Rekod Baru
+              <Plus size={16} className="sm:hidden" />
+              <span className="hidden sm:inline">+ Rekod Baru</span>
             </button>
           </div>
         </header>
@@ -955,7 +1102,7 @@ export default function App() {
 
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {activeTab !== 'records' && activeTab !== 'standalone' && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 px-4 sm:px-6 md:px-8 pt-6 pb-2 shrink-0 print:hidden">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
               <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
                 <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Jumlah Kes</div>
                 <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{stats.totalKes}</div>
@@ -979,8 +1126,90 @@ export default function App() {
           )}
 
           {/* Dashboard Content / Record Table */}
-          <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-4 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
+          <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
             
+            
+            {/* Settings Tab Content */}
+            {activeTab === 'settings' && (
+              <div className="flex flex-col gap-6 sm:hidden pb-10">
+                <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 overflow-hidden">
+                  <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
+                    <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Tetapan & Tindakan</h2>
+                  </div>
+                  <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    <button onClick={() => setDarkMode(!darkMode)} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400">
+                          {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+                        </div>
+                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{darkMode ? "Mod Siang" : "Mod Gelap"}</span>
+                      </div>
+                      <ChevronRight size={18} className="text-zinc-400" />
+                    </button>
+                    {!user ? (
+                      <button onClick={handleLogin} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400">
+                            <LogIn size={18} />
+                          </div>
+                          <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Log Masuk</span>
+                        </div>
+                        <ChevronRight size={18} className="text-zinc-400" />
+                      </button>
+                    ) : (
+                      <button onClick={handleLogout} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-red-50 dark:bg-red-500/10 rounded-lg text-red-600 dark:text-red-400">
+                            <LogOut size={18} />
+                          </div>
+                          <span className="text-sm font-medium text-red-600 dark:text-red-400">Log Keluar</span>
+                        </div>
+                      </button>
+                    )}
+                    {isInstallable && (
+                      <button onClick={handleInstallApp} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400">
+                            <Download size={18} />
+                          </div>
+                          <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Pasang Aplikasi</span>
+                        </div>
+                        <ChevronRight size={18} className="text-zinc-400" />
+                      </button>
+                    )}
+                    {user && (
+                      <button onClick={handleBackupToCloud} disabled={isBackingUp} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors disabled:opacity-50">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-blue-50 dark:bg-blue-500/10 rounded-lg text-blue-600 dark:text-blue-400">
+                            {isBackingUp ? <Loader2 size={18} className="animate-spin" /> : <CloudUpload size={18} />}
+                          </div>
+                          <span className="text-sm font-medium text-blue-600 dark:text-blue-400">Cloud Backup</span>
+                        </div>
+                        <ChevronRight size={18} className="text-zinc-400" />
+                      </button>
+                    )}
+                    <button onClick={handleExportData} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400">
+                          <Download size={18} />
+                        </div>
+                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Eksport Data CSV</span>
+                      </div>
+                      <ChevronRight size={18} className="text-zinc-400" />
+                    </button>
+                    <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400">
+                          <Upload size={18} />
+                        </div>
+                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Import Data CSV</span>
+                      </div>
+                      <ChevronRight size={18} className="text-zinc-400" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             {/* Main Dashboard Content */}
             {activeTab === 'dashboard' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 shrink-0 w-full">
@@ -992,7 +1221,7 @@ export default function App() {
                        Kes Terkini
                      </h3>
                      <button 
-                       onClick={() => setActiveTab('records')}
+                       onClick={() => { setActiveTab('records'); setIsMobileMenuOpen(false); }}
                        className="text-xs text-blue-600 hover:text-blue-700 font-medium cursor-pointer"
                      >
                        Lihat Semua
@@ -1025,7 +1254,7 @@ export default function App() {
                        Tindakan Pantas
                      </h3>
                    </div>
-                   <div className="grid grid-cols-2 gap-4 flex-1">
+                   <div className="grid grid-cols-2 gap-3 sm:gap-4 flex-1">
                      <button
                        onClick={() => setIsNewRecordModalOpen(true)}
                        className="p-5 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left flex flex-col gap-4 group cursor-pointer h-full"
@@ -1035,11 +1264,11 @@ export default function App() {
                        </div>
                        <div>
                          <p className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">Rekod Baru</p>
-                         <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">Daftar pelanggan dan butiran kes baru ke dalam sistem.</p>
+                         <p className="hidden sm:block text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">Daftar pelanggan dan butiran kes baru ke dalam sistem.</p>
                        </div>
                      </button>
                      <button
-                       onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }}
+                       onClick={() => { { setActiveTab('standalone'); setIsMobileMenuOpen(false); }; setStandaloneInitialRecord(null); }}
                        className="p-5 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left flex flex-col gap-4 group cursor-pointer h-full"
                      >
                        <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover:scale-105 transition-transform">
@@ -1047,7 +1276,7 @@ export default function App() {
                        </div>
                        <div>
                          <p className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">Paparan Resit</p>
-                         <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">Jana resit pembayaran am tanpa memaut ke rekod kes sedia ada.</p>
+                         <p className="hidden sm:block text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">Jana resit pembayaran am tanpa memaut ke rekod kes sedia ada.</p>
                        </div>
                      </button>
                    </div>
@@ -1063,7 +1292,7 @@ export default function App() {
                   <FileText size={16} className="text-blue-500" />
                   Senarai Rekod Kes
                 </span>
-                <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full lg:w-auto">
                   {selectedRecords.length > 0 && (
                     <button
                       onClick={() => setIsDeletingSelected(true)}
@@ -1102,10 +1331,10 @@ export default function App() {
                       <ChevronDown size={14} className="text-zinc-400" />
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
                     <input
                       type="date"
-                      className="px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg w-full sm:w-36 bg-white dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-zinc-700 dark:text-zinc-300 transition-all"
+                      className="px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg flex-1 sm:flex-none sm:w-36 bg-white dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-zinc-700 dark:text-zinc-300 transition-all"
                       value={filterStartDate}
                       onChange={(e) => setFilterStartDate(e.target.value)}
                       title="Tarikh Mula"
@@ -1113,7 +1342,7 @@ export default function App() {
                     <span className="text-zinc-400 text-sm font-medium px-1">-</span>
                     <input
                       type="date"
-                      className="px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg w-full sm:w-36 bg-white dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-zinc-700 dark:text-zinc-300 transition-all"
+                      className="px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg flex-1 sm:flex-none sm:w-36 bg-white dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-zinc-700 dark:text-zinc-300 transition-all"
                       value={filterEndDate}
                       onChange={(e) => setFilterEndDate(e.target.value)}
                       title="Tarikh Akhir"
@@ -1122,8 +1351,104 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="overflow-auto flex-1 bg-white dark:bg-zinc-950">
-                <table className="w-full text-left border-collapse whitespace-nowrap">
+              <div className="overflow-auto flex-1 bg-zinc-50/50 md:bg-white dark:bg-zinc-950/50 md:dark:bg-zinc-950 p-3 sm:p-4 md:p-0">
+                {/* Mobile View: Cards */}
+                <div className="md:hidden flex flex-col gap-3 pb-4">
+                  {filteredRecords.length > 0 ? (
+                    filteredRecords.map((record) => (
+                      <div key={record.id} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-sm relative flex flex-col transition-shadow hover:shadow-md cursor-pointer" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
+                        <div className="flex justify-between items-start mb-2">
+                           <div className="flex-1 pr-8">
+                             <h4 className="font-bold text-zinc-900 dark:text-zinc-100 text-sm">{record.nama}</h4>
+                             <p className="text-zinc-500 dark:text-zinc-400 text-xs mt-0.5">{record.kes}</p>
+                           </div>
+                           <div className="absolute top-4 right-4 z-10">
+                             <input 
+                               type="checkbox" 
+                               className="cursor-pointer rounded border-zinc-200 dark:border-zinc-700 w-4 h-4 text-blue-600 focus:ring-blue-500 transition-colors"
+                               checked={selectedRecords.includes(record.id)}
+                               onChange={(e) => {
+                                 e.stopPropagation();
+                                 if (e.target.checked) {
+                                   setSelectedRecords([...selectedRecords, record.id]);
+                                 } else {
+                                   setSelectedRecords(selectedRecords.filter(id => id !== record.id));
+                                 }
+                               }}
+                             />
+                           </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-y-3 mt-3 mb-1 text-sm border-t border-zinc-100 dark:border-zinc-800/50 pt-3">
+                           <div>
+                             <span className="block text-zinc-400 text-[10px] uppercase tracking-wider font-semibold mb-0.5">Baki Terkini</span>
+                             <span className={`font-semibold ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-zinc-800 dark:text-zinc-200'}`}>
+                               {formatRM(record.bakiFeeTerkini)}
+                             </span>
+                           </div>
+                           <div>
+                             <span className="block text-zinc-400 text-[10px] uppercase tracking-wider font-semibold mb-0.5">Mileage</span>
+                             <span className="font-semibold text-amber-600 dark:text-amber-500">
+                               {formatRM(record.bakiMileage)}
+                             </span>
+                           </div>
+                           <div className="col-span-2 flex justify-between items-center border-t border-zinc-100 dark:border-zinc-800/50 pt-2">
+                             <div>
+                               <span className="block text-zinc-400 text-[10px] uppercase tracking-wider font-semibold">Dikemaskini</span>
+                               <span className="font-medium text-zinc-700 dark:text-zinc-300 text-xs">
+                                 {formatDateDMY(record.tarikh)}
+                               </span>
+                             </div>
+                             <div className="flex gap-1.5">
+                               {record.bakiFeeTerkini === 0 ? (
+                                 <span className="text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 font-sans">Selesai</span>
+                               ) : (
+                                 <span className="text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 font-sans">Belum</span>
+                               )}
+                             </div>
+                           </div>
+                        </div>
+                        
+                        <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800/50 flex gap-2 w-full">
+                           <button onClick={(e) => { e.stopPropagation(); openPaymentModal(record); }} className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-400 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-colors">
+                             <Plus size={14} /> Bayaran
+                           </button>
+                           <button onClick={(e) => { e.stopPropagation(); setEditingRecord(record); }} className="p-1.5 px-2 text-zinc-500 hover:text-zinc-700 bg-zinc-50 hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-400 transition-colors flex items-center justify-center">
+                             <Edit size={16} />
+                           </button>
+                           <button onClick={(e) => { e.stopPropagation(); generateReceipt(record); }} className="p-1.5 px-2 text-zinc-500 hover:text-zinc-700 bg-zinc-50 hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-400 transition-colors flex items-center justify-center">
+                             <Printer size={16} />
+                           </button>
+                           <button onClick={(e) => { e.stopPropagation(); setDeletingRecord(record); }} className="p-1.5 px-2 text-red-500 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded-lg dark:bg-red-500/10 dark:hover:bg-red-500/20 transition-colors flex items-center justify-center">
+                             <Trash2 size={16} />
+                           </button>
+                        </div>
+                        
+                        <AnimatePresence>
+                          {expandedRowId === record.id && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden"
+                            >
+                               <div className="mt-4 pt-1 border-t border-zinc-100 dark:border-zinc-800 -mx-2 sm:-mx-4">
+                                 {renderExpandedDetails(record)}
+                               </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-10 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm text-zinc-400 dark:text-zinc-500 font-medium">
+                      Tiada rekod dijumpai.
+                    </div>
+                  )}
+                </div>
+
+                {/* Desktop View: Table */}
+                <table className="hidden md:table w-full text-left border-collapse whitespace-nowrap">
                   <thead className="sticky top-0 bg-zinc-50 dark:bg-zinc-900/50 z-10">
                     <tr className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase border-b border-zinc-100 dark:border-zinc-800 tracking-wider">
                       <th className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-center w-12 flex justify-center items-center h-full">
@@ -1189,7 +1514,7 @@ export default function App() {
                                 <span className="hidden sm:inline text-xs">{index + 1}</span>
                               </div>
                             </td>
-                            <td className="px-3 sm:px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200 border-r border-zinc-100 dark:border-zinc-800/50 truncate max-w-[120px] sm:max-w-none">{record.nama}</td>
+                            <td className="px-3 sm:px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200 border-r border-zinc-100 dark:border-zinc-800/50 break-words md:truncate md:max-w-none max-w-[140px]">{record.nama}</td>
                             <td className="hidden sm:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">
                               <span className="text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">
                                 {record.kes}
@@ -1244,199 +1569,7 @@ export default function App() {
                                   animate={{ height: "auto", opacity: 1 }}
                                   className="overflow-hidden"
                                 >
-                                  <div className="p-6 m-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm">
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
-                                      <div>
-                                        <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4 flex items-center gap-2">
-                                          <FileText size={16} className="text-blue-500"/> Maklumat Kes
-                                        </h4>
-                                        <div className="space-y-3 text-sm">
-                                          <p className="flex justify-between items-center"><span className="text-zinc-500">ID Rekod</span> <span className="font-mono text-zinc-900 dark:text-zinc-100 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded">{record.id}</span></p>
-                                          <p className="flex justify-between items-center"><span className="text-zinc-500">Kategori</span> <span className="font-medium text-zinc-900 dark:text-zinc-100">{record.kes}</span></p>
-                                          <p className="flex justify-between items-center"><span className="text-zinc-500">Dikemaskini</span> <span className="text-zinc-900 dark:text-zinc-100">{formatDateDMY(record.tarikh)}</span></p>
-                                          {record.nota && (
-                                            <div className="pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-800">
-                                              <p className="text-zinc-500 mb-1">Nota / Ringkasan</p>
-                                              <p className="text-zinc-900 dark:text-zinc-100 whitespace-pre-line">{record.nota}</p>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <div>
-                                        <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4 flex items-center gap-2">
-                                          <Wallet size={16} className="text-blue-500"/> Pecahan Kewangan
-                                        </h4>
-                                        <div className="space-y-3 text-sm">
-                                          <p className="flex justify-between items-center"><span className="text-zinc-500">Jumlah Fee</span> <span className="font-mono text-zinc-900 dark:text-zinc-100">{formatRM(record.totalFee)}</span></p>
-                                          <p className="flex justify-between items-center"><span className="text-zinc-500">Baki Terdahulu</span> <span className="font-mono text-zinc-900 dark:text-zinc-100">{formatRM(record.bakiSebelum)}</span></p>
-                                          <p className="flex justify-between items-center"><span className="text-zinc-500">Bayaran Terakhir</span> <span className="font-mono font-medium text-emerald-600 dark:text-emerald-500">{record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}</span></p>
-                                        </div>
-                                      </div>
-                                      <div className="flex flex-col gap-3 justify-center border-l border-zinc-100 dark:border-zinc-800 pl-8">
-                                        <button 
-                                          className="w-full px-4 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm"
-                                          onClick={() => setPaymentRecord(record)}
-                                        >
-                                          <CreditCard size={14} />
-                                          Kemaskini Bayaran
-                                        </button>
-                                        <button 
-                                          className="w-full px-4 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm"
-                                          onClick={() => setStatementRecord(record)}
-                                        >
-                                          <Printer size={14} />
-                                          Jana Penyata
-                                        </button>
-                                        <button 
-                                          className="w-full px-4 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-blue-600 dark:text-blue-400 font-medium transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm"
-                                          onClick={() => {
-                                            setStandaloneInitialRecord(record);
-                                            setActiveTab('standalone');
-                                          }}
-                                        >
-                                          <FileText size={14} />
-                                          Paparan Resit
-                                        </button>
-                                        <button 
-                                          className="w-full px-4 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-teal-600 dark:text-teal-500 font-medium transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm"
-                                          onClick={() => {
-                                            setMileageAdjustmentRecord({...record});
-                                            setMileageAdjustmentAmount('');
-                                            setMileageAdjustmentType('tambah');
-                                          }}
-                                        >
-                                          <Car size={14} />
-                                          Pelarasan Mileage
-                                        </button>
-                                        <button 
-                                          className="w-full px-4 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-amber-600 dark:text-amber-500 font-medium transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm"
-                                          onClick={() => setEditingRecord({...record})}
-                                        >
-                                          <Edit size={14} />
-                                          Edit Rekod
-                                        </button>
-                                      </div>
-                                    </div>
-
-                                    {/* Sejarah Bayaran Section */}
-                                    <div className="mt-8 pt-6 border-t border-zinc-100 dark:border-zinc-800">
-                                      <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4 flex items-center gap-2">
-                                        <Wallet size={16} className="text-blue-500" />
-                                        Sejarah Bayaran
-                                      </h4>
-                                      {record.paymentHistory && record.paymentHistory.length > 0 ? (
-                                        <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-sm">
-                                          <table className="w-full text-left text-[13px] whitespace-nowrap">
-                                            <thead className="bg-zinc-50/50 dark:bg-zinc-900/50 text-zinc-500 dark:text-zinc-400 font-semibold text-[11px] uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-800">
-                                              <tr>
-                                                <th className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">ID Bayaran</th>
-                                                <th 
-                                                  className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group"
-                                                  onClick={() => {
-                                                    if (paymentSortColumn === 'date') {
-                                                      setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
-                                                    } else {
-                                                      setPaymentSortColumn('date');
-                                                      setPaymentSortDirection('asc');
-                                                    }
-                                                  }}
-                                                >
-                                                  <div className="flex items-center gap-1">
-                                                    Tarikh
-                                                    <span className="text-zinc-400">
-                                                      {paymentSortColumn === 'date' ? (paymentSortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUp size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" />}
-                                                    </span>
-                                                  </div>
-                                                </th>
-                                                <th className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">Kaedah</th>
-                                                <th 
-                                                  className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group text-right"
-                                                  onClick={() => {
-                                                    if (paymentSortColumn === 'amount') {
-                                                      setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
-                                                    } else {
-                                                      setPaymentSortColumn('amount');
-                                                      setPaymentSortDirection('asc');
-                                                    }
-                                                  }}
-                                                >
-                                                  <div className="flex items-center justify-end gap-1">
-                                                    <span className="text-zinc-400">
-                                                      {paymentSortColumn === 'amount' ? (paymentSortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUp size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" />}
-                                                    </span>
-                                                    Fee (RM)
-                                                  </div>
-                                                </th>
-                                                <th className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 text-right">Mileage (RM)</th>
-                                                <th className="px-4 py-3 text-center w-12">Tindakan</th>
-                                              </tr>
-                                            </thead>
-                                            <tbody>
-                                              {[...record.paymentHistory].sort((a, b) => {
-                                                if (!paymentSortColumn) return 0;
-                                                let comparison = 0;
-                                                if (paymentSortColumn === 'date') comparison = parseDateString(a.date) - parseDateString(b.date);
-                                                else if (paymentSortColumn === 'amount') comparison = (a.amount || 0) - (b.amount || 0);
-                                                return paymentSortDirection === 'asc' ? comparison : -comparison;
-                                              }).map((payment) => (
-                                                <tr key={payment.id} className="border-b border-zinc-100 dark:border-zinc-800/50 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-500 font-mono text-xs">{payment.id}</td>
-                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-700 dark:text-zinc-300 font-mono text-[11px]">{formatDateDMY(payment.date)}</td>
-                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-700 dark:text-zinc-300 text-xs">{payment.method}</td>
-                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-right text-emerald-600 dark:text-emerald-500 font-medium font-mono text-sm">
-                                                    {payment.amount ? '+' + formatRM(payment.amount) : '-'}
-                                                  </td>
-                                                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-right text-amber-600 dark:text-amber-500 font-medium font-mono text-sm">
-                                                    {payment.mileageAmount ? '+' + formatRM(payment.mileageAmount) : '-'}
-                                                  </td>
-                                                  <td className="px-4 py-2 text-center flex justify-center gap-2">
-                                                    <button 
-                                                      title="Papar/Cetak Resit"
-                                                      onClick={() => setReceiptData({record, payment})}
-                                                      className="p-1 text-blue-500 hover:text-blue-700 transition-colors rounded hover:bg-blue-50"
-                                                    >
-                                                      <FileText size={14} />
-                                                    </button>
-                                                    <button 
-                                                      onClick={async () => {
-                                                        if (window.confirm('Padam rekod bayaran ini?')) {
-                                                          const newHistory = record.paymentHistory.filter(p => p.id !== payment.id);
-                                                          const updatedRecord = {
-                                                            ...record,
-                                                            paymentHistory: newHistory,
-                                                            bakiFeeTerkini: record.bakiFeeTerkini + payment.amount,
-                                                            bayaranTerakhir: newHistory.length > 0 ? newHistory[0].amount : 0
-                                                          };
-                                                          if (user) {
-                                                            const targetPath = `users/${user.uid}/records/${record.id}`;
-                                                            try {
-                                                              await setDoc(doc(db, 'users', user.uid, 'records', record.id), updatedRecord);
-                                                            } catch (err) {
-                                                              handleFirestoreError(err, OperationType.WRITE, targetPath);
-                                                            }
-                                                          } else {
-                                                            setRecords(prev => prev.map(r => r.id === record.id ? updatedRecord : r));
-                                                          }
-                                                        }
-                                                      }}
-                                                      className="text-zinc-400 dark:text-zinc-500 hover:text-red-600 p-1 rounded transition-colors"
-                                                    >
-                                                      <Trash2 size={12} />
-                                                    </button>
-                                                  </td>
-                                                </tr>
-                                              ))}
-                                            </tbody>
-                                          </table>
-                                        </div>
-                                      ) : (
-                                        <div className="text-center p-4 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-sm text-zinc-500 dark:text-zinc-400 text-sm">
-                                          Tiada rekod bayaran buat masa ini.
-                                        </div>
-                                      )}
-                                    </div>
-                                    
-                                  </div>
+                                    {renderExpandedDetails(record)}
                                 </motion.div>
                               </td>
                             </tr>
@@ -1471,6 +1604,38 @@ export default function App() {
           </div>
           
           {activeTab === 'standalone' && <StandaloneReceipts initialData={standaloneInitialRecord} />}
+        </div>
+        
+        {/* Mobile Bottom Navigation */}
+        <div className="md:hidden fixed bottom-0 left-0 right-0 h-[60px] box-content pb-safe bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-around z-40">
+          <button 
+            onClick={() => setActiveTab('dashboard')}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === 'dashboard' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-zinc-400'}`}
+          >
+            <Home size={20} className={activeTab === 'dashboard' ? 'fill-current' : ''} />
+            <span className="text-[10px] font-medium">Utama</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('records')}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === 'records' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-zinc-400'}`}
+          >
+            <FileText size={20} className={activeTab === 'records' ? 'fill-current' : ''} />
+            <span className="text-[10px] font-medium">Rekod</span>
+          </button>
+          <button 
+            onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === 'standalone' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-zinc-400'}`}
+          >
+            <Printer size={20} className={activeTab === 'standalone' ? 'fill-current' : ''} />
+            <span className="text-[10px] font-medium">Resit</span>
+          </button>
+          <button 
+            onClick={() => { setActiveTab('settings'); setStandaloneInitialRecord(null); }}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === 'settings' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-zinc-400'}`}
+          >
+            <Settings size={20} className={activeTab === 'settings' ? 'fill-current' : ''} />
+            <span className="text-[10px] font-medium">Tetapan</span>
+          </button>
         </div>
       </main>
 
@@ -2114,7 +2279,7 @@ export default function App() {
  {/* Cost Breakdown */}
  <div className="mb-10">
  <h3 className="text-sm font-bold text-black uppercase tracking-wider mb-4 border-b border-gray-300 pb-2">Perincian Kos & Tuntutan</h3>
- <div className="grid grid-cols-2 gap-4">
+ <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
  <div className="p-5 border border-gray-300  bg-white ">
  <p className="text-xs font-bold text-black uppercase tracking-wider mb-3 border-b border-gray-300 pb-2">Yuran Profesional</p>
  <div className="flex justify-between items-center space-y-2">
@@ -2498,20 +2663,20 @@ export default function App() {
         style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
       >
         <button 
-          onClick={() => setActiveTab('dashboard')} 
+          onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }} 
           className={`flex flex-col items-center p-1 text-[9px] w-1/3 text-center ${activeTab === 'dashboard' ? 'text-white' : 'hover:text-white'}`}
         >
           <Home size={20} className="mb-1" /> Papan Pemuka
         </button>
         <button 
-          onClick={() => setActiveTab('records')} 
+          onClick={() => { setActiveTab('records'); setIsMobileMenuOpen(false); }} 
           className={`flex flex-col items-center p-1 text-[9px] w-1/3 text-center ${activeTab === 'records' ? 'text-white' : 'hover:text-white'}`}
         >
           <Users size={20} className="mb-1" /> Rekod Pelanggan
         </button>
 
         <button 
-          onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }} 
+          onClick={() => { { setActiveTab('standalone'); setIsMobileMenuOpen(false); }; setStandaloneInitialRecord(null); }} 
           className={`flex flex-col items-center p-1 text-[9px] w-1/3 text-center ${activeTab === 'standalone' ? 'text-white' : 'hover:text-white'}`}
         >
           <FileText size={20} className="mb-1" /> Paparan Resit
