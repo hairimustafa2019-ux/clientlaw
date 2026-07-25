@@ -6,11 +6,11 @@
 import StandaloneReceipts from './components/StandaloneReceipts';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus } from 'lucide-react';
+import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { records as initialRecords, CaseRecord } from './data';
 import { jsPDF } from 'jspdf';
-import { toPng } from 'html-to-image';
+import html2canvas from 'html2canvas';
 import { auth, db, storage } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query } from 'firebase/firestore';
@@ -135,12 +135,14 @@ export default function App() {
   const [mileageAdjustmentAmount, setMileageAdjustmentAmount] = useState<string>('');
   const [mileageAdjustmentType, setMileageAdjustmentType] = useState<'tambah' | 'tolak'>('tambah');
   const [deletingRecord, setDeletingRecord] = useState<CaseRecord | null>(null);
+  const [settlingRecord, setSettlingRecord] = useState<CaseRecord | null>(null);
   const [isDeletingSelected, setIsDeletingSelected] = useState<boolean>(false);
 
   const [standaloneInitialRecord, setStandaloneInitialRecord] = useState<CaseRecord | null>(null);
   
   const [paymentSortColumn, setPaymentSortColumn] = useState<'date' | 'amount' | null>(null);
   const [paymentSortDirection, setPaymentSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [dateSortOrder, setDateSortOrder] = useState<'asc' | 'desc' | null>(null);
 
   const [isNewRecordModalOpen, setIsNewRecordModalOpen] = useState(false);
   const [newRecordData, setNewRecordData] = useState({
@@ -583,6 +585,48 @@ export default function App() {
     setExpandedRowId(null);
   };
 
+  const handleSettleBakiFeeToZero = async () => {
+    if (!settlingRecord) return;
+    const currentBaki = settlingRecord.bakiFeeTerkini;
+    if (currentBaki <= 0) {
+      setSettlingRecord(null);
+      return;
+    }
+
+    const dateStr = formatDateDMY(new Date().toISOString().split('T')[0]);
+    const newPaymentEntry = {
+      id: `P-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      date: dateStr,
+      amount: currentBaki,
+      mileageAmount: 0,
+      method: 'Pelarasan (Set RM0)'
+    };
+
+    const updatedRecord: CaseRecord = {
+      ...settlingRecord,
+      bayaranTerakhir: currentBaki,
+      bakiSebelum: currentBaki,
+      bakiFeeTerkini: 0,
+      tarikh: dateStr,
+      paymentHistory: [newPaymentEntry, ...(settlingRecord.paymentHistory || [])],
+      userId: user ? user.uid : undefined
+    };
+
+    if (user) {
+      const targetPath = `users/${user.uid}/records/${settlingRecord.id}`;
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'records', settlingRecord.id), updatedRecord);
+        silentBackupToCloud(records.map(rec => rec.id === settlingRecord.id ? updatedRecord : rec));
+      } catch(err) {
+        handleFirestoreError(err, OperationType.WRITE, targetPath);
+      }
+    } else {
+      setRecords(prev => prev.map(rec => rec.id === settlingRecord.id ? updatedRecord : rec));
+    }
+
+    setSettlingRecord(null);
+  };
+
   const handleDeleteSelected = async () => {
     if (user) {
       for (const id of selectedRecords) {
@@ -676,23 +720,19 @@ export default function App() {
     
     setIsGeneratingPDF(true);
     try {
-      const imgData = await toPng(printRef.current, {
-        cacheBust: true,
-        pixelRatio: 2,
+      const canvas = await html2canvas(printRef.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
         backgroundColor: '#ffffff'
       });
+      const imgData = canvas.toDataURL('image/png');
       
       const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
       
-      const img = document.createElement('img');
-      img.src = imgData;
-      await new Promise((resolve) => {
-        img.onload = resolve;
-      });
-      
-      const imgPropsHeight = (img.height * pdfWidth) / img.width;
+      const imgPropsHeight = (canvas.height * pdfWidth) / canvas.width;
       let heightLeft = imgPropsHeight;
       let position = 0;
 
@@ -719,23 +759,19 @@ export default function App() {
     
     setIsGeneratingReceiptPDF(true);
     try {
-      const imgData = await toPng(receiptPrintRef.current, {
-        cacheBust: true,
-        pixelRatio: 2,
+      const canvas = await html2canvas(receiptPrintRef.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
         backgroundColor: '#ffffff'
       });
+      const imgData = canvas.toDataURL('image/png');
       
       const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
       
-      const img = document.createElement('img');
-      img.src = imgData;
-      await new Promise((resolve) => {
-        img.onload = resolve;
-      });
-      
-      const imgPropsHeight = (img.height * pdfWidth) / img.width;
+      const imgPropsHeight = (canvas.height * pdfWidth) / canvas.width;
       let heightLeft = imgPropsHeight;
       let position = 0;
 
@@ -769,7 +805,7 @@ export default function App() {
 
   // Filter records
   const filteredRecords = useMemo(() => {
-    return records.filter(record => {
+    const list = records.filter(record => {
       const matchesSearch = record.nama.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesKes = filterKes === 'Semua' || record.kes.toLowerCase() === filterKes.toLowerCase();
       
@@ -796,7 +832,17 @@ export default function App() {
 
       return matchesSearch && matchesKes && matchesDate;
     });
-  }, [searchTerm, filterKes, filterStartDate, filterEndDate, records]);
+
+    if (dateSortOrder) {
+      list.sort((a, b) => {
+        const timeA = parseDateObj(a.tarikh).getTime();
+        const timeB = parseDateObj(b.tarikh).getTime();
+        return dateSortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+      });
+    }
+
+    return list;
+  }, [searchTerm, filterKes, filterStartDate, filterEndDate, records, dateSortOrder]);
 
   // Extract unique cases for the dropdown
   const uniqueKes = useMemo(() => {
@@ -1331,6 +1377,29 @@ export default function App() {
                       <ChevronDown size={14} className="text-zinc-400" />
                     </div>
                   </div>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <ArrowUpDown size={14} className="text-zinc-400" />
+                    </div>
+                    <select
+                      className="pl-9 pr-8 py-2 appearance-none text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg w-full sm:w-44 bg-white dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium text-zinc-700 dark:text-zinc-300 transition-all cursor-pointer"
+                      value={dateSortOrder || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'desc') setDateSortOrder('desc');
+                        else if (val === 'asc') setDateSortOrder('asc');
+                        else setDateSortOrder(null);
+                      }}
+                      title="Susun Mengikut Tarikh"
+                    >
+                      <option value="">Susunan Tarikh Asal</option>
+                      <option value="desc">Tarikh: Terkini</option>
+                      <option value="asc">Tarikh: Terlama</option>
+                    </select>
+                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                      <ChevronDown size={14} className="text-zinc-400" />
+                    </div>
+                  </div>
                   <div className="flex items-center gap-2 w-full sm:w-auto">
                     <input
                       type="date"
@@ -1413,6 +1482,11 @@ export default function App() {
                            <button onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }} className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-400 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-colors">
                              <Plus size={14} /> Bayaran
                            </button>
+                           {record.bakiFeeTerkini > 0 && (
+                             <button onClick={(e) => { e.stopPropagation(); setSettlingRecord(record); }} title="Set Baki Fee terus kepada RM0" className="p-1.5 px-2 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 rounded-lg transition-colors flex items-center justify-center gap-1 text-xs font-medium border border-emerald-200 dark:border-emerald-800/50 shrink-0">
+                               <CheckCircle size={14} /> Set RM0
+                             </button>
+                           )}
                            <button onClick={(e) => { e.stopPropagation(); setEditingRecord(record); }} className="p-1.5 px-2 text-zinc-500 hover:text-zinc-700 bg-zinc-50 hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-400 transition-colors flex items-center justify-center">
                              <Edit size={16} />
                            </button>
@@ -1472,7 +1546,30 @@ export default function App() {
                       <th className="hidden sm:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800">Kategori Kes</th>
                       <th className="hidden lg:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Total Fee</th>
                       <th className="hidden xl:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Bayaran Terakhir</th>
-                      <th className="hidden md:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-center">Tarikh</th>
+                      <th 
+                        className="hidden md:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-center cursor-pointer select-none hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
+                        onClick={() => {
+                          if (dateSortOrder === 'desc') {
+                            setDateSortOrder('asc');
+                          } else if (dateSortOrder === 'asc') {
+                            setDateSortOrder(null);
+                          } else {
+                            setDateSortOrder('desc');
+                          }
+                        }}
+                        title="Klik untuk susun mengikut tarikh (Terkini / Terlama)"
+                      >
+                        <div className="flex items-center justify-center gap-1.5">
+                          <span>Tarikh</span>
+                          {dateSortOrder === 'desc' ? (
+                            <ArrowDown size={13} className="text-blue-600 dark:text-blue-400" />
+                          ) : dateSortOrder === 'asc' ? (
+                            <ArrowUp size={13} className="text-blue-600 dark:text-blue-400" />
+                          ) : (
+                            <ArrowUpDown size={13} className="text-zinc-400 opacity-50 group-hover:opacity-100 transition-opacity" />
+                          )}
+                        </div>
+                      </th>
                       <th className="hidden xl:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Baki Sebelum</th>
                       <th className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Baki Terkini</th>
                       <th className="hidden lg:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Baki Mileage</th>
@@ -1542,7 +1639,18 @@ export default function App() {
                               {formatRM(record.bakiMileage)}
                             </td>
                             <td className="px-3 sm:px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center justify-center gap-2">
+                              <div className="flex items-center justify-center gap-1.5">
+                                {record.bakiFeeTerkini > 0 && (
+                                  <button 
+                                    onClick={() => setSettlingRecord(record)}
+                                    className="text-emerald-700 dark:text-emerald-300 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-1 shrink-0 shadow-sm"
+                                    title="Set Baki Fee terus kepada RM0"
+                                  >
+                                    <CheckCircle size={13} className="text-emerald-600 dark:text-emerald-400" />
+                                    <span>Set RM0</span>
+                                  </button>
+                                )}
+
                                 <button 
                                   onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
                                   className="text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm whitespace-nowrap flex items-center gap-1.5"
@@ -1861,6 +1969,45 @@ export default function App() {
                     className="px-5 py-2.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors cursor-pointer flex-1 shadow-sm"
                   >
                     Ya, Padam
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {settlingRecord && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:hidden">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md overflow-hidden"
+            >
+              <div className="p-6 text-center">
+                <div className="w-14 h-14 rounded-full bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center mx-auto mb-4 border border-emerald-100 dark:border-emerald-900/30">
+                  <CheckCircle size={30} className="text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 text-lg mb-2">Pengesahan Set Baki Fee RM0</h3>
+                <p className="text-zinc-600 dark:text-zinc-400 text-sm mb-6 leading-relaxed">
+                  Adakah anda pasti untuk menetapkan baki fee bagi pelanggan <strong className="text-zinc-900 dark:text-zinc-100">{settlingRecord.nama}</strong> ({settlingRecord.kes}) daripada <span className="font-mono font-bold text-amber-600 dark:text-amber-400">{formatRM(settlingRecord.bakiFeeTerkini)}</span> terus kepada <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">RM0.00</span>?
+                </p>
+                <div className="flex justify-center gap-3">
+                  <button 
+                    onClick={() => setSettlingRecord(null)}
+                    className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-colors cursor-pointer flex-1"
+                  >
+                    Batal
+                  </button>
+                  <button 
+                    onClick={handleSettleBakiFeeToZero}
+                    className="px-5 py-2.5 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium transition-colors cursor-pointer flex-1 shadow-sm flex items-center justify-center gap-1.5"
+                  >
+                    <CheckCircle size={16} />
+                    Ya, Set RM0
                   </button>
                 </div>
               </div>
