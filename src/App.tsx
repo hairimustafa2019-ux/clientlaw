@@ -902,9 +902,21 @@ export default function App() {
       </div>
     </div>
     <div>
-      <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4 flex items-center gap-2">
-        <History size={16} className="text-blue-500"/> Rekod Bayaran
-      </h4>
+      <div className="flex justify-between items-center mb-4">
+        <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+          <History size={16} className="text-blue-500"/> Rekod Bayaran
+        </h4>
+        {record.bakiFeeTerkini > 0 && (
+          <button 
+            onClick={() => setPaymentRecord(record)}
+            className="text-xs bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm"
+            title="Tambah Bayaran"
+          >
+            <Plus size={12} />
+            <span>+ Bayaran</span>
+          </button>
+        )}
+      </div>
       {record.paymentHistory && record.paymentHistory.length > 0 ? (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
           <table className="w-full text-left text-[13px] md:whitespace-nowrap">
@@ -1640,6 +1652,17 @@ export default function App() {
                             </td>
                             <td className="px-3 sm:px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-center gap-1.5">
+                                {record.bakiFeeTerkini > 0 && (
+                                  <button 
+                                    onClick={() => setPaymentRecord(record)}
+                                    className="text-blue-700 dark:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-blue-200 dark:border-blue-800/50 flex items-center gap-1 shrink-0 shadow-sm"
+                                    title="Tambah Bayaran"
+                                  >
+                                    <Plus size={13} className="text-blue-600 dark:text-blue-400" />
+                                    <span>+ Bayaran</span>
+                                  </button>
+                                )}
+
                                 {record.bakiFeeTerkini > 0 && (
                                   <button 
                                     onClick={() => setSettlingRecord(record)}
