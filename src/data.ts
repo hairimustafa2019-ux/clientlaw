@@ -4,6 +4,7 @@ export interface PaymentEntry {
   amount: number;
   mileageAmount?: number;
   method: string;
+  nota?: string;
 }
 
 export interface CaseRecord {

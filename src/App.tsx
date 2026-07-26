@@ -129,6 +129,7 @@ export default function App() {
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [paymentMethod, setPaymentMethod] = useState<string>('Transfer');
   const [paymentError, setPaymentError] = useState<string>('');
+  const [paymentNote, setPaymentNote] = useState<string>('');
   
   const [editingRecord, setEditingRecord] = useState<CaseRecord | null>(null);
   const [mileageAdjustmentRecord, setMileageAdjustmentRecord] = useState<CaseRecord | null>(null);
@@ -243,6 +244,7 @@ export default function App() {
     if (paymentRecord) {
       setPaymentAmount('');
       setPaymentError('');
+      setPaymentNote('');
     }
   }, [paymentRecord]);
 
@@ -675,7 +677,8 @@ export default function App() {
         date: dateStr,
         amount: feeAmt,
         mileageAmount: mileageAmt,
-        method: paymentMethod
+        method: paymentMethod,
+        nota: paymentNote
     };
 
     const updatedRecord = {
@@ -707,6 +710,7 @@ export default function App() {
     setPaymentMileageAmount('');
     setPaymentDate(new Date().toISOString().split('T')[0]);
     setPaymentMethod('Transfer');
+    setPaymentNote('');
   };
 
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -897,8 +901,38 @@ export default function App() {
         <p className="flex justify-between items-center"><span className="text-zinc-500">Jumlah Fee</span> <span className="font-mono text-zinc-900 dark:text-zinc-100">{formatRM(record.totalFee)}</span></p>
         <p className="flex justify-between items-center"><span className="text-zinc-500">Baki Terdahulu</span> <span className="font-mono text-zinc-900 dark:text-zinc-100">{formatRM(record.bakiSebelum)}</span></p>
         <p className="flex justify-between items-center"><span className="text-zinc-500">Bayaran Terakhir</span> <span className="font-mono font-medium text-emerald-600 dark:text-emerald-500">{record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}</span></p>
-        <p className="flex justify-between items-center"><span className="text-zinc-500">Baki Terkini</span> <span className={`font-mono font-bold ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-zinc-100'}`}>{formatRM(record.bakiFeeTerkini)}</span></p>
-        <p className="flex justify-between items-center pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-800"><span className="text-zinc-500">Baki Mileage</span> <span className="font-mono font-medium text-amber-600 dark:text-amber-500">{formatRM(record.bakiMileage)}</span></p>
+        <div className="flex justify-between items-center">
+          <span className="text-zinc-500">Baki Terkini</span>
+          <div className="flex items-center gap-1.5">
+            <span className={`font-mono font-bold ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-zinc-100'}`}>
+              {formatRM(record.bakiFeeTerkini)}
+            </span>
+            {record.bakiFeeTerkini > 0 && (
+              <button 
+                onClick={() => setPaymentRecord(record)}
+                className="text-[11px] text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium underline flex items-center cursor-pointer"
+                title="Buat Bayaran"
+              >
+                (Bayar)
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex justify-between items-center pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-800">
+          <span className="text-zinc-500">Baki Mileage</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono font-medium text-amber-600 dark:text-amber-500">
+              {formatRM(record.bakiMileage)}
+            </span>
+            <button 
+              onClick={() => setMileageAdjustmentRecord(record)}
+              className="text-[11px] text-teal-600 hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300 font-medium underline flex items-center cursor-pointer"
+              title="Kemaskini baki mileage"
+            >
+              (Kemaskini)
+            </button>
+          </div>
+        </div>
       </div>
     </div>
     <div>
@@ -942,6 +976,7 @@ export default function App() {
                   </div>
                 </th>
                 <th className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">Kaedah</th>
+                <th className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">Nota</th>
                 <th 
                   className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group text-right"
                   onClick={() => {
@@ -976,6 +1011,9 @@ export default function App() {
                   <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-500 font-mono text-xs">{payment.id}</td>
                   <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-700 dark:text-zinc-300 font-mono text-[11px]">{formatDateDMY(payment.date)}</td>
                   <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-700 dark:text-zinc-300 text-xs">{payment.method}</td>
+                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-600 dark:text-zinc-400 text-xs max-w-[160px] truncate" title={payment.nota || ''}>
+                    {payment.nota || <span className="text-zinc-400 dark:text-zinc-600 italic">-</span>}
+                  </td>
                   <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-right text-emerald-600 dark:text-emerald-500 font-medium font-mono text-sm">
                     {payment.amount ? '+' + formatRM(payment.amount) : '-'}
                   </td>
@@ -1490,9 +1528,12 @@ export default function App() {
                            </div>
                         </div>
                         
-                        <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800/50 flex gap-2 w-full">
-                           <button onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }} className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-400 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-colors">
+                        <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800/50 flex flex-wrap gap-2 w-full">
+                           <button onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }} className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-400 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
                              <Plus size={14} /> Bayaran
+                           </button>
+                           <button onClick={(e) => { e.stopPropagation(); setMileageAdjustmentRecord(record); }} className="flex-1 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-600 dark:bg-teal-500/10 dark:hover:bg-teal-500/20 dark:text-teal-400 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-colors border border-teal-200 dark:border-teal-800/50 cursor-pointer">
+                             <Car size={14} /> ± Mileage
                            </button>
                            {record.bakiFeeTerkini > 0 && (
                              <button onClick={(e) => { e.stopPropagation(); setSettlingRecord(record); }} title="Set Baki Fee terus kepada RM0" className="p-1.5 px-2 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 rounded-lg transition-colors flex items-center justify-center gap-1 text-xs font-medium border border-emerald-200 dark:border-emerald-800/50 shrink-0">
@@ -1652,10 +1693,19 @@ export default function App() {
                             </td>
                             <td className="px-3 sm:px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-center gap-1.5">
+                                <button 
+                                  onClick={() => setMileageAdjustmentRecord(record)}
+                                  className="text-teal-700 dark:text-teal-300 bg-teal-50 hover:bg-teal-100 dark:bg-teal-500/10 dark:hover:bg-teal-500/20 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-teal-200 dark:border-teal-800/50 flex items-center gap-1 shrink-0 shadow-sm cursor-pointer"
+                                  title="Pelarasan Mileage (Kredit/Debit)"
+                                >
+                                  <Car size={13} className="text-teal-600 dark:text-teal-400" />
+                                  <span>± Mileage</span>
+                                </button>
+
                                 {record.bakiFeeTerkini > 0 && (
                                   <button 
                                     onClick={() => setPaymentRecord(record)}
-                                    className="text-blue-700 dark:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-blue-200 dark:border-blue-800/50 flex items-center gap-1 shrink-0 shadow-sm"
+                                    className="text-blue-700 dark:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-blue-200 dark:border-blue-800/50 flex items-center gap-1 shrink-0 shadow-sm cursor-pointer"
                                     title="Tambah Bayaran"
                                   >
                                     <Plus size={13} className="text-blue-600 dark:text-blue-400" />
@@ -1666,7 +1716,7 @@ export default function App() {
                                 {record.bakiFeeTerkini > 0 && (
                                   <button 
                                     onClick={() => setSettlingRecord(record)}
-                                    className="text-emerald-700 dark:text-emerald-300 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-1 shrink-0 shadow-sm"
+                                    className="text-emerald-700 dark:text-emerald-300 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-1 shrink-0 shadow-sm cursor-pointer"
                                     title="Set Baki Fee terus kepada RM0"
                                   >
                                     <CheckCircle size={13} className="text-emerald-600 dark:text-emerald-400" />
@@ -2368,6 +2418,18 @@ export default function App() {
                       </div>
                     </div>
                   </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                      Nota Bayaran
+                    </label>
+                    <input
+                      type="text"
+                      className="pl-3 pr-4 py-2.5 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100"
+                      placeholder="Contoh: Bayaran pendahuluan, ansuran ke-2, dll."
+                      value={paymentNote}
+                      onChange={(e) => setPaymentNote(e.target.value)}
+                    />
+                  </div>
                   <div className="flex justify-end gap-3 pt-6 border-t border-zinc-100 dark:border-zinc-800/50 mt-6">
                     <button 
                       type="button" 
@@ -2682,8 +2744,14 @@ export default function App() {
  </div>
 
  <div className="flex justify-between items-start border-b border-gray-300 pb-12 mb-12">
- <div className="text-sm font-bold text-black uppercase flex items-center gap-2">
- Butiran Kes: <span className="underline underline-offset-4">{receiptData.record.kes}</span>
+ <div className="text-sm font-bold text-black uppercase flex flex-col gap-2 text-left">
+   <div>Butiran Kes: <span className="underline underline-offset-4">{receiptData.record.kes}</span></div>
+   {receiptData.payment.nota && (
+     <div className="mt-2 normal-case font-normal text-zinc-600 text-[13px] text-left">
+       <span className="font-bold uppercase text-black text-[11px] block mb-0.5">Nota Bayaran:</span>
+       <span className="italic bg-zinc-50 border border-zinc-200 rounded px-2.5 py-1.5 inline-block text-zinc-700 font-mono">{receiptData.payment.nota}</span>
+     </div>
+   )}
  </div>
  {(()=>{
  const sortedPayments = [...(receiptData.record.paymentHistory || [])].sort((a, b) => parseDateString(a.date) - parseDateString(b.date));
