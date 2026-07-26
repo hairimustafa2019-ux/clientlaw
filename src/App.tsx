@@ -10,10 +10,11 @@ import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPi
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { records as initialRecords, CaseRecord } from './data';
 import { jsPDF } from 'jspdf';
+import JSZip from 'jszip';
 import html2canvas from 'html2canvas';
 import { auth, db, storage } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, query, writeBatch } from 'firebase/firestore';
 import { ref, uploadString } from 'firebase/storage';
 
 enum OperationType {
@@ -119,6 +120,13 @@ export default function App() {
   const [filterEndDate, setFilterEndDate] = useState<string>('');
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
+  
+  // ZIP Download States
+  const [zipQueue, setZipQueue] = useState<{record: CaseRecord, payment: import('./data').PaymentEntry}[] | null>(null);
+  const [zipCurrentIndex, setZipCurrentIndex] = useState<number>(0);
+  const zipInstanceRef = useRef<JSZip | null>(null);
+  const hiddenReceiptPrintRef = useRef<HTMLDivElement>(null);
+  const [isGeneratingZip, setIsGeneratingZip] = useState(false);
 
   // Modal States
   const [paymentRecord, setPaymentRecord] = useState<CaseRecord | null>(null);
@@ -193,12 +201,26 @@ export default function App() {
     }
     const targetPath = `users/${user.uid}/records`;
     const q = query(collection(db, targetPath));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      if (snapshot.empty) {
+        // If Firestore is empty, populate it with initial data file
+        try {
+          const batch = writeBatch(db);
+          for (const rec of initialRecords) {
+            const docRef = doc(db, 'users', user.uid, 'records', rec.id);
+            batch.set(docRef, { ...rec, userId: user.uid });
+          }
+          await batch.commit();
+          return; // The snapshot listener will re-fire with the new data
+        } catch (error) {
+          console.error("Failed to seed initial data:", error);
+        }
+      }
+      
       const fetchedRecords: CaseRecord[] = [];
       snapshot.forEach(doc => {
         fetchedRecords.push(doc.data() as CaseRecord);
       });
-      // Fallback: If completely empty, we can just leave it as empty (no initialRecords logic to sync to Firebase unless user imports)
       setRecords(fetchedRecords);
     }, (error) => {
        handleFirestoreError(error, OperationType.GET, targetPath);
@@ -554,6 +576,26 @@ export default function App() {
     setMileageAdjustmentAmount('');
   };
 
+  const handleInlineNoteUpdate = async (id: string, newNote: string) => {
+    const recordToUpdate = records.find(r => r.id === id);
+    if (!recordToUpdate) return;
+    
+    if (recordToUpdate.nota === newNote) return;
+
+    const updatedRecord = { ...recordToUpdate, nota: newNote };
+    
+    setRecords(prev => prev.map(rec => rec.id === id ? updatedRecord : rec));
+
+    if (user) {
+      const targetPath = `users/${user.uid}/records/${id}`;
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'records', id), { ...updatedRecord, userId: user.uid });
+      } catch(err) {
+        handleFirestoreError(err, OperationType.WRITE, targetPath);
+      }
+    }
+  };
+
   const handleEditRecordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingRecord) return;
@@ -712,6 +754,117 @@ export default function App() {
     setPaymentMethod('Transfer');
     setPaymentNote('');
   };
+
+  const handleDirectPay = (amount: string) => {
+    // Find most recent active customer (has baki)
+    const activeRecords = [...records].reverse().filter(r => (r.bakiFeeTerkini > 0 || (r.bakiMileage && r.bakiMileage > 0)));
+    if (activeRecords.length > 0) {
+      const recentCustomer = activeRecords[0];
+      setPaymentRecord(recentCustomer);
+      setPaymentAmount(amount);
+      setPaymentMileageAmount('');
+      setPaymentDate(new Date().toISOString().split('T')[0]);
+      setPaymentMethod('Transfer');
+      setPaymentNote('Bayaran Segera');
+    } else {
+      alert("Tiada pelanggan aktif yang mempunyai baki untuk dibayar.");
+    }
+  };
+
+  const handleDownloadSelectedReceiptsZIP = () => {
+    const queue: {record: CaseRecord, payment: import('./data').PaymentEntry}[] = [];
+    selectedRecords.forEach(recordId => {
+       const record = records.find(r => r.id === recordId);
+       if (record && record.paymentHistory) {
+           record.paymentHistory.forEach(payment => {
+               queue.push({ record, payment });
+           });
+       }
+    });
+    
+    if (queue.length === 0) {
+        alert("Tiada resit (sejarah bayaran) dijumpai untuk rekod yang dipilih.");
+        return;
+    }
+    
+    zipInstanceRef.current = new JSZip();
+    setIsGeneratingZip(true);
+    setZipQueue(queue);
+    setZipCurrentIndex(0);
+  };
+
+  useEffect(() => {
+    const processNextZipItem = async () => {
+      if (zipQueue && zipInstanceRef.current && hiddenReceiptPrintRef.current) {
+        if (zipCurrentIndex < zipQueue.length) {
+          // Allow DOM to update and images to load
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          try {
+            const canvas = await html2canvas(hiddenReceiptPrintRef.current, {
+              scale: 2,
+              useCORS: true,
+              logging: false,
+              backgroundColor: '#ffffff'
+            });
+            const imgData = canvas.toDataURL('image/png');
+            const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            const imgPropsHeight = (canvas.height * pdfWidth) / canvas.width;
+            
+            let heightLeft = imgPropsHeight;
+            let position = 0;
+            pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgPropsHeight);
+            heightLeft -= pageHeight;
+            while (heightLeft >= 0) {
+              position = heightLeft - imgPropsHeight;
+              pdf.addPage();
+              pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgPropsHeight);
+              heightLeft -= pageHeight;
+            }
+            
+            const pdfBlob = pdf.output('blob');
+            const currentItem = zipQueue[zipCurrentIndex];
+            const cleanName = currentItem.record.nama.replace(/[^a-zA-Z0-9_-]/g, '_');
+            zipInstanceRef.current.file(`Resit_${cleanName}_${currentItem.payment.id}.pdf`, pdfBlob);
+            
+            // Advance to next
+            setZipCurrentIndex(prev => prev + 1);
+          } catch (err) {
+            console.error("Failed to generate PDF for zip item", err);
+            // Skip this one and continue
+            setZipCurrentIndex(prev => prev + 1);
+          }
+        } else {
+          // Done processing all items, generate zip
+          try {
+            const zipBlob = await zipInstanceRef.current.generateAsync({ type: 'blob' });
+            const url = URL.createObjectURL(zipBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `Resit_Pilihan_${new Date().getTime()}.zip`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+          } catch (err) {
+            console.error("Failed to generate ZIP", err);
+            alert("Ralat semasa menjana fail ZIP.");
+          } finally {
+            setIsGeneratingZip(false);
+            setZipQueue(null);
+            setZipCurrentIndex(0);
+            zipInstanceRef.current = null;
+          }
+        }
+      }
+    };
+
+    if (isGeneratingZip && zipQueue) {
+      processNextZipItem();
+    }
+  }, [zipCurrentIndex, zipQueue, isGeneratingZip]);
 
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
@@ -1160,7 +1313,7 @@ export default function App() {
               <button 
                 onClick={handleBackupToCloud}
                 disabled={isBackingUp}
-                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 shrink-0 transition-all"
+                className="hidden lg:flex p-2 sm:px-4 sm:py-2 text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 shrink-0 transition-all"
               >
                 {isBackingUp ? <Loader2 size={14} className="animate-spin" /> : <CloudUpload size={14} />}
                 <span className="hidden sm:inline">Cloud Backup</span>
@@ -1168,7 +1321,7 @@ export default function App() {
             )}
             <button 
               onClick={handleExportData}
-              className="hidden sm:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
+              className="hidden lg:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
               <Download size={14} />
               <span className="hidden sm:inline">Eksport</span>
             </button>
@@ -1181,7 +1334,7 @@ export default function App() {
             />
             <button 
               onClick={() => fileInputRef.current?.click()}
-              className="hidden sm:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
+              className="hidden lg:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
               <Upload size={14} />
               <span className="hidden sm:inline">Import</span>
             </button>
@@ -1376,6 +1529,23 @@ export default function App() {
                        </div>
                      </button>
                    </div>
+                   
+                   <div className="mt-6 pt-6 border-t border-zinc-100 dark:border-zinc-800">
+                     <div className="flex items-center justify-between mb-3">
+                       <h4 className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Bayaran Segera (Pelanggan Aktif Terkini)</h4>
+                     </div>
+                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {['50', '100', '200', '500'].map(amount => (
+                          <button
+                            key={amount}
+                            onClick={() => handleDirectPay(amount)}
+                            className="py-2.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 rounded-lg text-sm font-bold hover:bg-emerald-100 dark:hover:bg-emerald-500/30 transition-colors shadow-sm"
+                          >
+                            RM{amount}
+                          </button>
+                        ))}
+                     </div>
+                   </div>
                 </div>
               </div>
             )}
@@ -1390,13 +1560,23 @@ export default function App() {
                 </span>
                 <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full lg:w-auto">
                   {selectedRecords.length > 0 && (
-                    <button
-                      onClick={() => setIsDeletingSelected(true)}
-                      className="px-3 py-1.5 text-xs bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 font-medium cursor-pointer flex items-center gap-1 transition-all"
-                    >
-                      <Trash2 size={12} />
-                      Padam Terpilih ({selectedRecords.length})
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleDownloadSelectedReceiptsZIP}
+                        disabled={isGeneratingZip}
+                        className="px-3 py-1.5 text-xs bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-500/20 font-medium cursor-pointer flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isGeneratingZip ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                        {isGeneratingZip ? `Menjana ZIP...` : `Muat Turun Resit (${selectedRecords.length})`}
+                      </button>
+                      <button
+                        onClick={() => setIsDeletingSelected(true)}
+                        className="px-3 py-1.5 text-xs bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 font-medium cursor-pointer flex items-center gap-1.5 transition-all"
+                      >
+                        <Trash2 size={12} />
+                        Padam Terpilih ({selectedRecords.length})
+                      </button>
+                    </div>
                   )}
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -1596,11 +1776,12 @@ export default function App() {
                         />
                       </th>
                       <th className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800">Nama Pelanggan</th>
-                      <th className="hidden sm:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800">Kategori Kes</th>
-                      <th className="hidden lg:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Total Fee</th>
-                      <th className="hidden xl:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Bayaran Terakhir</th>
+                      <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800">Kategori Kes</th>
+                      <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800">Nota Kes</th>
+                      <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Total Fee</th>
+                      <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Bayaran Terakhir</th>
                       <th 
-                        className="hidden md:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-center cursor-pointer select-none hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
+                        className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-center cursor-pointer select-none hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
                         onClick={() => {
                           if (dateSortOrder === 'desc') {
                             setDateSortOrder('asc');
@@ -1623,9 +1804,9 @@ export default function App() {
                           )}
                         </div>
                       </th>
-                      <th className="hidden xl:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Baki Sebelum</th>
+                      <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Baki Sebelum</th>
                       <th className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Baki Terkini</th>
-                      <th className="hidden lg:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Baki Mileage</th>
+                      <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Baki Mileage</th>
                       <th className="px-3 sm:px-4 py-3 text-center">Tindakan</th>
                     </tr>
                   </thead>
@@ -1665,17 +1846,31 @@ export default function App() {
                               </div>
                             </td>
                             <td className="px-3 sm:px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200 border-r border-zinc-100 dark:border-zinc-800/50 break-words md:truncate md:max-w-none max-w-[140px]">{record.nama}</td>
-                            <td className="hidden sm:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">
+                            <td className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">
                               <span className="text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">
                                 {record.kes}
                               </span>
                             </td>
-                            <td className="hidden lg:table-cell px-3 sm:px-4 py-3 font-mono text-zinc-600 dark:text-zinc-400 border-r border-zinc-100 dark:border-zinc-800/50 text-right">{formatRM(record.totalFee)}</td>
-                            <td className="hidden xl:table-cell px-3 sm:px-4 py-3 font-mono border-r border-zinc-100 dark:border-zinc-800/50 text-emerald-600 dark:text-emerald-500 text-right bg-emerald-50/50 dark:bg-emerald-900/10">
+                            <td className=" px-3 sm:px-4 py-1.5 border-r border-zinc-100 dark:border-zinc-800/50" onClick={(e) => e.stopPropagation()}>
+                              <input 
+                                type="text" 
+                                defaultValue={record.nota || ''}
+                                placeholder="Catat nota..."
+                                onBlur={(e) => handleInlineNoteUpdate(record.id, e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.currentTarget.blur();
+                                  }
+                                }}
+                                className="w-full min-w-[150px] bg-transparent border border-transparent hover:border-zinc-300 dark:hover:border-zinc-700 focus:border-blue-500 dark:focus:border-blue-500 focus:bg-white dark:focus:bg-zinc-800 rounded px-2 py-1.5 text-[12px] text-zinc-700 dark:text-zinc-300 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600 outline-none"
+                              />
+                            </td>
+                            <td className=" px-3 sm:px-4 py-3 font-mono text-zinc-600 dark:text-zinc-400 border-r border-zinc-100 dark:border-zinc-800/50 text-right">{formatRM(record.totalFee)}</td>
+                            <td className=" px-3 sm:px-4 py-3 font-mono border-r border-zinc-100 dark:border-zinc-800/50 text-emerald-600 dark:text-emerald-500 text-right bg-emerald-50/50 dark:bg-emerald-900/10">
                               {record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}
                             </td>
-                            <td className="hidden md:table-cell px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 text-center text-zinc-500 font-mono text-[11px]">{formatDateDMY(record.tarikh)}</td>
-                            <td className="hidden xl:table-cell px-3 sm:px-4 py-3 font-mono border-r border-zinc-100 dark:border-zinc-800/50 text-right text-zinc-400">{formatRM(record.bakiSebelum)}</td>
+                            <td className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 text-center text-zinc-500 font-mono text-[11px]">{formatDateDMY(record.tarikh)}</td>
+                            <td className=" px-3 sm:px-4 py-3 font-mono border-r border-zinc-100 dark:border-zinc-800/50 text-right text-zinc-400">{formatRM(record.bakiSebelum)}</td>
                             <td className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">
                               <div className="flex items-center justify-end gap-2 font-mono font-bold">
                                 {record.bakiFeeTerkini <= 0 ? (
@@ -1688,7 +1883,7 @@ export default function App() {
                                 </span>
                               </div>
                             </td>
-                            <td className="hidden lg:table-cell px-3 sm:px-4 py-3 font-mono border-r border-zinc-100 dark:border-zinc-800/50 text-right text-amber-600 dark:text-amber-500">
+                            <td className=" px-3 sm:px-4 py-3 font-mono border-r border-zinc-100 dark:border-zinc-800/50 text-right text-amber-600 dark:text-amber-500">
                               {formatRM(record.bakiMileage)}
                             </td>
                             <td className="px-3 sm:px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
@@ -1836,7 +2031,7 @@ export default function App() {
                   <Edit size={18} className="text-amber-500" />
                   Edit Rekod Pelanggan
                 </h3>
-                <button onClick={() => setEditingRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setEditingRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -1915,7 +2110,7 @@ export default function App() {
                         <button 
                           type="button" 
                           onClick={() => setEditingRecord({...editingRecord, bakiMileage: Math.max(0, (editingRecord.bakiMileage || 0) - 50)})}
-                          className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                          className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
                           title="Tolak RM50"
                         >
                           -50
@@ -1930,7 +2125,7 @@ export default function App() {
                         <button 
                           type="button" 
                           onClick={() => setEditingRecord({...editingRecord, bakiMileage: (editingRecord.bakiMileage || 0) + 50})}
-                          className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                          className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
                           title="Tambah RM50"
                         >
                           +50
@@ -1947,8 +2142,8 @@ export default function App() {
                     <textarea
                       className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100 resize-y min-h-[80px]"
                       placeholder="Masukkan nota tambahan (pilihan)"
-                      value={newRecordData.nota}
-                      onChange={(e) => setNewRecordData({ ...newRecordData, nota: e.target.value })}
+                      value={editingRecord.nota || ''}
+                      onChange={(e) => setEditingRecord({ ...editingRecord, nota: e.target.value })}
                     />
                   </div>
 
@@ -1956,13 +2151,13 @@ export default function App() {
                     <button 
                       type="button"
                       onClick={() => setEditingRecord(null)}
-                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-colors cursor-pointer"
+                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
                     >
                       Batal
                     </button>
                     <button 
                       type="submit"
-                      className="px-5 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors cursor-pointer shadow-sm"
+                      className="px-5 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] hover:shadow-md cursor-pointer shadow-sm"
                     >
                       Simpan Perubahan
                     </button>
@@ -1995,13 +2190,13 @@ export default function App() {
                 <div className="flex justify-center gap-3">
                   <button 
                     onClick={() => setIsDeletingSelected(false)}
-                    className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-colors cursor-pointer flex-1"
+                    className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
                   >
                     Batal
                   </button>
                   <button 
                     onClick={handleDeleteSelected}
-                    className="px-5 py-2.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors cursor-pointer flex-1 shadow-sm"
+                    className="px-5 py-2.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] hover:shadow-md cursor-pointer flex-1 shadow-sm"
                   >
                     Ya, Padam Semua
                   </button>
@@ -2033,13 +2228,13 @@ export default function App() {
                 <div className="flex justify-center gap-3">
                   <button 
                     onClick={() => setDeletingRecord(null)}
-                    className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-colors cursor-pointer flex-1"
+                    className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
                   >
                     Batal
                   </button>
                   <button 
                     onClick={handleDeleteRecord}
-                    className="px-5 py-2.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors cursor-pointer flex-1 shadow-sm"
+                    className="px-5 py-2.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] hover:shadow-md cursor-pointer flex-1 shadow-sm"
                   >
                     Ya, Padam
                   </button>
@@ -2071,13 +2266,13 @@ export default function App() {
                 <div className="flex justify-center gap-3">
                   <button 
                     onClick={() => setSettlingRecord(null)}
-                    className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-colors cursor-pointer flex-1"
+                    className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
                   >
                     Batal
                   </button>
                   <button 
                     onClick={handleSettleBakiFeeToZero}
-                    className="px-5 py-2.5 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium transition-colors cursor-pointer flex-1 shadow-sm flex items-center justify-center gap-1.5"
+                    className="px-5 py-2.5 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] hover:shadow-md cursor-pointer flex-1 shadow-sm flex items-center justify-center gap-1.5"
                   >
                     <CheckCircle size={16} />
                     Ya, Set RM0
@@ -2104,7 +2299,7 @@ export default function App() {
                   <Users size={18} className="text-blue-500" />
                   Rekod Pelanggan Baru
                 </h3>
-                <button onClick={() => setIsNewRecordModalOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setIsNewRecordModalOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -2185,17 +2380,29 @@ export default function App() {
                     </div>
                   </div>
 
+                  <div>
+                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                      Nota / Ringkasan Kes
+                    </label>
+                    <textarea
+                      className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100 resize-y min-h-[60px]"
+                      placeholder="Masukkan nota tambahan (pilihan)"
+                      value={newRecordData.nota || ''}
+                      onChange={(e) => setNewRecordData({ ...newRecordData, nota: e.target.value })}
+                    />
+                  </div>
+
                   <div className="flex justify-end gap-3 pt-6 border-t border-zinc-100 dark:border-zinc-800/50 mt-6">
                     <button 
                       type="button"
                       onClick={() => setIsNewRecordModalOpen(false)}
-                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-colors cursor-pointer"
+                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
                     >
                       Batal
                     </button>
                     <button 
                       type="submit"
-                      className="px-5 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors cursor-pointer shadow-sm"
+                      className="px-5 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] hover:shadow-md cursor-pointer shadow-sm"
                     >
                       Simpan Rekod
                     </button>
@@ -2222,7 +2429,7 @@ export default function App() {
                   <Car size={18} className="text-teal-500" />
                   Pelarasan Mileage
                 </h3>
-                <button onClick={() => setMileageAdjustmentRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setMileageAdjustmentRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -2239,14 +2446,14 @@ export default function App() {
                     <button 
                       type="button" 
                       onClick={() => setMileageAdjustmentType('tambah')}
-                      className={`flex-1 py-2.5 text-sm font-medium transition-colors ${mileageAdjustmentType === 'tambah' ? 'bg-teal-500 text-white' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                      className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${mileageAdjustmentType === 'tambah' ? 'bg-teal-500 text-white shadow-sm' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                     >
                       Tambah (+)
                     </button>
                     <button 
                       type="button" 
                       onClick={() => setMileageAdjustmentType('tolak')}
-                      className={`flex-1 py-2.5 text-sm font-medium transition-colors border-l border-zinc-200 dark:border-zinc-800 ${mileageAdjustmentType === 'tolak' ? 'bg-teal-500 text-white border-transparent' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                      className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer border-l border-zinc-200 dark:border-zinc-800 ${mileageAdjustmentType === 'tolak' ? 'bg-teal-500 text-white border-transparent shadow-sm' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                     >
                       Tolak (-)
                     </button>
@@ -2278,13 +2485,13 @@ export default function App() {
                     <button 
                       type="button"
                       onClick={() => setMileageAdjustmentRecord(null)}
-                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-colors cursor-pointer"
+                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
                     >
                       Batal
                     </button>
                     <button 
                       type="submit"
-                      className="px-5 py-2.5 text-sm bg-teal-600 text-white rounded-lg hover:bg-teal-700 font-medium transition-colors cursor-pointer shadow-sm"
+                      className="px-5 py-2.5 text-sm bg-teal-600 text-white rounded-lg hover:bg-teal-700 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] hover:shadow-md cursor-pointer shadow-sm"
                     >
                       Simpan
                     </button>
@@ -2309,7 +2516,7 @@ export default function App() {
                   <CreditCard size={18} className="text-blue-500" />
                   Kemaskini Bayaran
                 </h3>
-                <button onClick={() => setPaymentRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setPaymentRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -2434,13 +2641,13 @@ export default function App() {
                     <button 
                       type="button" 
                       onClick={() => setPaymentRecord(null)}
-                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-colors cursor-pointer"
+                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
                     >
                       Batal
                     </button>
                     <button 
                       type="submit"
-                      className="px-5 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-sm transition-colors cursor-pointer"
+                      className="px-5 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-sm transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] hover:shadow-md cursor-pointer"
                     >
                       <CheckCircle size={16} />
                       Sahkan Bayaran
@@ -2468,12 +2675,12 @@ export default function App() {
                   <Printer size={18} className="text-zinc-600 dark:text-zinc-400" />
                   Pratinjau Penyata
                 </h3>
-                <button onClick={() => setStatementRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setStatementRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
  
- <div className="p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
+ <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
  {/* Printable Area Starts */}
  <div ref={printRef} className="w-full min-w-[700px] mx-auto font-sans text-black bg-white print:min-w-0 print:w-full print:p-0">
  {/* Header */}
@@ -2622,13 +2829,13 @@ export default function App() {
               <div className="p-5 border-t border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 flex justify-end gap-3 print:hidden">
                 <button 
                   onClick={() => setStatementRecord(null)}
-                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700  hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-colors cursor-pointer"
+                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                 >
                   Tutup
                 </button>
                 <button 
                   onClick={handlePrint}
-                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700  bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium flex items-center gap-2 transition-colors cursor-pointer"
+                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
                 >
                   <Printer size={16} className="text-zinc-500" />
                   Cetak
@@ -2636,7 +2843,7 @@ export default function App() {
                 <button 
                   onClick={handleDownloadPDF}
                   disabled={isGeneratingPDF}
-                  className="px-5 py-2.5 text-sm bg-blue-600 text-white  hover:bg-blue-700 font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed  transition-colors cursor-pointer"
+                  className="px-5 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] hover:shadow-md cursor-pointer shadow-sm"
                 >
                   {isGeneratingPDF ? (
                     <>
@@ -2677,13 +2884,13 @@ export default function App() {
                 </div>
                 <button 
                   onClick={() => setReceiptData(null)}
-                  className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors cursor-pointer"
+                  className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer"
                 >
                   <X size={18} />
                 </button>
               </div>
  
- <div className="p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
+ <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
  {/* Printable Area Starts */}
                 <div ref={receiptPrintRef} className="w-full min-w-[700px] mx-auto font-sans text-black bg-white print:min-w-0 print:w-full print:p-0">
                   {/* Header */}
@@ -2825,13 +3032,13 @@ export default function App() {
               <div className="p-5 border-t border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 flex justify-end gap-3 print:hidden">
                 <button 
                   onClick={() => setReceiptData(null)}
-                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-colors cursor-pointer"
+                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                 >
                   Tutup
                 </button>
                 <button 
                   onClick={handlePrint}
-                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium flex items-center gap-2 transition-colors cursor-pointer"
+                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
                 >
                   <Printer size={16} className="text-zinc-500" />
                   Cetak
@@ -2839,7 +3046,7 @@ export default function App() {
                 <button 
                   onClick={handleDownloadReceiptPDF}
                   disabled={isGeneratingReceiptPDF}
-                  className="px-5 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed shadow-sm transition-colors cursor-pointer"
+                  className="px-5 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed shadow-sm transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] hover:shadow-md cursor-pointer"
                 >
                   {isGeneratingReceiptPDF ? (
                     <>
@@ -2894,32 +3101,148 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+      {/* Hidden PDF renderer for ZIP generation */}
+      {zipQueue && zipCurrentIndex < zipQueue.length && zipQueue[zipCurrentIndex] && (
+        <div className="fixed top-0 left-0 -z-50 opacity-0 pointer-events-none overflow-hidden w-[800px]">
+          <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
+            <div ref={hiddenReceiptPrintRef} className="w-full min-w-[700px] mx-auto font-sans text-black bg-white print:min-w-0 print:w-full print:p-0">
+                  {/* Header */}
+                  <div className="flex items-center pb-6 border-b-2 border-black mb-8 gap-6">
+                    <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-[75px] w-auto" alt="Logo" />
+                    <div className="flex-1">
+                      <h1 className="text-[18px] font-bold uppercase m-0 leading-tight">TETUAN HAIRI MUSTAFA & ASSOCIATES</h1>
+                      <p className="text-[11px] font-bold italic m-0 mt-0.5 text-[#222]">PEGUAM SYARIE * PESURUHJAYA SUMPAH</p>
+                      <div className="text-[11px] mt-1 leading-[1.3]">
+                        <p className="m-0">LOT 02, BANGUNAN ARKED MARA, 09100 BALING, KEDAH</p>
+                        <p className="m-0">TEL: 010-2434143 / 011-56531310 | EMAIL: tetuanhairi@gmail.com</p>
+                      </div>
+                    </div>
+                    <div className="text-right whitespace-nowrap">
+                      <h2 className="text-2xl font-bold tracking-tight uppercase mb-1">Resit Rasmi</h2>
+                      <p className="text-[13px] font-mono mt-1">Ref: {zipQueue[zipCurrentIndex].payment.id}</p>
+                      <p className="text-[13px] font-mono">Tarikh: {formatDateDMY(zipQueue[zipCurrentIndex].payment.date)}</p>
+                    </div>
+                  </div>
 
-      {/* Mobile Bottom Nav */}
-      <nav 
-        className="md:hidden bg-zinc-900 dark:bg-zinc-950 text-zinc-400 border-t border-zinc-800 flex justify-around p-2 pt-3 shrink-0 z-40 print:hidden"
-        style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
-      >
-        <button 
-          onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }} 
-          className={`flex flex-col items-center p-1 text-[9px] w-1/3 text-center ${activeTab === 'dashboard' ? 'text-white' : 'hover:text-white'}`}
-        >
-          <Home size={20} className="mb-1" /> Papan Pemuka
-        </button>
-        <button 
-          onClick={() => { setActiveTab('records'); setIsMobileMenuOpen(false); }} 
-          className={`flex flex-col items-center p-1 text-[9px] w-1/3 text-center ${activeTab === 'records' ? 'text-white' : 'hover:text-white'}`}
-        >
-          <Users size={20} className="mb-1" /> Rekod Pelanggan
-        </button>
+                  <div className="flex justify-between items-start mb-8 text-sm">
+                    <div>
+                      <p className="font-bold uppercase tracking-wider text-black mb-1">Diterima Daripada:</p>
+                      <p className="font-bold text-[16px] text-black uppercase mb-1">{zipQueue[zipCurrentIndex].record.nama}</p>
+                      <p className="text-black font-medium">Kategori Kes: {zipQueue[zipCurrentIndex].record.kes}</p>
+                    </div>
+                  </div>
 
-        <button 
-          onClick={() => { { setActiveTab('standalone'); setIsMobileMenuOpen(false); }; setStandaloneInitialRecord(null); }} 
-          className={`flex flex-col items-center p-1 text-[9px] w-1/3 text-center ${activeTab === 'standalone' ? 'text-white' : 'hover:text-white'}`}
-        >
-          <FileText size={20} className="mb-1" /> Paparan Resit
-        </button>
-      </nav>
+                  <div className="border-t-[3px] border-b-[3px] border-gray-300 mb-8">
+ <table className="w-full text-sm">
+ <thead>
+ <tr className="border-b-2 border-gray-300 ">
+ <th className="py-3 px-4 font-bold text-left uppercase">Item / Perkara</th>
+ <th className="py-3 px-4 font-bold text-right uppercase w-[200px] border-l-2 border-gray-300 ">Jumlah (RM)</th>
+ </tr>
+ </thead>
+ <tbody>
+ {(zipQueue[zipCurrentIndex].payment.amount > 0 || (zipQueue[zipCurrentIndex].payment.amount === 0 && !zipQueue[zipCurrentIndex].payment.mileageAmount)) && (
+ <tr>
+ <td className="py-4 px-4 font-medium text-black uppercase">FEE {formatDateDMY(zipQueue[zipCurrentIndex].payment.date)}</td>
+ <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-gray-300 ">{zipQueue[zipCurrentIndex].payment.amount.toFixed(2)}</td>
+ </tr>
+ )}
+ {!!zipQueue[zipCurrentIndex].payment.mileageAmount && zipQueue[zipCurrentIndex].payment.mileageAmount > 0 && (
+ <tr>
+ <td className="py-4 px-4 font-medium text-black uppercase">MILEAGE {formatDateDMY(zipQueue[zipCurrentIndex].payment.date)}</td>
+ <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-gray-300 ">{zipQueue[zipCurrentIndex].payment.mileageAmount.toFixed(2)}</td>
+ </tr>
+ )}
+ {(zipQueue[zipCurrentIndex].payment.amount > 0 && !!zipQueue[zipCurrentIndex].payment.mileageAmount && zipQueue[zipCurrentIndex].payment.mileageAmount > 0) && (
+ <tr className="border-t-2 border-gray-300 bg-white ">
+ <td className="py-4 px-4 font-bold text-black text-right uppercase">JUMLAH KESELURUHAN (RM)</td>
+ <td className="py-4 px-4 font-mono font-bold text-right border-l-2 border-gray-300 ">{(zipQueue[zipCurrentIndex].payment.amount + zipQueue[zipCurrentIndex].payment.mileageAmount).toFixed(2)}</td>
+ </tr>
+ )}
+ </tbody>
+ </table>
+ </div>
+
+ <div className="flex justify-between items-start border-b border-gray-300 pb-12 mb-12">
+ <div className="text-sm font-bold text-black uppercase flex flex-col gap-2 text-left">
+   <div>Butiran Kes: <span className="underline underline-offset-4">{zipQueue[zipCurrentIndex].record.kes}</span></div>
+   {zipQueue[zipCurrentIndex].payment.nota && (
+     <div className="mt-2 normal-case font-normal text-zinc-600 text-[13px] text-left">
+       <span className="font-bold uppercase text-black text-[11px] block mb-0.5">Nota Bayaran:</span>
+       <span className="italic bg-zinc-50 border border-zinc-200 rounded px-2.5 py-1.5 inline-block text-zinc-700 font-mono">{zipQueue[zipCurrentIndex].payment.nota}</span>
+     </div>
+   )}
+ </div>
+ {(()=>{
+ const sortedPayments = [...(zipQueue[zipCurrentIndex].record.paymentHistory || [])].sort((a, b) => parseDateString(a.date) - parseDateString(b.date));
+ const paymentIndex = sortedPayments.findIndex(p => p.id === zipQueue[zipCurrentIndex].payment.id);
+ const paymentsAfter = sortedPayments.slice(paymentIndex + 1);
+
+ const sumAfterFee = paymentsAfter.reduce((sum, p) => sum + (p.amount || 0), 0);
+ const bakiTerkiniFee = zipQueue[zipCurrentIndex].record.bakiFeeTerkini + sumAfterFee;
+ const bakiTerdahuluFee = bakiTerkiniFee + (zipQueue[zipCurrentIndex].payment.amount || 0);
+
+ const hasMileageReceipt = !!zipQueue[zipCurrentIndex].payment.mileageAmount && zipQueue[zipCurrentIndex].payment.mileageAmount > 0;
+ const sumAfterMileage = paymentsAfter.reduce((sum, p) => sum + (p.mileageAmount || 0), 0);
+ const bakiTerkiniMileage = zipQueue[zipCurrentIndex].record.bakiMileage !== undefined ? zipQueue[zipCurrentIndex].record.bakiMileage + sumAfterMileage : 0;
+ const bakiTerdahuluMileage = bakiTerkiniMileage + (zipQueue[zipCurrentIndex].payment.mileageAmount || 0);
+ 
+ return (
+ <div className="text-right space-y-4">
+ {zipQueue[zipCurrentIndex].payment.amount > 0 && (
+ <>
+ <div className="text-sm font-bold text-black flex justify-end gap-12">
+ <span>JUMLAH BAYARAN (FEE):</span>
+ <span className="w-32">RM {zipQueue[zipCurrentIndex].payment.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+ </div>
+ <div className="text-sm font-bold text-black flex justify-end gap-12">
+ <span>BAKI TERDAHULU (FEE):</span>
+ <span className="w-32">RM {bakiTerdahuluFee.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+ </div>
+ <div className="text-sm font-bold text-black flex justify-end gap-12 pt-3 border-t border-gray-300 mb-4">
+ <span>BAKI TERKINI (FEE):</span>
+ <span className="w-32">RM {bakiTerkiniFee.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                     </div>
+                                   </>
+                               )}
+
+                               {hasMileageReceipt && (
+                                   <>
+                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                                         <span>JUMLAH BAYARAN (MILEAGE):</span>
+                                         <span className="w-32">RM {zipQueue[zipCurrentIndex].payment.mileageAmount!.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                     </div>
+                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                                         <span>BAKI TERDAHULU (MILEAGE):</span>
+                                         <span className="w-32">RM {bakiTerdahuluMileage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                     </div>
+                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12 pt-3 border-t border-zinc-900 dark:border-zinc-100">
+                                         <span>BAKI TERKINI (MILEAGE):</span>
+                                         <span className="w-32">RM {bakiTerkiniMileage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                     </div>
+                                   </>
+                               )}
+                           </div>
+                         );
+                     })()}
+                  </div>
+
+                  <div className="flex justify-end pt-12">
+                    <div className="text-center">
+                      <img src="https://arleta.site/interactivelink/2510/cop-bulat.png" alt="Cop Rasmi" className="block mx-auto max-h-[85px] w-auto -mb-1" />
+                      <p className="font-bold text-sm text-zinc-900 dark:text-zinc-100 uppercase">Hairi Mustafa & Associates</p>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Peguam Syarie & Pesuruhjaya Sumpah</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-12 pt-6 border-t border-dashed border-zinc-300 dark:border-zinc-700 text-center text-[10px] text-zinc-400 dark:text-zinc-500 italic">
+                    Resit ini dijana oleh komputer, terima kasih atas urusan anda. Ref: {zipQueue[zipCurrentIndex].payment.id}
+                  </div>
+                </div>
+                {/* Printable Area Ends */}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -372,7 +372,7 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
                 <button onClick={() => setShowPreview(false)} className="p-2 text-zinc-400 hover:text-zinc-600 rounded-full transition-colors"><X size={20} /></button>
               </div>
               
-              <div className="p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
+              <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
                 {/* Print Area */}
                 <div ref={printRef} className="w-full min-w-[700px] mx-auto font-sans text-black bg-white print:min-w-0 print:w-full print:p-0">
                   <div className="flex items-center pb-2 border-b-2 border-black mb-4 gap-4">
