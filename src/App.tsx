@@ -98,6 +98,19 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'records' | 'standalone' | 'settings'>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   const [records, setRecords] = useState<CaseRecord[]>(() => {
     const saved = localStorage.getItem('localOfflineRecords');
     if (saved) {
@@ -199,8 +212,30 @@ export default function App() {
       }
       return;
     }
+
     const targetPath = `users/${user.uid}/records`;
+    
+    // Auto sync local offline records when user logs in
+    const savedLocal = localStorage.getItem('localOfflineRecords');
+    if (savedLocal) {
+      try {
+        const parsed = JSON.parse(savedLocal);
+        if (parsed && parsed.length > 0) {
+          const batch = writeBatch(db);
+          for (const rec of parsed) {
+            const docRef = doc(db, 'users', user.uid, 'records', rec.id);
+            batch.set(docRef, { ...rec, userId: user.uid }, { merge: true });
+          }
+          batch.commit().then(() => {
+            localStorage.removeItem('localOfflineRecords');
+            console.log('Local records auto-synced to cloud.');
+          });
+        }
+      } catch (e) {}
+    }
+
     const q = query(collection(db, targetPath));
+
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       if (snapshot.empty) {
         // If Firestore is empty, populate it with initial data file
@@ -1282,7 +1317,15 @@ export default function App() {
             </h1>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => setDarkMode(!darkMode)} className="hidden sm:flex p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors" title={darkMode ? "Tukar ke Mod Siang" : "Tukar ke Mod Gelap"}>
+
+            {user && (
+              <div className={"hidden md:flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider border transition-colors " + (isOnline ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50" : "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800/50")}>
+                <div className={"w-1.5 h-1.5 rounded-full " + (isOnline ? "bg-emerald-500" : "bg-amber-500 animate-pulse")}></div>
+                {isOnline ? 'Auto-Sync' : 'Offline'}
+              </div>
+            )}
+            <button onClick={() => setDarkMode(!darkMode)}
+ className="hidden sm:flex p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors" title={darkMode ? "Tukar ke Mod Siang" : "Tukar ke Mod Gelap"}>
               {darkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
 
