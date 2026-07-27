@@ -14,6 +14,7 @@
         "bakiSebelum": { "type": "number" },
         "bakiFeeTerkini": { "type": "number" },
         "bakiMileage": { "type": "number" },
+        "nota": { "type": "string" },
         "paymentHistory": {
           "type": "array"
         },

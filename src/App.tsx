@@ -1259,6 +1259,62 @@ export default function App() {
 </div>
   );
 
+  if (!authReady) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <Loader2 size={36} className="text-blue-600 animate-spin" />
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm font-medium">Sila tunggu sebentar...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center bg-zinc-50 dark:bg-zinc-950 px-4">
+        <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-8 flex flex-col items-center animate-fade-in">
+          <div className="flex flex-col items-center gap-3 mb-8">
+            <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-16 w-auto" alt="Logo" />
+            <div className="text-center">
+              <span className="font-bold text-lg tracking-tight text-zinc-900 dark:text-white uppercase leading-tight block">HAIRI MUSTAFA</span>
+              <span className="font-bold text-[12px] tracking-widest text-blue-600 dark:text-blue-400 uppercase leading-none block mt-1">ASSOCIATES</span>
+            </div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 text-center mt-3 max-w-[280px]">
+              Sistem Pengurusan Rekod Pelanggan & Penerbitan Resit Peguam Syarie
+            </p>
+          </div>
+
+          <div className="w-full space-y-4">
+            <button
+              onClick={handleLogin}
+              className="w-full flex items-center justify-center gap-3 px-4 py-3 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300 font-medium transition-all shadow-sm cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" width="24" height="24">
+                <g transform="matrix(1, 0, 0, 1, 0, 0)">
+                  <path d="M21.35,11.1H12v2.7h5.38c-0.24,1.28 -0.96,2.37 -2.04,3.1v2.58h3.3c1.93,-1.78 3.04,-4.4 3.04,-7.4C21.68,11.83 21.56,11.43 21.35,11.1z" fill="#4285F4" />
+                  <path d="M12,20.58c2.43,0 4.47,-0.8 5.96,-2.2l-2.58,-2.02c-0.72,0.48 -1.64,0.77 -2.66,0.77 -2.05,0 -3.79,-1.38 -4.41,-3.24H2.43v2.66C3.91,19.22 7.71,20.58 12,20.58z" fill="#34A853" />
+                  <path d="M7.59,13.89C7.43,13.4 7.34,12.88 7.34,12.34s0.09,-1.06 0.25,-1.55V8.13H2.43c-0.53,1.06 -0.83,2.25 -0.83,3.52s0.3,2.46 0.83,3.52l5.16,-4.28z" fill="#FBBC05" />
+                  <path d="M12,6.72c1.32,0 2.51,0.45 3.44,1.35l2.58,-2.58C16.47,4.09 14.43,3.3 12,3.3c-4.29,0 -8.09,1.36 -9.57,4.83l5.16,4.21c0.62,-1.86 2.36,-3.24 4.41,-3.24z" fill="#EA4335" />
+                </g>
+              </svg>
+              <span>Log Masuk dengan Google</span>
+            </button>
+          </div>
+
+          <div className="mt-8 text-center">
+            <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-medium">
+              Sila log masuk untuk mengakses data dan resit syarikat.
+            </p>
+            <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-2">
+              Hak Cipta Terpelihara &copy; {new Date().getFullYear()} Hairi Mustafa Associates
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen w-full bg-zinc-50 dark:bg-black font-sans overflow-hidden text-zinc-900 dark:text-zinc-100">
       
@@ -2022,7 +2078,7 @@ export default function App() {
             )}
           </div>
           
-          {activeTab === 'standalone' && <StandaloneReceipts initialData={standaloneInitialRecord} />}
+          {activeTab === 'standalone' && <StandaloneReceipts initialData={standaloneInitialRecord} user={user} db={db} />}
         </div>
         
         {/* Mobile Bottom Navigation */}

@@ -3,6 +3,8 @@ import { Printer, Edit, Trash2, Plus, Download, X, FileMinus } from 'lucide-reac
 import { motion, AnimatePresence } from 'motion/react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, writeBatch, Firestore } from 'firebase/firestore';
+import { User } from 'firebase/auth';
 
 type ReceiptItem = { perkara: string; harga: number };
 
@@ -18,11 +20,20 @@ export type StandaloneReceiptData = {
   bakiTerdahulu: number;
   bakiTerkini: number;
   butiran: string;
+  userId?: string;
 };
 
 import { CaseRecord } from '../data';
 
-export default function StandaloneReceipts({ initialData }: { initialData?: CaseRecord | null }) {
+export default function StandaloneReceipts({ 
+  initialData, 
+  user, 
+  db 
+}: { 
+  initialData?: CaseRecord | null; 
+  user: User | null; 
+  db: Firestore;
+}) {
   const [records, setRecords] = useState<StandaloneReceiptData[]>(() => {
     const saved = localStorage.getItem('hma_receipts');
     if (saved) {
@@ -31,9 +42,66 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
     return [];
   });
 
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   useEffect(() => {
-    localStorage.setItem('hma_receipts', JSON.stringify(records));
-  }, [records]);
+    if (!user) {
+      const saved = localStorage.getItem('hma_receipts');
+      if (saved) {
+        try { setRecords(JSON.parse(saved)); } catch (e) { setRecords([]); }
+      } else {
+        setRecords([]);
+      }
+      return;
+    }
+
+    // Auto sync local offline receipts to Firestore when user logs in
+    const savedLocal = localStorage.getItem('hma_receipts');
+    if (savedLocal) {
+      try {
+        const parsed = JSON.parse(savedLocal);
+        if (parsed && parsed.length > 0) {
+          const batch = writeBatch(db);
+          for (const rec of parsed) {
+            const rId = rec.id || doc(collection(db, `users/${user.uid}/receipts`)).id;
+            const docRef = doc(db, 'users', user.uid, 'receipts', rId);
+            batch.set(docRef, { ...rec, id: rId, userId: user.uid }, { merge: true });
+          }
+          batch.commit().then(() => {
+            localStorage.removeItem('hma_receipts');
+            console.log('Local receipts auto-synced to cloud.');
+          }).catch(err => {
+            console.error("Failed to commit synced receipts", err);
+          });
+        }
+      } catch (e) {
+        console.error("Error syncing local receipts", e);
+      }
+    }
+
+    const q = query(collection(db, `users/${user.uid}/receipts`));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedReceipts: StandaloneReceiptData[] = [];
+      snapshot.forEach(doc => {
+        fetchedReceipts.push(doc.data() as StandaloneReceiptData);
+      });
+      
+      // Sort receipts by tarikh descending, or fallback to id
+      fetchedReceipts.sort((a, b) => b.tarikh.localeCompare(a.tarikh));
+      
+      setRecords(fetchedReceipts);
+    }, (error) => {
+      console.error("Failed to load receipts from Firestore:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user, db]);
+
+  useEffect(() => {
+    if (!user) {
+      localStorage.setItem('hma_receipts', JSON.stringify(records));
+    }
+  }, [records, user]);
 
   const [form, setForm] = useState<StandaloneReceiptData>(() => {
     const defaultForm = {
@@ -114,7 +182,7 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
     setForm({ ...form, bakiTerdahulu: baki, bakiTerkini: baki - form.jumlah });
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!form.nama) {
       alert("Sila masukkan nama pelanggan.");
       return;
@@ -122,17 +190,37 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
     
     let d = new Date(form.tarikh);
     const tarikhDisplay = `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
-    const submission = { ...form, tarikhDisplay };
-
-    if (editIndex !== null) {
-      const newRecords = [...records];
-      newRecords[editIndex] = submission;
-      setRecords(newRecords);
-    } else {
-      setRecords([submission, ...records]);
-    }
     
-    setShowPreview(true);
+    if (user) {
+      const rId = editingId || doc(collection(db, `users/${user.uid}/receipts`)).id;
+      const submission = { ...form, id: rId, tarikhDisplay, userId: user.uid };
+      
+      try {
+        await setDoc(doc(db, `users/${user.uid}/receipts`, rId), submission);
+        localStorage.removeItem('hma_receipt_draft');
+        setEditingId(null);
+        setEditIndex(null);
+        setShowPreview(true);
+      } catch (err) {
+        console.error("Failed to save receipt to Firestore:", err);
+        alert("Gagal menyimpan resit ke cloud. Sila cuba lagi.");
+      }
+    } else {
+      const rId = form.id || `local-${Date.now()}`;
+      const submission = { ...form, id: rId, tarikhDisplay };
+      
+      if (editIndex !== null) {
+        const newRecords = [...records];
+        newRecords[editIndex] = submission;
+        setRecords(newRecords);
+      } else {
+        setRecords([submission, ...records]);
+      }
+      localStorage.removeItem('hma_receipt_draft');
+      setEditIndex(null);
+      setEditingId(null);
+      setShowPreview(true);
+    }
   };
 
   const doPrint = () => {
@@ -188,23 +276,40 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
       butiran: ''
     });
     setEditIndex(null);
+    setEditingId(null);
   };
 
-  const editRekod = (index: number) => {
-    const rec = records[index];
+  const editRekod = (rec: StandaloneReceiptData) => {
+    const idx = records.findIndex(r => r.id === rec.id || (r.nama === rec.nama && r.tarikh === rec.tarikh && r.jumlah === rec.jumlah));
+    if (idx === -1) return;
     setForm({
       ...rec,
       items: rec.items && rec.items.length > 0 ? rec.items : [{ perkara: (rec as any).item || 'Fee/Deposit', harga: rec.jumlah }]
     });
-    setEditIndex(index);
+    setEditIndex(idx);
+    if (rec.id) {
+      setEditingId(rec.id);
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const padamRekod = (index: number) => {
+  const padamRekod = async (rec: StandaloneReceiptData) => {
     if (confirm("Adakah anda pasti untuk memadam rekod ini?")) {
-      const newRecords = [...records];
-      newRecords.splice(index, 1);
-      setRecords(newRecords);
+      if (user && rec.id) {
+        try {
+          await deleteDoc(doc(db, `users/${user.uid}/receipts`, rec.id));
+        } catch (err) {
+          console.error("Failed to delete receipt from Firestore:", err);
+          alert("Gagal memadam resit dari cloud.");
+        }
+      } else {
+        const idx = records.findIndex(r => r.id === rec.id || (r.nama === rec.nama && r.tarikh === rec.tarikh && r.jumlah === rec.jumlah));
+        if (idx !== -1) {
+          const newRecords = [...records];
+          newRecords.splice(idx, 1);
+          setRecords(newRecords);
+        }
+      }
     }
   };
 
@@ -342,8 +447,8 @@ export default function StandaloneReceipts({ initialData }: { initialData?: Case
                       <td className="p-3">{data.jumlah.toFixed(2)}</td>
                       <td className="p-3">{data.bakiTerkini.toFixed(2)}</td>
                       <td className="p-3 flex gap-2">
-                        <button onClick={() => editRekod(index)} className="px-2 py-1 bg-yellow-400 text-yellow-900 font-bold text-xs rounded hover:bg-yellow-500">EDIT</button>
-                        <button onClick={() => padamRekod(index)} className="px-2 py-1 bg-red-500 text-white font-bold text-xs rounded hover:bg-red-600">PADAM</button>
+                        <button onClick={() => editRekod(data)} className="px-2 py-1 bg-yellow-400 text-yellow-900 font-bold text-xs rounded hover:bg-yellow-500">EDIT</button>
+                        <button onClick={() => padamRekod(data)} className="px-2 py-1 bg-red-500 text-white font-bold text-xs rounded hover:bg-red-600">PADAM</button>
                       </td>
                     </tr>
                   )
