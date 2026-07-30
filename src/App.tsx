@@ -144,6 +144,7 @@ export default function App() {
   // Modal States
   const [paymentRecord, setPaymentRecord] = useState<CaseRecord | null>(null);
   const [statementRecord, setStatementRecord] = useState<CaseRecord | null>(null);
+  const [simpleStatementRecord, setSimpleStatementRecord] = useState<CaseRecord | null>(null);
   const [receiptData, setReceiptData] = useState<{record: CaseRecord, payment: import('./data').PaymentEntry} | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<string>('');
   const [paymentMileageAmount, setPaymentMileageAmount] = useState<string>('');
@@ -165,6 +166,7 @@ export default function App() {
   const [paymentSortColumn, setPaymentSortColumn] = useState<'date' | 'amount' | null>(null);
   const [paymentSortDirection, setPaymentSortDirection] = useState<'asc' | 'desc'>('desc');
   const [dateSortOrder, setDateSortOrder] = useState<'asc' | 'desc' | null>(null);
+  const [nameSortOrder, setNameSortOrder] = useState<'asc' | 'desc' | null>(null);
 
   const [isNewRecordModalOpen, setIsNewRecordModalOpen] = useState(false);
   const [newRecordData, setNewRecordData] = useState({
@@ -178,6 +180,7 @@ export default function App() {
 
   // Printing Reference
   const printRef = useRef<HTMLDivElement>(null);
+  const simplePrintRef = useRef<HTMLDivElement>(null);
   const receiptPrintRef = useRef<HTMLDivElement>(null);
   const [isGeneratingReceiptPDF, setIsGeneratingReceiptPDF] = useState(false);
 
@@ -902,9 +905,49 @@ export default function App() {
   }, [zipCurrentIndex, zipQueue, isGeneratingZip]);
 
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isGeneratingSimplePDF, setIsGeneratingSimplePDF] = useState(false);
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleDownloadSimplePDF = async () => {
+    if (!simplePrintRef.current || !simpleStatementRecord) return;
+    
+    setIsGeneratingSimplePDF(true);
+    try {
+      const canvas = await html2canvas(simplePrintRef.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+      const imgData = canvas.toDataURL('image/png');
+      
+      const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      
+      const imgPropsHeight = (canvas.height * pdfWidth) / canvas.width;
+      let heightLeft = imgPropsHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgPropsHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft >= 0) {
+        position = heightLeft - imgPropsHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgPropsHeight);
+        heightLeft -= pageHeight;
+      }
+
+      pdf.save(`Penyata_Ringkas_${simpleStatementRecord.nama.replace(/\s+/g, '_')}_${simpleStatementRecord.id}.pdf`);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+    } finally {
+      setIsGeneratingSimplePDF(false);
+    }
   };
 
   const handleDownloadPDF = async () => {
@@ -1025,7 +1068,13 @@ export default function App() {
       return matchesSearch && matchesKes && matchesDate;
     });
 
-    if (dateSortOrder) {
+    if (nameSortOrder) {
+      list.sort((a, b) => {
+        const nameA = (a.namaPelanggan || '').toLowerCase();
+        const nameB = (b.namaPelanggan || '').toLowerCase();
+        return nameSortOrder === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+      });
+    } else if (dateSortOrder) {
       list.sort((a, b) => {
         const timeA = parseDateObj(a.tarikh).getTime();
         const timeB = parseDateObj(b.tarikh).getTime();
@@ -1034,7 +1083,7 @@ export default function App() {
     }
 
     return list;
-  }, [searchTerm, filterKes, filterStartDate, filterEndDate, records, dateSortOrder]);
+  }, [searchTerm, filterKes, filterStartDate, filterEndDate, records, dateSortOrder, nameSortOrder]);
 
   // Extract unique cases for the dropdown
   const uniqueKes = useMemo(() => {
@@ -1128,16 +1177,26 @@ export default function App() {
         <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
           <History size={16} className="text-blue-500"/> Rekod Bayaran
         </h4>
-        {record.bakiFeeTerkini > 0 && (
+        <div className="flex items-center gap-2">
           <button 
-            onClick={() => setPaymentRecord(record)}
-            className="text-xs bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm"
-            title="Tambah Bayaran"
+            onClick={() => setSimpleStatementRecord(record)}
+            className="text-xs bg-zinc-100 hover:bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-zinc-200 dark:border-zinc-700"
+            title="Cetak Penyata Ringkas"
           >
-            <Plus size={12} />
-            <span>+ Bayaran</span>
+            <Printer size={12} />
+            <span>Penyata Ringkas</span>
           </button>
-        )}
+          {record.bakiFeeTerkini > 0 && (
+            <button 
+              onClick={() => setPaymentRecord(record)}
+              className="text-xs bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm"
+              title="Tambah Bayaran"
+            >
+              <Plus size={12} />
+              <span>+ Bayaran</span>
+            </button>
+          )}
+        </div>
       </div>
       {record.paymentHistory && record.paymentHistory.length > 0 ? (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
@@ -1449,36 +1508,39 @@ export default function App() {
 
 
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          {activeTab !== 'records' && activeTab !== 'standalone' && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
-              <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
-                <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Jumlah Kes</div>
-                <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{stats.totalKes}</div>
-              </div>
-              
-              <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
-                <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Total Fee</div>
-                <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalFee)}</div>
-              </div>
-
-              <div className="flex flex-col gap-1 border-l-2 border-red-500 dark:border-red-500 pl-4">
-                <div className="text-[10px] font-medium tracking-widest uppercase text-red-500 dark:text-red-400">Baki Fee Terkini</div>
-                <div className="text-3xl font-light tracking-tight text-red-600 dark:text-red-500">{formatRM(stats.totalBakiTerkini)}</div>
-              </div>
-
-              <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
-                <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Baki Mileage</div>
-                <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalMileage)}</div>
-              </div>
-            </div>
-          )}
-
-          {/* Dashboard Content / Record Table */}
-          <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
-            
-            
+          <AnimatePresence mode="wait">
             {/* Settings Tab Content */}
             {activeTab === 'settings' && (
+              <motion.div
+                key="settings"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="flex-1 flex flex-col overflow-hidden min-h-0"
+              >
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
+                  <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Jumlah Kes</div>
+                    <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{stats.totalKes}</div>
+                  </div>
+                  
+                  <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Total Fee</div>
+                    <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalFee)}</div>
+                  </div>
+
+                  <div className="flex flex-col gap-1 border-l-2 border-red-500 dark:border-red-500 pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-red-500 dark:text-red-400">Baki Fee Terkini</div>
+                    <div className="text-3xl font-light tracking-tight text-red-600 dark:text-red-500">{formatRM(stats.totalBakiTerkini)}</div>
+                  </div>
+
+                  <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Baki Mileage</div>
+                    <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalMileage)}</div>
+                  </div>
+                </div>
+                <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
               <div className="flex flex-col gap-6 sm:hidden pb-10">
                 <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 overflow-hidden">
                   <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
@@ -1557,9 +1619,41 @@ export default function App() {
                   </div>
                 </div>
               </div>
+                </div>
+              </motion.div>
             )}
             {/* Main Dashboard Content */}
             {activeTab === 'dashboard' && (
+              <motion.div
+                key="dashboard"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="flex-1 flex flex-col overflow-hidden min-h-0"
+              >
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
+                  <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Jumlah Kes</div>
+                    <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{stats.totalKes}</div>
+                  </div>
+                  
+                  <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Total Fee</div>
+                    <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalFee)}</div>
+                  </div>
+
+                  <div className="flex flex-col gap-1 border-l-2 border-red-500 dark:border-red-500 pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-red-500 dark:text-red-400">Baki Fee Terkini</div>
+                    <div className="text-3xl font-light tracking-tight text-red-600 dark:text-red-500">{formatRM(stats.totalBakiTerkini)}</div>
+                  </div>
+
+                  <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Baki Mileage</div>
+                    <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalMileage)}</div>
+                  </div>
+                </div>
+                <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 shrink-0 w-full">
                 {/* Recent Cases */}
                 <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm p-6 overflow-hidden">
@@ -1647,11 +1741,22 @@ export default function App() {
                    </div>
                 </div>
               </div>
+                </div>
+              </motion.div>
             )}
 
             {/* Main Data Table Area */}
             {activeTab === 'records' && (
-            <div className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm flex flex-col h-full overflow-hidden">
+              <motion.div
+                key="records"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="flex-1 flex flex-col overflow-hidden min-h-0"
+              >
+                <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 pt-4 sm:pt-6 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
+                  <div className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm flex flex-col h-full overflow-hidden">
               <div className="p-4 bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-100 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 tracking-tight flex items-center gap-2">
                   <FileText size={16} className="text-blue-500" />
@@ -1874,7 +1979,31 @@ export default function App() {
                           }}
                         />
                       </th>
-                      <th className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800">Nama Pelanggan</th>
+                      <th 
+                        className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 cursor-pointer select-none hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
+                        onClick={() => {
+                          if (nameSortOrder === 'asc') {
+                            setNameSortOrder('desc');
+                          } else if (nameSortOrder === 'desc') {
+                            setNameSortOrder(null);
+                          } else {
+                            setNameSortOrder('asc');
+                            setDateSortOrder(null);
+                          }
+                        }}
+                        title="Klik untuk susun mengikut nama (A-Z / Z-A)"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span>Nama Pelanggan</span>
+                          {nameSortOrder === 'asc' ? (
+                            <ArrowUp size={13} className="text-blue-600 dark:text-blue-400" />
+                          ) : nameSortOrder === 'desc' ? (
+                            <ArrowDown size={13} className="text-blue-600 dark:text-blue-400" />
+                          ) : (
+                            <ArrowUpDown size={13} className="text-zinc-400 opacity-50 group-hover:opacity-100 transition-opacity" />
+                          )}
+                        </div>
+                      </th>
                       <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800">Kategori Kes</th>
                       <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800">Nota Kes</th>
                       <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Total Fee</th>
@@ -1888,6 +2017,7 @@ export default function App() {
                             setDateSortOrder(null);
                           } else {
                             setDateSortOrder('desc');
+                            setNameSortOrder(null);
                           }
                         }}
                         title="Klik untuk susun mengikut tarikh (Terkini / Terlama)"
@@ -2036,19 +2166,27 @@ export default function App() {
                               </div>
                             </td>
                           </motion.tr>
-                          {expandedRowId === record.id && (
-                            <tr className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">
-                              <td colSpan={10} className="p-0 whitespace-normal">
-                                <motion.div
-                                  initial={{ height: 0, opacity: 0 }}
-                                  animate={{ height: "auto", opacity: 1 }}
-                                  className="overflow-hidden"
-                                >
-                                    {renderExpandedDetails(record)}
-                                </motion.div>
-                              </td>
-                            </tr>
-                          )}
+                          <AnimatePresence>
+                            {expandedRowId === record.id && (
+                              <motion.tr 
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50"
+                              >
+                                <td colSpan={10} className="p-0 whitespace-normal">
+                                  <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: "auto", opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    className="overflow-hidden"
+                                  >
+                                      {renderExpandedDetails(record)}
+                                  </motion.div>
+                                </td>
+                              </motion.tr>
+                            )}
+                          </AnimatePresence>
                         </React.Fragment>
                       ))
                     ) : (
@@ -2075,10 +2213,23 @@ export default function App() {
                 </div>
               </div>
             </div>
+                </div>
+              </motion.div>
             )}
-          </div>
-          
-          {activeTab === 'standalone' && <StandaloneReceipts initialData={standaloneInitialRecord} user={user} db={db} />}
+            
+            {activeTab === 'standalone' && (
+              <motion.div
+                key="standalone"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="flex-1 flex flex-col min-h-0 overflow-hidden"
+              >
+                <StandaloneReceipts initialData={standaloneInitialRecord} user={user} db={db} />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
         
         {/* Mobile Bottom Navigation */}
@@ -2945,6 +3096,148 @@ export default function App() {
                   className="px-5 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] hover:shadow-md cursor-pointer shadow-sm"
                 >
                   {isGeneratingPDF ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Sedang Menjana...
+                    </>
+                  ) : (
+                    <>
+                      <Download size={16} />
+                      Muat Turun PDF
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Simple Statement Modal & Print Layout */}
+      <AnimatePresence>
+        {simpleStatementRecord && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:static print:bg-white print:p-0 print:block">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-3xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
+            >
+              <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 print:hidden">
+                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                  <Printer size={18} className="text-zinc-600 dark:text-zinc-400" />
+                  Pratinjau Penyata Ringkas
+                </h3>
+                <button onClick={() => setSimpleStatementRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
+                {/* Printable Area Starts */}
+                <div ref={simplePrintRef} className="w-full min-w-[700px] mx-auto font-sans text-black bg-white print:min-w-0 print:w-full print:p-0">
+                  
+                  {/* Header */}
+                  <div className="flex items-center pb-6 border-b-2 border-black mb-8 gap-6">
+                    <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-[75px] w-auto" alt="Logo" />
+                    <div className="flex-1">
+                      <h1 className="text-[18px] font-bold uppercase m-0 leading-tight">TETUAN HAIRI MUSTAFA & ASSOCIATES</h1>
+                      <p className="text-[11px] font-bold italic m-0 mt-0.5 text-[#222]">PEGUAM SYARIE * PESURUHJAYA SUMPAH</p>
+                      <div className="text-[11px] mt-1 leading-[1.3]">
+                        <p className="m-0">LOT 02, BANGUNAN ARKED MARA, 09100 BALING, KEDAH</p>
+                        <p className="m-0">TEL: 010-2434143 / 011-56531310 | EMAIL: tetuanhairi@gmail.com</p>
+                      </div>
+                    </div>
+                    <div className="text-right whitespace-nowrap">
+                      <h2 className="text-2xl font-bold tracking-tight uppercase mb-1">Penyata Ringkas</h2>
+                      <p className="text-[13px] font-mono mt-1">Ref: {simpleStatementRecord.id}</p>
+                      <p className="text-[13px] font-mono">Tarikh: {formatDateDMY(new Date().toISOString().split('T')[0])}</p>
+                    </div>
+                  </div>
+
+                  {/* Client Info */}
+                  <div className="flex justify-between items-start text-sm mb-10 bg-white p-6 border border-gray-300">
+                    <div>
+                      <p className="text-xs font-bold text-black uppercase tracking-wider mb-2">Kepada</p>
+                      <p className="font-bold text-black text-lg mb-1">{simpleStatementRecord.nama}</p>
+                      <p className="text-black font-medium">Kategori Kes: {simpleStatementRecord.kes}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-bold text-black uppercase tracking-wider mb-2">Baki Terkini</p>
+                      <p className="text-3xl font-bold font-mono text-black">{formatRM(simpleStatementRecord.bakiFeeTerkini)}</p>
+                      <p className="text-black font-medium text-xs mt-1">
+                        Tarikh Terakhir Bayaran: {simpleStatementRecord.paymentHistory && simpleStatementRecord.paymentHistory.length > 0 
+                          ? formatDateDMY([...simpleStatementRecord.paymentHistory].sort((a: any, b: any) => parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime())[0].date)
+                          : '-'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Payment History */}
+                  <div>
+                    <h3 className="text-sm font-bold text-black uppercase tracking-wider mb-4 border-b border-gray-300 pb-2">Senarai Sejarah Bayaran</h3>
+                    {simpleStatementRecord.paymentHistory && simpleStatementRecord.paymentHistory.length > 0 ? (
+                      <div className="border border-gray-300 overflow-x-auto print:overflow-visible">
+                        <table className="w-full text-sm text-left min-w-[500px]">
+                          <thead className="bg-white border-b border-gray-300">
+                            <tr>
+                              <th className="py-3 px-5 font-semibold text-black">Tarikh</th>
+                              <th className="py-3 px-5 font-semibold text-black">No. Rujukan</th>
+                              <th className="py-3 px-5 font-semibold text-black">Kaedah</th>
+                              <th className="py-3 px-5 font-semibold text-black text-right">Fee (RM)</th>
+                              <th className="py-3 px-5 font-semibold text-black text-right">Mileage (RM)</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-300">
+                            {[...simpleStatementRecord.paymentHistory]
+                              .sort((a: any, b: any) => parseDateObj(a.date).getTime() - parseDateObj(b.date).getTime())
+                              .map((payment) => (
+                              <tr key={payment.id} className="hover:bg-white transition-colors">
+                                <td className="py-3 px-5 text-black">{formatDateDMY(payment.date)}</td>
+                                <td className="py-3 px-5 text-black font-mono text-xs">{payment.id}</td>
+                                <td className="py-3 px-5 text-black">{payment.method}</td>
+                                <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">
+                                  {formatRM(payment.amount || 0)}
+                                </td>
+                                <td className="py-3 px-5 text-right font-mono font-medium text-amber-600">
+                                  {formatRM(payment.mileageAmount || 0)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="p-8 text-center text-gray-500 border border-gray-300 bg-gray-50">
+                        Tiada rekod bayaran buat masa ini.
+                      </div>
+                    )}
+                  </div>
+                  
+                </div>
+                {/* Printable Area Ends */}
+              </div>
+
+              <div className="p-5 border-t border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 flex justify-end gap-3 print:hidden">
+                <button 
+                  onClick={() => setSimpleStatementRecord(null)}
+                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                >
+                  Tutup
+                </button>
+                <button 
+                  onClick={handlePrint}
+                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
+                >
+                  <Printer size={16} className="text-zinc-500" />
+                  Cetak
+                </button>
+                <button 
+                  onClick={handleDownloadSimplePDF}
+                  disabled={isGeneratingSimplePDF}
+                  className="px-5 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] hover:shadow-md cursor-pointer shadow-sm"
+                >
+                  {isGeneratingSimplePDF ? (
                     <>
                       <Loader2 size={16} className="animate-spin" />
                       Sedang Menjana...
