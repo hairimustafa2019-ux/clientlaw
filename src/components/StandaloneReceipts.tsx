@@ -5,6 +5,7 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query, writeBatch, Firestore } from 'firebase/firestore';
 import { User } from 'firebase/auth';
+import { CaseRecord } from '../data';
 
 type ReceiptItem = { perkara: string; harga: number };
 
@@ -23,16 +24,16 @@ export type StandaloneReceiptData = {
   userId?: string;
 };
 
-import { CaseRecord } from '../data';
-
 export default function StandaloneReceipts({ 
   initialData, 
   user, 
-  db 
+  db,
+  caseRecords = []
 }: { 
   initialData?: CaseRecord | null; 
   user: User | null; 
   db: Firestore;
+  caseRecords?: CaseRecord[];
 }) {
   const [records, setRecords] = useState<StandaloneReceiptData[]>(() => {
     const saved = localStorage.getItem('hma_receipts');
@@ -144,6 +145,8 @@ export default function StandaloneReceipts({
   }, [initialData]);
 
   const [editIndex, setEditIndex] = useState<number | null>(null);
+  
+  const uniqueCustomerNames = Array.from(new Set(caseRecords.map(r => r.nama).filter(Boolean)));
   const [searchTxt, setSearchTxt] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
@@ -344,8 +347,25 @@ export default function StandaloneReceipts({
 
               <div>
                 <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">Nama Pelanggan:</label>
-                <input type="text" className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 uppercase" 
-                  value={form.nama} onChange={e => setForm({...form, nama: e.target.value.toUpperCase()})} required />
+                <input 
+                  type="text" 
+                  list="customer-names"
+                  className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 uppercase" 
+                  value={form.nama} 
+                  onChange={e => {
+                    const selectedName = e.target.value.toUpperCase();
+                    const existingRecord = caseRecords.find(r => r.nama.toUpperCase() === selectedName);
+                    // Automatically fill in other details if available, although Standalone receipts don't have many matching fields
+                    setForm({...form, nama: selectedName});
+                  }} 
+                  required 
+                  placeholder="Cari atau masukkan nama baru..."
+                />
+                <datalist id="customer-names">
+                  {uniqueCustomerNames.map((name, i) => (
+                    <option key={i} value={name} />
+                  ))}
+                </datalist>
               </div>
 
               <div>

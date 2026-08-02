@@ -1214,7 +1214,7 @@ export default function App() {
           {record.bakiFeeTerkini > 0 && (
             <button 
               onClick={() => setPaymentRecord(record)}
-              className="text-xs bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm"
+              className="text-xs bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 px-2.5 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1 shadow-sm hover:shadow-md hover:-translate-y-0.5 animate-subtle-pulse"
               title="Tambah Bayaran"
             >
               <Plus size={12} />
@@ -1533,7 +1533,7 @@ export default function App() {
             </button>
             <button 
               onClick={() => setIsNewRecordModalOpen(true)}
-              className="p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center justify-center shrink-0 transition-all"
+              className="p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center justify-center shrink-0 transition-all hover:-translate-y-0.5 hover:shadow-lg animate-subtle-pulse"
             >
               <Plus size={16} className="sm:hidden" />
               <span className="hidden sm:inline">+ Rekod Baru</span>
@@ -1756,7 +1756,7 @@ export default function App() {
                    <div className="grid grid-cols-2 gap-3 sm:gap-4 flex-1">
                      <button
                        onClick={() => setIsNewRecordModalOpen(true)}
-                       className="p-5 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left flex flex-col gap-4 group cursor-pointer h-full"
+                       className="p-5 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all text-left flex flex-col gap-4 group cursor-pointer h-full hover:shadow-md hover:-translate-y-1 animate-subtle-pulse"
                      >
                        <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-105 transition-transform">
                          <Plus size={20} />
@@ -1972,7 +1972,7 @@ export default function App() {
                               className="overflow-hidden"
                             >
                                <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800/50 flex flex-wrap gap-2 w-full">
-                                 <button onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }} className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-400 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer">
+                                 <button onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }} className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-400 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer hover:shadow-md hover:-translate-y-0.5 animate-subtle-pulse">
                                    <Plus size={14} /> Bayaran
                                  </button>
                                  <button onClick={(e) => { e.stopPropagation(); setMileageAdjustmentRecord(record); }} className="flex-1 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-600 dark:bg-teal-500/10 dark:hover:bg-teal-500/20 dark:text-teal-400 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1 transition-colors border border-teal-200 dark:border-teal-800/50 cursor-pointer">
@@ -2179,7 +2179,7 @@ export default function App() {
                                 {record.bakiFeeTerkini > 0 && (
                                   <button 
                                     onClick={() => setPaymentRecord(record)}
-                                    className="text-blue-700 dark:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-blue-200 dark:border-blue-800/50 flex items-center gap-1 shrink-0 shadow-sm cursor-pointer"
+                                    className="text-blue-700 dark:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 px-2 py-1.5 rounded-lg text-xs font-medium transition-all border border-blue-200 dark:border-blue-800/50 flex items-center gap-1 shrink-0 shadow-sm cursor-pointer hover:shadow-md hover:-translate-y-0.5 animate-subtle-pulse"
                                     title="Tambah Bayaran"
                                   >
                                     <Plus size={13} className="text-blue-600 dark:text-blue-400" />
@@ -2276,7 +2276,7 @@ export default function App() {
                 transition={{ duration: 0.2 }}
                 className="flex-1 flex flex-col min-h-0 overflow-hidden"
               >
-                <StandaloneReceipts initialData={standaloneInitialRecord} user={user} db={db} />
+                <StandaloneReceipts initialData={standaloneInitialRecord} user={user} db={db} caseRecords={records} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -2862,6 +2862,14 @@ export default function App() {
                         autoFocus
                       />
                     </div>
+                    {paymentAmount && !isNaN(parseFloat(paymentAmount)) && (
+                      <div className="mt-2 text-[11px] font-medium text-zinc-500 dark:text-zinc-400 flex items-center justify-between bg-zinc-50 dark:bg-zinc-900 px-3 py-2 rounded-md">
+                        <span>Baki Selepas Bayaran (Fee):</span>
+                        <span className="text-blue-600 dark:text-blue-400 font-bold">
+                          RM {Math.max(0, paymentRecord.bakiFeeTerkini - parseFloat(paymentAmount)).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {(paymentRecord.bakiMileage || 0) > 0 && (
@@ -2887,6 +2895,14 @@ export default function App() {
                           }}
                         />
                       </div>
+                      {paymentMileageAmount && !isNaN(parseFloat(paymentMileageAmount)) && (
+                        <div className="mt-2 text-[11px] font-medium text-zinc-500 dark:text-zinc-400 flex items-center justify-between bg-zinc-50 dark:bg-zinc-900 px-3 py-2 rounded-md">
+                          <span>Baki Selepas Bayaran (Mileage):</span>
+                          <span className="text-blue-600 dark:text-blue-400 font-bold">
+                            RM {Math.max(0, paymentRecord.bakiMileage - parseFloat(paymentMileageAmount)).toFixed(2)}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
 
