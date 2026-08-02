@@ -170,6 +170,26 @@ export default function App() {
   const [isDeletingSelected, setIsDeletingSelected] = useState<boolean>(false);
 
   const [standaloneInitialRecord, setStandaloneInitialRecord] = useState<CaseRecord | null>(null);
+  const [clientProfileName, setClientProfileName] = useState<string | null>(null);
+  
+  const handleUpdateClientProfile = (e: React.FormEvent, nama: string) => {
+    e.preventDefault();
+    const formData = new FormData(e.target as HTMLFormElement);
+    const telefon = formData.get('telefon') as string;
+    const emel = formData.get('emel') as string;
+    const alamat = formData.get('alamat') as string;
+    
+    setRecords(prev => prev.map(r => {
+      if (r.nama === nama) {
+        return { ...r, telefon, emel, alamat };
+      }
+      return r;
+    }));
+    
+    // Optionally stay open or show toast
+    alert('Profil Pelanggan Berjaya Dikemaskini');
+  };
+
   
   const [paymentSortColumn, setPaymentSortColumn] = useState<'date' | 'amount' | null>(null);
   const [paymentSortDirection, setPaymentSortDirection] = useState<'asc' | 'desc'>('desc');
@@ -929,6 +949,44 @@ export default function App() {
     }
   }, [zipCurrentIndex, zipQueue, isGeneratingZip]);
 
+  const handleExportCSV = () => {
+    const headers = [
+      'No', 'Tarikh Kemaskini', 'Nama Pelanggan', 'Kategori Kes', 'Nota', 
+      'Jumlah Fee (RM)', 'Jumlah Bayaran (Fee) (RM)', 'Baki Fee (RM)', 
+      'Jumlah Bayaran (Mileage) (RM)', 'Baki Mileage (RM)'
+    ];
+
+    const csvData = [
+      headers.join(','),
+      ...filteredRecords.map((r, i) => {
+        const totalPaidFee = r.paymentHistory?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+        const totalPaidMileage = r.paymentHistory?.reduce((sum, p) => sum + (p.mileageAmount || 0), 0) || 0;
+        
+        return [
+          i + 1,
+          `"${r.tarikh || ''}"`,
+          `"${r.nama || ''}"`,
+          `"${r.kes || ''}"`,
+          `"${(r.nota || '').replace(/"/g, '""')}"`,
+          r.totalFee || 0,
+          totalPaidFee,
+          r.bakiFeeTerkini || 0,
+          totalPaidMileage,
+          r.bakiMileage || 0
+        ].join(',');
+      })
+    ].join('\n');
+
+    const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Senarai_Pelanggan_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [isGeneratingSimplePDF, setIsGeneratingSimplePDF] = useState(false);
 
@@ -1203,6 +1261,14 @@ export default function App() {
           <History size={16} className="text-blue-500"/> Rekod Bayaran
         </h4>
         <div className="flex items-center gap-2">
+          <button 
+            onClick={() => setStatementRecord(record)}
+            className="text-xs bg-zinc-100 hover:bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-zinc-200 dark:border-zinc-700"
+            title="Cetak Penyata Akaun Penuh"
+          >
+            <Printer size={12} />
+            <span>Penyata Penuh</span>
+          </button>
           <button 
             onClick={() => setSimpleStatementRecord(record)}
             className="text-xs bg-zinc-100 hover:bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-zinc-200 dark:border-zinc-700"
@@ -1908,6 +1974,16 @@ export default function App() {
                       title="Tarikh Akhir"
                     />
                   </div>
+                  
+                  <button 
+                    onClick={handleExportCSV}
+                    className="px-3 py-2 text-sm bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-500/20 font-medium cursor-pointer flex items-center gap-2 transition-all shrink-0 ml-auto"
+                    title="Eksport Senarai ke CSV"
+                  >
+                    <FileText size={14} />
+                    <span className="hidden sm:inline">Eksport CSV</span>
+                  </button>
+                  
                 </div>
               </div>
 
@@ -1934,7 +2010,16 @@ export default function App() {
                           </div>
                           <div className="flex-1 min-w-0">
                              <div className="flex justify-between items-start gap-2">
-                               <h4 className="font-bold text-zinc-900 dark:text-zinc-100 text-[13px] sm:text-sm truncate leading-tight">{record.nama}</h4>
+                               <h4 className="font-bold text-zinc-900 dark:text-zinc-100 text-[13px] sm:text-sm truncate leading-tight flex items-center gap-1">
+  {record.nama}
+  <button 
+    onClick={(e) => { e.stopPropagation(); setClientProfileName(record.nama); }}
+    className="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 p-1 rounded-md"
+    title="Profil Pelanggan"
+  >
+    <Users size={14} />
+  </button>
+</h4>
                                <span className={`font-bold text-[13px] sm:text-sm shrink-0 leading-tight ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-zinc-800 dark:text-zinc-200'}`}>
                                  {formatRM(record.bakiFeeTerkini)}
                                </span>
@@ -2124,7 +2209,18 @@ export default function App() {
                                 <span className="hidden sm:inline text-xs">{index + 1}</span>
                               </div>
                             </td>
-                            <td className="px-3 sm:px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200 border-r border-zinc-100 dark:border-zinc-800/50 break-words md:truncate md:max-w-none max-w-[140px]">{record.nama}</td>
+                            <td className="px-3 sm:px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200 border-r border-zinc-100 dark:border-zinc-800/50 break-words md:truncate md:max-w-none max-w-[140px]">
+  <div className="flex items-center justify-between group">
+    <span>{record.nama}</span>
+    <button 
+      onClick={(e) => { e.stopPropagation(); setClientProfileName(record.nama); }}
+      className="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
+      title="Profil Pelanggan"
+    >
+      <Users size={14} />
+    </button>
+  </div>
+</td>
                             <td className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">
                               <span className="text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">
                                 {record.kes}
@@ -2989,7 +3085,7 @@ export default function App() {
               <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 print:hidden">
                 <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
                   <Printer size={18} className="text-zinc-600 dark:text-zinc-400" />
-                  Pratinjau Penyata
+                  Pratinjau Penyata Penuh
                 </h3>
                 <button onClick={() => setStatementRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   <X size={18} />
@@ -3011,7 +3107,7 @@ export default function App() {
  </div>
  </div>
  <div className="text-right whitespace-nowrap">
- <h2 className="text-2xl font-bold tracking-tight uppercase mb-1">Penyata Akaun</h2>
+ <h2 className="text-2xl font-bold tracking-tight uppercase mb-1">Penyata Akaun Penuh</h2>
  <p className="text-[13px] font-mono mt-1">Ref: {statementRecord.id}</p>
  <p className="text-[13px] font-mono">Tarikh: {formatDateDMY(new Date().toISOString().split('T')[0])}</p>
  </div>
@@ -3701,6 +3797,92 @@ export default function App() {
           </div>
         </div>
       )}
+      {/* Client Profile Modal */}
+      <AnimatePresence>
+        {clientProfileName && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+            >
+              <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50">
+                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                  <Users size={18} className="text-zinc-600 dark:text-zinc-400" />
+                  Profil Pelanggan: {clientProfileName}
+                </h3>
+                <button onClick={() => setClientProfileName(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                  <X size={18} />
+                </button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto">
+                {(() => {
+                  const clientCases = records.filter(r => r.nama === clientProfileName);
+                  const firstCase = clientCases[0] || {};
+                  const totalClientFee = clientCases.reduce((sum, r) => sum + r.totalFee, 0);
+                  const totalClientBaki = clientCases.reduce((sum, r) => sum + r.bakiFeeTerkini, 0);
+                  
+                  return (
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="p-4 bg-blue-50 dark:bg-blue-500/10 rounded-xl border border-blue-100 dark:border-blue-900/30">
+                          <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase mb-1">Jumlah Keseluruhan Kes</p>
+                          <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">{clientCases.length} Kes</p>
+                        </div>
+                        <div className="p-4 bg-amber-50 dark:bg-amber-500/10 rounded-xl border border-amber-100 dark:border-amber-900/30">
+                          <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase mb-1">Jumlah Tunggakan (Baki)</p>
+                          <p className="text-2xl font-bold font-mono text-amber-700 dark:text-amber-300">{formatRM(totalClientBaki)}</p>
+                        </div>
+                      </div>
+                      
+                      <form onSubmit={(e) => handleUpdateClientProfile(e, clientProfileName)} className="space-y-4 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 bg-zinc-50/30 dark:bg-zinc-900/30">
+                        <h4 className="font-semibold text-sm mb-3">Maklumat Perhubungan</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-1 uppercase">No. Telefon</label>
+                            <input name="telefon" type="text" defaultValue={firstCase.telefon || ''} className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="01X-XXXXXXX" />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-1 uppercase">Emel</label>
+                            <input name="emel" type="email" defaultValue={firstCase.emel || ''} className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="emel@contoh.com" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-1 uppercase">Alamat</label>
+                          <textarea name="alamat" defaultValue={firstCase.alamat || ''} rows={2} className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Alamat penuh..." />
+                        </div>
+                        <div className="flex justify-end pt-2">
+                          <button type="submit" className="px-4 py-2 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">Simpan Maklumat</button>
+                        </div>
+                      </form>
+                      
+                      <div>
+                        <h4 className="font-semibold text-sm mb-3">Senarai Kes</h4>
+                        <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden divide-y divide-zinc-200 dark:divide-zinc-800">
+                          {clientCases.map(c => (
+                            <div key={c.id} className="p-3 sm:p-4 bg-white dark:bg-zinc-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div>
+                                <p className="font-semibold text-sm">{c.kes}</p>
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400">Ruj: {c.id} &bull; Tarikh: {formatDateDMY(c.tarikh)}</p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className="font-mono text-sm font-semibold">{formatRM(c.bakiFeeTerkini)}</p>
+                                <p className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase">Baki Fee</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

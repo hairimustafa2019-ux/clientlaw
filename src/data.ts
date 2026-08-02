@@ -10,6 +10,9 @@ export interface PaymentEntry {
 export interface CaseRecord {
   id: string;
   nama: string;
+  telefon?: string;
+  emel?: string;
+  alamat?: string;
   kes: string;
   totalFee: number;
   bayaranTerakhir: number;
