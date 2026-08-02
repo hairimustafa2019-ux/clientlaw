@@ -6,7 +6,7 @@
 import StandaloneReceipts from './components/StandaloneReceipts';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History } from 'lucide-react';
+import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History, ToggleLeft, ToggleRight, Cloud } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { records as initialRecords, CaseRecord } from './data';
 import { jsPDF } from 'jspdf';
@@ -127,6 +127,13 @@ export default function App() {
     }
     return false;
   });
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('autoBackupEnabled') === 'true';
+    }
+    return false;
+  });
+  const skipNextBackupRef = useRef(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterKes, setFilterKes] = useState<string>('Semua');
   const [filterStartDate, setFilterStartDate] = useState<string>('');
@@ -183,6 +190,23 @@ export default function App() {
   const simplePrintRef = useRef<HTMLDivElement>(null);
   const receiptPrintRef = useRef<HTMLDivElement>(null);
   const [isGeneratingReceiptPDF, setIsGeneratingReceiptPDF] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('autoBackupEnabled', autoBackupEnabled.toString());
+  }, [autoBackupEnabled]);
+
+  useEffect(() => {
+    if (skipNextBackupRef.current) {
+      skipNextBackupRef.current = false;
+      return;
+    }
+    if (autoBackupEnabled && user && authReady) {
+      const timeoutId = setTimeout(() => {
+        silentBackupToCloud(records);
+      }, 1500);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [records, autoBackupEnabled, user, authReady]);
 
   useEffect(() => {
     if (darkMode) {
@@ -259,6 +283,7 @@ export default function App() {
       snapshot.forEach(doc => {
         fetchedRecords.push(doc.data() as CaseRecord);
       });
+      skipNextBackupRef.current = true;
       setRecords(fetchedRecords);
     }, (error) => {
        handleFirestoreError(error, OperationType.GET, targetPath);
@@ -1556,6 +1581,17 @@ export default function App() {
                       </div>
                       <ChevronRight size={18} className="text-zinc-400" />
                     </button>
+                    <button onClick={() => setAutoBackupEnabled(!autoBackupEnabled)} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600 dark:text-blue-400">
+                          <Cloud size={18} />
+                        </div>
+                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Auto-Backup (Setiap Perubahan)</span>
+                      </div>
+                      <div className="text-zinc-400">
+                        {autoBackupEnabled ? <ToggleRight size={24} className="text-blue-500" /> : <ToggleLeft size={24} />}
+                      </div>
+                    </button>
                     {!user ? (
                       <button onClick={handleLogin} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
                         <div className="flex items-center gap-3">
@@ -1855,23 +1891,18 @@ export default function App() {
               </div>
 
               <div className="overflow-auto flex-1 bg-zinc-50/50 md:bg-white dark:bg-zinc-950/50 md:dark:bg-zinc-950 p-3 sm:p-4 md:p-0">
-                {/* Mobile View: Cards */}
-                <div className="md:hidden flex flex-col gap-3 pb-4">
+                {/* Mobile View: List */}
+                <div className="md:hidden bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm overflow-hidden mb-4 divide-y divide-zinc-200 dark:divide-zinc-800">
                   {filteredRecords.length > 0 ? (
                     filteredRecords.map((record) => (
-                      <div key={record.id} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-sm relative flex flex-col transition-shadow hover:shadow-md cursor-pointer" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
-                        <div className="flex justify-between items-start mb-2">
-                           <div className="flex-1 pr-8">
-                             <h4 className="font-bold text-zinc-900 dark:text-zinc-100 text-sm">{record.nama}</h4>
-                             <p className="text-zinc-500 dark:text-zinc-400 text-xs mt-0.5">{record.kes}</p>
-                           </div>
-                           <div className="absolute top-4 right-4 z-10">
-                             <input 
-                               type="checkbox" 
-                               className="cursor-pointer rounded border-zinc-200 dark:border-zinc-700 w-4 h-4 text-blue-600 focus:ring-blue-500 transition-colors"
+                      <div key={record.id} className="p-3 sm:p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer transition-colors relative" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
+                        <div className="flex items-start gap-3">
+                          <div className="pt-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                             <input
+                                type="checkbox"
+                                className="cursor-pointer rounded border-zinc-200 dark:border-zinc-700 w-4 h-4 text-blue-600 focus:ring-blue-500 transition-colors"
                                checked={selectedRecords.includes(record.id)}
                                onChange={(e) => {
-                                 e.stopPropagation();
                                  if (e.target.checked) {
                                    setSelectedRecords([...selectedRecords, record.id]);
                                  } else {
@@ -1879,60 +1910,36 @@ export default function App() {
                                  }
                                }}
                              />
-                           </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-y-3 mt-3 mb-1 text-sm border-t border-zinc-100 dark:border-zinc-800/50 pt-3">
-                           <div>
-                             <span className="block text-zinc-400 text-[10px] uppercase tracking-wider font-semibold mb-0.5">Baki Terkini</span>
-                             <span className={`font-semibold ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-zinc-800 dark:text-zinc-200'}`}>
-                               {formatRM(record.bakiFeeTerkini)}
-                             </span>
-                           </div>
-                           <div>
-                             <span className="block text-zinc-400 text-[10px] uppercase tracking-wider font-semibold mb-0.5">Mileage</span>
-                             <span className="font-semibold text-amber-600 dark:text-amber-500">
-                               {formatRM(record.bakiMileage)}
-                             </span>
-                           </div>
-                           <div className="col-span-2 flex justify-between items-center border-t border-zinc-100 dark:border-zinc-800/50 pt-2">
-                             <div>
-                               <span className="block text-zinc-400 text-[10px] uppercase tracking-wider font-semibold">Dikemaskini</span>
-                               <span className="font-medium text-zinc-700 dark:text-zinc-300 text-xs">
-                                 {formatDateDMY(record.tarikh)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                             <div className="flex justify-between items-start gap-2">
+                               <h4 className="font-bold text-zinc-900 dark:text-zinc-100 text-[13px] sm:text-sm truncate leading-tight">{record.nama}</h4>
+                               <span className={`font-bold text-[13px] sm:text-sm shrink-0 leading-tight ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-zinc-800 dark:text-zinc-200'}`}>
+                                 {formatRM(record.bakiFeeTerkini)}
                                </span>
                              </div>
-                             <div className="flex gap-1.5">
-                               {record.bakiFeeTerkini === 0 ? (
-                                 <span className="text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 font-sans">Selesai</span>
-                               ) : (
-                                 <span className="text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 font-sans">Belum</span>
-                               )}
+                             
+                             <div className="flex justify-between items-center mt-1">
+                               <p className="text-zinc-500 dark:text-zinc-400 text-[11px] truncate">{record.kes}</p>
+                               <span className="text-amber-600 dark:text-amber-500 text-[11px] font-medium shrink-0">
+                                 Mil: {formatRM(record.bakiMileage)}
+                               </span>
                              </div>
-                           </div>
-                        </div>
-                        
-                        <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800/50 flex flex-wrap gap-2 w-full">
-                           <button onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }} className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-400 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
-                             <Plus size={14} /> Bayaran
-                           </button>
-                           <button onClick={(e) => { e.stopPropagation(); setMileageAdjustmentRecord(record); }} className="flex-1 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-600 dark:bg-teal-500/10 dark:hover:bg-teal-500/20 dark:text-teal-400 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-colors border border-teal-200 dark:border-teal-800/50 cursor-pointer">
-                             <Car size={14} /> ± Mileage
-                           </button>
-                           {record.bakiFeeTerkini > 0 && (
-                             <button onClick={(e) => { e.stopPropagation(); setSettlingRecord(record); }} title="Set Baki Fee terus kepada RM0" className="p-1.5 px-2 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 rounded-lg transition-colors flex items-center justify-center gap-1 text-xs font-medium border border-emerald-200 dark:border-emerald-800/50 shrink-0">
-                               <CheckCircle size={14} /> Set RM0
-                             </button>
-                           )}
-                           <button onClick={(e) => { e.stopPropagation(); setEditingRecord(record); }} className="p-1.5 px-2 text-zinc-500 hover:text-zinc-700 bg-zinc-50 hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-400 transition-colors flex items-center justify-center">
-                             <Edit size={16} />
-                           </button>
-                           <button onClick={(e) => { e.stopPropagation(); setStatementRecord(record); }} className="p-1.5 px-2 text-zinc-500 hover:text-zinc-700 bg-zinc-50 hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-400 transition-colors flex items-center justify-center">
-                             <Printer size={16} />
-                           </button>
-                           <button onClick={(e) => { e.stopPropagation(); setDeletingRecord(record); }} className="p-1.5 px-2 text-red-500 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded-lg dark:bg-red-500/10 dark:hover:bg-red-500/20 transition-colors flex items-center justify-center">
-                             <Trash2 size={16} />
-                           </button>
+
+                             <div className="flex justify-between items-center mt-1.5">
+                               <span className="text-zinc-400 text-[10px] flex items-center gap-1">
+                                 {formatDateDMY(record.tarikh)}
+                               </span>
+                               <div className="flex items-center gap-1.5">
+                                 {record.bakiFeeTerkini === 0 ? (
+                                   <span className="text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 font-sans">Selesai</span>
+                                 ) : (
+                                   <span className="text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 font-sans">Belum</span>
+                                 )}
+                                 <ChevronDown size={14} className={`text-zinc-400 transition-transform ${expandedRowId === record.id ? 'rotate-180' : ''}`} />
+                               </div>
+                             </div>
+                          </div>
                         </div>
                         
                         <AnimatePresence>
@@ -1943,7 +1950,30 @@ export default function App() {
                               exit={{ height: 0, opacity: 0 }}
                               className="overflow-hidden"
                             >
-                               <div className="mt-4 pt-1 border-t border-zinc-100 dark:border-zinc-800 -mx-2 sm:-mx-4">
+                               <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800/50 flex flex-wrap gap-2 w-full">
+                                 <button onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }} className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-400 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer">
+                                   <Plus size={14} /> Bayaran
+                                 </button>
+                                 <button onClick={(e) => { e.stopPropagation(); setMileageAdjustmentRecord(record); }} className="flex-1 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-600 dark:bg-teal-500/10 dark:hover:bg-teal-500/20 dark:text-teal-400 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1 transition-colors border border-teal-200 dark:border-teal-800/50 cursor-pointer">
+                                   <Car size={14} /> ± Mil
+                                 </button>
+                                 {record.bakiFeeTerkini > 0 && (
+                                   <button onClick={(e) => { e.stopPropagation(); setSettlingRecord(record); }} title="Set Baki Fee terus kepada RM0" className="p-1.5 px-2 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 rounded-lg transition-colors flex items-center justify-center gap-1 text-[13px] font-medium border border-emerald-200 dark:border-emerald-800/50 shrink-0">
+                                     <CheckCircle size={14} /> RM0
+                                   </button>
+                                 )}
+                                 <button onClick={(e) => { e.stopPropagation(); setEditingRecord(record); }} className="p-1.5 px-2 text-zinc-500 hover:text-zinc-700 bg-zinc-50 hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-400 transition-colors flex items-center justify-center">
+                                   <Edit size={16} />
+                                 </button>
+                                 <button onClick={(e) => { e.stopPropagation(); setStatementRecord(record); }} className="p-1.5 px-2 text-zinc-500 hover:text-zinc-700 bg-zinc-50 hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-400 transition-colors flex items-center justify-center">
+                                   <Printer size={16} />
+                                 </button>
+                                 <button onClick={(e) => { e.stopPropagation(); setDeletingRecord(record); }} className="p-1.5 px-2 text-red-500 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded-lg dark:bg-red-500/10 dark:hover:bg-red-500/20 transition-colors flex items-center justify-center">
+                                   <Trash2 size={16} />
+                                 </button>
+                               </div>
+                               
+                               <div className="mt-3 pt-1 border-t border-zinc-100 dark:border-zinc-800 -mx-3 sm:-mx-4">
                                  {renderExpandedDetails(record)}
                                </div>
                             </motion.div>
@@ -1952,12 +1982,11 @@ export default function App() {
                       </div>
                     ))
                   ) : (
-                    <div className="text-center py-10 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm text-zinc-400 dark:text-zinc-500 font-medium">
+                    <div className="text-center py-10 bg-white dark:bg-zinc-900 shadow-sm text-zinc-400 dark:text-zinc-500 font-medium">
                       Tiada rekod dijumpai.
                     </div>
                   )}
                 </div>
-
                 {/* Desktop View: Table */}
                 <table className="hidden md:table w-full text-left border-collapse whitespace-nowrap">
                   <thead className="sticky top-0 bg-zinc-50 dark:bg-zinc-900/50 z-10">
