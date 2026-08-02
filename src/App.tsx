@@ -6,7 +6,7 @@
 import StandaloneReceipts from './components/StandaloneReceipts';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History, ToggleLeft, ToggleRight, Cloud } from 'lucide-react';
+import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History, ToggleLeft, ToggleRight, Cloud, RefreshCw } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { records as initialRecords, CaseRecord } from './data';
 import { jsPDF } from 'jspdf';
@@ -14,7 +14,7 @@ import JSZip from 'jszip';
 import html2canvas from 'html2canvas';
 import { auth, db, storage } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query, writeBatch } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, query, writeBatch, getDocs } from 'firebase/firestore';
 import { ref, uploadString } from 'firebase/storage';
 
 enum OperationType {
@@ -147,6 +147,7 @@ export default function App() {
   const zipInstanceRef = useRef<JSZip | null>(null);
   const hiddenReceiptPrintRef = useRef<HTMLDivElement>(null);
   const [isGeneratingZip, setIsGeneratingZip] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Modal States
   const [paymentRecord, setPaymentRecord] = useState<CaseRecord | null>(null);
@@ -264,21 +265,6 @@ export default function App() {
     const q = query(collection(db, targetPath));
 
     const unsubscribe = onSnapshot(q, async (snapshot) => {
-      if (snapshot.empty) {
-        // If Firestore is empty, populate it with initial data file
-        try {
-          const batch = writeBatch(db);
-          for (const rec of initialRecords) {
-            const docRef = doc(db, 'users', user.uid, 'records', rec.id);
-            batch.set(docRef, { ...rec, userId: user.uid });
-          }
-          await batch.commit();
-          return; // The snapshot listener will re-fire with the new data
-        } catch (error) {
-          console.error("Failed to seed initial data:", error);
-        }
-      }
-      
       const fetchedRecords: CaseRecord[] = [];
       snapshot.forEach(doc => {
         fetchedRecords.push(doc.data() as CaseRecord);
@@ -292,10 +278,10 @@ export default function App() {
   }, [user, authReady]);
 
   useEffect(() => {
-    if (!user) {
+    if (authReady && !user) {
       localStorage.setItem('localOfflineRecords', JSON.stringify(records));
     }
-  }, [records, user]);
+  }, [records, user, authReady]);
 
   const handleLogin = async () => {
     try {
@@ -425,6 +411,27 @@ export default function App() {
       console.log("Auto-save to cloud successful");
     } catch (error) {
       console.error("Auto backup failed", error);
+    }
+  };
+
+  const handleRefreshData = async () => {
+    if (!user) return;
+    setIsRefreshing(true);
+    try {
+      const q = query(collection(db, `users/${user.uid}/records`));
+      const snapshot = await getDocs(q);
+      const fetchedRecords: CaseRecord[] = [];
+      snapshot.forEach(doc => {
+        fetchedRecords.push(doc.data() as CaseRecord);
+      });
+      skipNextBackupRef.current = true;
+      setRecords(fetchedRecords);
+      // alert("Data berjaya dikemaskini.");
+    } catch (error) {
+      console.error("Failed to refresh data:", error);
+      alert("Gagal memuat semula data.");
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -589,6 +596,7 @@ export default function App() {
       paymentHistory: []
     };
 
+    setRecords(prev => [newRecord, ...prev]);
     if (user) {
       const targetPath = `users/${user.uid}/records/${id}`;
       try {
@@ -596,8 +604,6 @@ export default function App() {
       } catch(err) {
           handleFirestoreError(err, OperationType.WRITE, targetPath);
       }
-    } else {
-      setRecords(prev => [newRecord, ...prev]);
     }
 
     setIsNewRecordModalOpen(false);
@@ -625,6 +631,7 @@ export default function App() {
         bakiMileage: newBakiMileage
     };
 
+    setRecords(prev => prev.map(rec => rec.id === mileageAdjustmentRecord.id ? updatedRecord : rec));
     if (user) {
       const targetPath = `users/${user.uid}/records/${mileageAdjustmentRecord.id}`;
       try {
@@ -632,8 +639,6 @@ export default function App() {
       } catch(err) {
           handleFirestoreError(err, OperationType.WRITE, targetPath);
       }
-    } else {
-      setRecords(prev => prev.map(rec => rec.id === mileageAdjustmentRecord.id ? updatedRecord : rec));
     }
     setMileageAdjustmentRecord(null);
     setMileageAdjustmentAmount('');
@@ -663,6 +668,7 @@ export default function App() {
     e.preventDefault();
     if (!editingRecord) return;
     
+    setRecords(prev => prev.map(rec => rec.id === editingRecord.id ? editingRecord : rec));
     if (user) {
       const targetPath = `users/${user.uid}/records/${editingRecord.id}`;
       try {
@@ -670,14 +676,13 @@ export default function App() {
       } catch(err) {
           handleFirestoreError(err, OperationType.WRITE, targetPath);
       }
-    } else {
-      setRecords(prev => prev.map(rec => rec.id === editingRecord.id ? editingRecord : rec));
     }
     setEditingRecord(null);
   };
 
   const handleDeleteRecord = async () => {
     if (!deletingRecord) return;
+    setRecords(prev => prev.filter(rec => rec.id !== deletingRecord.id));
     if (user) {
       const targetPath = `users/${user.uid}/records/${deletingRecord.id}`;
       try {
@@ -685,8 +690,6 @@ export default function App() {
       } catch(err) {
           handleFirestoreError(err, OperationType.DELETE, targetPath);
       }
-    } else {
-      setRecords(prev => prev.filter(rec => rec.id !== deletingRecord.id));
     }
     setDeletingRecord(null);
     setExpandedRowId(null);
@@ -719,6 +722,7 @@ export default function App() {
       userId: user ? user.uid : undefined
     };
 
+    setRecords(prev => prev.map(rec => rec.id === settlingRecord.id ? updatedRecord : rec));
     if (user) {
       const targetPath = `users/${user.uid}/records/${settlingRecord.id}`;
       try {
@@ -727,14 +731,13 @@ export default function App() {
       } catch(err) {
         handleFirestoreError(err, OperationType.WRITE, targetPath);
       }
-    } else {
-      setRecords(prev => prev.map(rec => rec.id === settlingRecord.id ? updatedRecord : rec));
     }
 
     setSettlingRecord(null);
   };
 
   const handleDeleteSelected = async () => {
+    setRecords(prev => prev.filter(rec => !selectedRecords.includes(rec.id)));
     if (user) {
       for (const id of selectedRecords) {
           const targetPath = `users/${user.uid}/records/${id}`;
@@ -744,8 +747,6 @@ export default function App() {
               handleFirestoreError(err, OperationType.DELETE, targetPath);
           }
       }
-    } else {
-      setRecords(prev => prev.filter(rec => !selectedRecords.includes(rec.id)));
     }
     setSelectedRecords([]);
     setIsDeletingSelected(false);
@@ -797,6 +798,7 @@ export default function App() {
         userId: user ? user.uid : undefined
     };
 
+    setRecords(prev => prev.map(rec => rec.id === paymentRecord.id ? updatedRecord : rec));
     if (user) {
       const targetPath = `users/${user.uid}/records/${paymentRecord.id}`;
       try {
@@ -806,8 +808,6 @@ export default function App() {
       } catch(err) {
           handleFirestoreError(err, OperationType.WRITE, targetPath);
       }
-    } else {
-      setRecords(prev => prev.map(rec => rec.id === paymentRecord.id ? updatedRecord : rec));
     }
 
     setPaymentRecord(null);
@@ -1311,6 +1311,7 @@ export default function App() {
                             bakiMileage: record.bakiMileage + (payment.mileageAmount || 0),
                             bayaranTerakhir: newHistory.length > 0 ? newHistory[0].amount : 0
                           };
+                          setRecords((prev: any) => prev.map((r: any) => r.id === record.id ? updatedRecord : r));
                           if (user) {
                             const targetPath = `users/${user.uid}/records/${record.id}`;
                             try {
@@ -1318,8 +1319,6 @@ export default function App() {
                             } catch (err: any) {
                               handleFirestoreError(err, OperationType.WRITE, targetPath);
                             }
-                          } else {
-                            setRecords((prev: any) => prev.map((r: any) => r.id === record.id ? updatedRecord : r));
                           }
                         }
                       }}
@@ -1494,6 +1493,17 @@ export default function App() {
             )}
             {user && (
               <button 
+                onClick={handleRefreshData}
+                disabled={isRefreshing}
+                className="hidden lg:flex p-2 sm:px-4 sm:py-2 text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-lg font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 shrink-0 transition-all"
+                title="Semak Semula Data dari Cloud"
+              >
+                {isRefreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                <span className="hidden sm:inline">Refresh Data</span>
+              </button>
+            )}
+            {user && (
+              <button 
                 onClick={handleBackupToCloud}
                 disabled={isBackingUp}
                 className="hidden lg:flex p-2 sm:px-4 sm:py-2 text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 shrink-0 transition-all"
@@ -1619,6 +1629,17 @@ export default function App() {
                             <Download size={18} />
                           </div>
                           <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Pasang Aplikasi</span>
+                        </div>
+                        <ChevronRight size={18} className="text-zinc-400" />
+                      </button>
+                    )}
+                    {user && (
+                      <button onClick={handleRefreshData} disabled={isRefreshing} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors disabled:opacity-50">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-emerald-50 dark:bg-emerald-500/10 rounded-lg text-emerald-600 dark:text-emerald-400">
+                            {isRefreshing ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+                          </div>
+                          <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Refresh Data</span>
                         </div>
                         <ChevronRight size={18} className="text-zinc-400" />
                       </button>
