@@ -1864,6 +1864,86 @@ export default function App() {
                    </div>
                 </div>
               </div>
+              
+              {/* Peringatan Tunggakan Section */}
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm p-6 overflow-hidden">
+                 <div className="flex justify-between items-center mb-6">
+                   <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 tracking-tight flex items-center gap-2">
+                     <AlertTriangle size={16} className="text-amber-500" />
+                     Sistem Peringatan Baki Tertunggak
+                   </h3>
+                 </div>
+                 <div className="overflow-x-auto">
+                    <table className="w-full text-left text-[13px] whitespace-nowrap">
+                      <thead className="bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 uppercase text-[10px] font-bold tracking-wider">
+                        <tr>
+                          <th className="px-4 py-3 rounded-tl-lg">Nama Pelanggan</th>
+                          <th className="px-4 py-3">No. Telefon</th>
+                          <th className="px-4 py-3">Kategori Kes</th>
+                          <th className="px-4 py-3">Tarikh Terakhir Bayaran</th>
+                          <th className="px-4 py-3 text-right">Baki Fee</th>
+                          <th className="px-4 py-3 text-center rounded-tr-lg">Tindakan</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
+                        {(() => {
+                           const overdueRecords = records
+                             .filter(r => r.bakiFeeTerkini > 0)
+                             .sort((a, b) => b.bakiFeeTerkini - a.bakiFeeTerkini);
+                             
+                           if (overdueRecords.length === 0) {
+                             return (
+                               <tr>
+                                 <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">Tiada tunggakan direkodkan.</td>
+                               </tr>
+                             );
+                           }
+                           
+                           return overdueRecords.map(r => {
+                             let lastPaymentDate = '-';
+                             if (r.paymentHistory && r.paymentHistory.length > 0) {
+                               const sortedHistory = [...r.paymentHistory].sort((a: any, b: any) => parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime());
+                               lastPaymentDate = formatDateDMY(sortedHistory[0].date);
+                             }
+                             return (
+                               <tr key={r.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                                 <td className="px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200">
+                                   <div className="flex items-center justify-between group">
+                                     <span>{r.nama}</span>
+                                     <button 
+                                       onClick={(e) => { e.stopPropagation(); setClientProfileName(r.nama); }}
+                                       className="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
+                                       title="Profil Pelanggan"
+                                     >
+                                       <Users size={14} />
+                                     </button>
+                                   </div>
+                                 </td>
+                                 <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{r.telefon || '-'}</td>
+                                 <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{r.kes}</td>
+                                 <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{lastPaymentDate}</td>
+                                 <td className="px-4 py-3 text-right font-mono font-medium text-red-600 dark:text-red-400">{formatRM(r.bakiFeeTerkini)}</td>
+                                 <td className="px-4 py-3 text-center">
+                                   {r.telefon ? (
+                                      <a 
+                                        href={`https://wa.me/${r.telefon.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Salam, ini adalah peringatan mesra berkenaan baki tertunggak sebanyak ${formatRM(r.bakiFeeTerkini)} untuk kes ${r.kes}.`)}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center justify-center p-1.5 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors"
+                                        title="Hantar Peringatan WhatsApp"
+                                      >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-message-circle"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+                                      </a>
+                                   ) : '-'}
+                                 </td>
+                               </tr>
+                             );
+                           });
+                        })()}
+                      </tbody>
+                    </table>
+                 </div>
+              </div>
                 </div>
               </motion.div>
             )}

@@ -25,7 +25,7 @@ export interface CaseRecord {
 }
 
 export const records: CaseRecord[] = [
-  { id: '1',  nama: 'Amira', kes: 'N.Anak', totalFee: 2500, bayaranTerakhir: 200, tarikh: '17/3/26', bakiSebelum: 970, bakiFeeTerkini: 770, bakiMileage: 0 },
+  { id: '1',  nama: 'Amira', telefon: '0123456789', emel: 'amira@example.com', alamat: 'Jalan Baru, KL', kes: 'N.Anak', totalFee: 2500, bayaranTerakhir: 200, tarikh: '17/3/26', bakiSebelum: 970, bakiFeeTerkini: 770, bakiMileage: 0 },
   { id: '2',  nama: 'Amir', kes: 'Faraid Pusaka', totalFee: 4000, bayaranTerakhir: 800, tarikh: '8/4/2026', bakiSebelum: 2300, bakiFeeTerkini: 1500, bakiMileage: 0 },
   { id: '3',  nama: 'Hajar', kes: 'Fasakh', totalFee: 4000, bayaranTerakhir: 0, tarikh: '4/5/2026', bakiSebelum: 1700, bakiFeeTerkini: 1700, bakiMileage: 600 },
   { id: '4',  nama: 'Hajar', kes: 'Rayuan', totalFee: 500, bayaranTerakhir: 0, tarikh: '4/6/2026', bakiSebelum: 500, bakiFeeTerkini: 500, bakiMileage: 300 },
