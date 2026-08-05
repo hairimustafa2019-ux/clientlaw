@@ -401,11 +401,11 @@ export default function App() {
   }, []);
 
   const handleExportData = () => {
-    const headers = ['Nama', 'Kes', 'Total Fee', 'Bayaran Terakhir', 'Tarikh Akhir', 'Baki Sebelum', 'Baki Fee Terkini', 'Baki Mileage'];
+    const headers = ['Nama', 'Telefon', 'Emel', 'Alamat', 'Kes', 'Total Fee', 'Bayaran Terakhir', 'Tarikh Akhir', 'Baki Sebelum', 'Baki Fee Terkini', 'Baki Mileage'];
     const csvContent = [
       headers.join(','),
       ...filteredRecords.map(r => 
-        [`"${r.nama}"`, `"${r.kes}"`, r.totalFee, r.bayaranTerakhir, r.tarikh, r.bakiSebelum, r.bakiFeeTerkini, r.bakiMileage].join(',')
+        [`"${r.nama}"`, `"${r.telefon || ''}"`, `"${r.emel || ''}"`, `"${(r.alamat || '').replace(/"/g, '""')}"`, `"${r.kes}"`, r.totalFee, r.bayaranTerakhir, r.tarikh, r.bakiSebelum, r.bakiFeeTerkini, r.bakiMileage].join(',')
       )
     ].join('\n');
 
@@ -509,6 +509,9 @@ export default function App() {
       const colIndex = {
         id: headers.findIndex(h => h === 'id' || h.includes('id rekod')),
         nama: headers.findIndex(h => h.includes('nama')),
+        telefon: headers.findIndex(h => h.includes('telefon')),
+        emel: headers.findIndex(h => h.includes('emel')),
+        alamat: headers.findIndex(h => h.includes('alamat')),
         kes: headers.findIndex(h => h.includes('kes')),
         totalFee: headers.findIndex(h => h.includes('total fee') || h.includes('jumlah fee')),
         bayaranTerakhir: headers.findIndex(h => h.includes('bayaran terakhir')),
@@ -604,6 +607,9 @@ export default function App() {
     const newRecord: CaseRecord & { userId?: string } = {
       id,
       nama: newRecordData.nama,
+      telefon: newRecordData.telefon,
+      emel: newRecordData.emel,
+      alamat: newRecordData.alamat,
       kes: newRecordData.kes || 'Umum',
       totalFee: totalFee,
       bayaranTerakhir: 0,
@@ -951,7 +957,7 @@ export default function App() {
 
   const handleExportCSV = () => {
     const headers = [
-      'No', 'Tarikh Kemaskini', 'Nama Pelanggan', 'Kategori Kes', 'Nota', 
+      'No', 'Tarikh Kemaskini', 'Nama Pelanggan', 'No. Telefon', 'Emel', 'Alamat', 'Kategori Kes', 'Nota', 
       'Jumlah Fee (RM)', 'Jumlah Bayaran (Fee) (RM)', 'Baki Fee (RM)', 
       'Jumlah Bayaran (Mileage) (RM)', 'Baki Mileage (RM)'
     ];
@@ -966,6 +972,9 @@ export default function App() {
           i + 1,
           `"${r.tarikh || ''}"`,
           `"${r.nama || ''}"`,
+          `"${r.telefon || ''}"`,
+          `"${r.emel || ''}"`,
+          `"${(r.alamat || '').replace(/"/g, '""')}"`,
           `"${r.kes || ''}"`,
           `"${(r.nota || '').replace(/"/g, '""')}"`,
           r.totalFee || 0,
@@ -2521,9 +2530,43 @@ export default function App() {
                       type="text"
                       required
                       className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100"
-                      value={editingRecord.nama}
+                      value={editingRecord.nama || ''}
                       onChange={(e) => setEditingRecord({ ...editingRecord, nama: e.target.value })}
                       autoFocus
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">No. Telefon</label>
+                      <input
+                        type="text"
+                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                        placeholder="Contoh: 0123456789"
+                        value={editingRecord.telefon || ''}
+                        onChange={(e) => setEditingRecord({ ...editingRecord, telefon: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">Emel</label>
+                      <input
+                        type="email"
+                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                        placeholder="Contoh: ali@example.com"
+                        value={editingRecord.emel || ''}
+                        onChange={(e) => setEditingRecord({ ...editingRecord, emel: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">Alamat</label>
+                    <textarea
+                      rows={2}
+                      className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                      placeholder="Alamat penuh..."
+                      value={editingRecord.alamat || ''}
+                      onChange={(e) => setEditingRecord({ ...editingRecord, alamat: e.target.value })}
                     />
                   </div>
                   
@@ -2790,9 +2833,43 @@ export default function App() {
                       required
                       className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100"
                       placeholder="Contoh: Ali bin Abu"
-                      value={newRecordData.nama}
+                      value={newRecordData.nama || ''}
                       onChange={(e) => setNewRecordData({ ...newRecordData, nama: e.target.value })}
                       autoFocus
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">No. Telefon</label>
+                      <input
+                        type="text"
+                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                        placeholder="Contoh: 0123456789"
+                        value={newRecordData.telefon || ''}
+                        onChange={(e) => setNewRecordData({ ...newRecordData, telefon: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">Emel</label>
+                      <input
+                        type="email"
+                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                        placeholder="Contoh: ali@example.com"
+                        value={newRecordData.emel || ''}
+                        onChange={(e) => setNewRecordData({ ...newRecordData, emel: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">Alamat</label>
+                    <textarea
+                      rows={2}
+                      className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                      placeholder="Alamat penuh..."
+                      value={newRecordData.alamat || ''}
+                      onChange={(e) => setNewRecordData({ ...newRecordData, alamat: e.target.value })}
                     />
                   </div>
                   
