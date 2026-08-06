@@ -15,7 +15,7 @@ import html2canvas from 'html2canvas';
 import { auth, db, storage } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, writeBatch, getDocs } from 'firebase/firestore';
-import { ref, uploadString } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 enum OperationType {
   CREATE = 'create',
@@ -127,6 +127,28 @@ export default function App() {
     }
     return false;
   });
+
+  const [whatsappTemplate, setWhatsappTemplate] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('whatsappTemplate') || 'Salam {nama}, ini adalah peringatan mesra berkenaan baki tertunggak sebanyak {baki} untuk kes {kes}.';
+    }
+    return 'Salam {nama}, ini adalah peringatan mesra berkenaan baki tertunggak sebanyak {baki} untuk kes {kes}.';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('whatsappTemplate', whatsappTemplate);
+  }, [whatsappTemplate]);
+
+  const [whatsappIncludeLink, setWhatsappIncludeLink] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('whatsappIncludeLink') === 'true';
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('whatsappIncludeLink', String(whatsappIncludeLink));
+  }, [whatsappIncludeLink]);
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('autoBackupEnabled') === 'true';
@@ -172,21 +194,34 @@ export default function App() {
   const [standaloneInitialRecord, setStandaloneInitialRecord] = useState<CaseRecord | null>(null);
   const [clientProfileName, setClientProfileName] = useState<string | null>(null);
   
-  const handleUpdateClientProfile = (e: React.FormEvent, nama: string) => {
+  const handleUpdateClientProfile = async (e: React.FormEvent, nama: string) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
     const telefon = formData.get('telefon') as string;
     const emel = formData.get('emel') as string;
     const alamat = formData.get('alamat') as string;
     
-    setRecords(prev => prev.map(r => {
+    const updatedRecords = records.map(r => {
       if (r.nama === nama) {
         return { ...r, telefon, emel, alamat };
       }
       return r;
-    }));
+    });
     
-    // Optionally stay open or show toast
+    setRecords(updatedRecords);
+    
+    if (user) {
+      try {
+        const updates = updatedRecords.filter(r => r.nama === nama);
+        for (const rec of updates) {
+          const targetPath = `users/${user.uid}/records/${rec.id}`;
+          await setDoc(doc(db, 'users', user.uid, 'records', rec.id), { ...rec, userId: user.uid }, { merge: true });
+        }
+      } catch (err) {
+        console.error("Gagal mengemaskini di awan", err);
+      }
+    }
+    
     alert('Profil Pelanggan Berjaya Dikemaskini');
   };
 
@@ -194,7 +229,7 @@ export default function App() {
   const [paymentSortColumn, setPaymentSortColumn] = useState<'date' | 'amount' | null>(null);
   const [paymentSortDirection, setPaymentSortDirection] = useState<'asc' | 'desc'>('desc');
   const [dateSortOrder, setDateSortOrder] = useState<'asc' | 'desc' | null>(null);
-  const [nameSortOrder, setNameSortOrder] = useState<'asc' | 'desc' | null>(null);
+  const [nameSortOrder, setNameSortOrder] = useState<'asc' | 'desc' | null>('asc');
 
   const [isNewRecordModalOpen, setIsNewRecordModalOpen] = useState(false);
   const [newRecordData, setNewRecordData] = useState({
@@ -399,6 +434,22 @@ export default function App() {
         .catch(err => console.error('SW registration failed', err));
     }
   }, []);
+
+  const handleFormatData = async () => {
+    if (window.confirm("AMARAN: Adakah anda pasti mahu memadam SEMUA rekod? Tindakan ini tidak boleh dipulihkan.")) {
+      if (user) {
+        try {
+          for (const rec of records) {
+            await deleteDoc(doc(db, 'users', user.uid, 'records', rec.id));
+          }
+        } catch (err) {
+          console.error("Gagal memadam dari awan", err);
+        }
+      }
+      setRecords([]);
+      alert("Semua data telah berjaya dipadam (diformat).");
+    }
+  };
 
   const handleExportData = () => {
     const headers = ['Nama', 'Telefon', 'Emel', 'Alamat', 'Kes', 'Total Fee', 'Bayaran Terakhir', 'Tarikh Akhir', 'Baki Sebelum', 'Baki Fee Terkini', 'Baki Mileage'];
@@ -1035,6 +1086,18 @@ export default function App() {
       }
 
       pdf.save(`Penyata_Ringkas_${simpleStatementRecord.nama.replace(/\s+/g, '_')}_${simpleStatementRecord.id}.pdf`);
+      const pdfBlob = pdf.output('blob');
+      if (user) {
+        try {
+          const storageRef = ref(storage, `statements/${user.uid}/${simpleStatementRecord.id}_ringkas.pdf`);
+          await uploadBytes(storageRef, pdfBlob);
+          const url = await getDownloadURL(storageRef);
+          await setDoc(doc(db, 'users', user.uid, 'records', simpleStatementRecord.id), { statementUrl: url }, { merge: true });
+          setRecords(prev => prev.map(r => r.id === simpleStatementRecord.id ? { ...r, statementUrl: url } : r));
+        } catch (err) {
+          console.error('Failed to upload PDF', err);
+        }
+      }
     } catch (error) {
       console.error('Error generating PDF:', error);
     } finally {
@@ -1074,6 +1137,18 @@ export default function App() {
       }
 
       pdf.save(`Penyata_${statementRecord.nama.replace(/\s+/g, '_')}_${statementRecord.id}.pdf`);
+      const pdfBlob = pdf.output('blob');
+      if (user) {
+        try {
+          const storageRef = ref(storage, `statements/${user.uid}/${statementRecord.id}.pdf`);
+          await uploadBytes(storageRef, pdfBlob);
+          const url = await getDownloadURL(storageRef);
+          await setDoc(doc(db, 'users', user.uid, 'records', statementRecord.id), { statementUrl: url }, { merge: true });
+          setRecords(prev => prev.map(r => r.id === statementRecord.id ? { ...r, statementUrl: url } : r));
+        } catch (err) {
+          console.error('Failed to upload PDF', err);
+        }
+      }
     } catch (error) {
       console.error('Error generating PDF:', error);
     } finally {
@@ -1162,8 +1237,8 @@ export default function App() {
 
     if (nameSortOrder) {
       list.sort((a, b) => {
-        const nameA = (a.namaPelanggan || '').toLowerCase();
-        const nameB = (b.namaPelanggan || '').toLowerCase();
+        const nameA = (a.nama || '').toLowerCase();
+        const nameB = (b.nama || '').toLowerCase();
         return nameSortOrder === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
       });
     } else if (dateSortOrder) {
@@ -1518,6 +1593,13 @@ export default function App() {
           >
             Paparan Resit
           </button>
+          
+          <button 
+            onClick={() => { setActiveTab('settings'); setIsMobileMenuOpen(false); }}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'settings' ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-50 dark:hover:bg-zinc-900/50'}`}
+          >
+            Tetapan
+          </button>
         </nav>
       </aside>
 
@@ -1607,6 +1689,12 @@ export default function App() {
               <span className="hidden sm:inline">Import</span>
             </button>
             <button 
+              onClick={handleFormatData}
+              className="hidden lg:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/20 rounded-lg font-medium cursor-pointer shrink-0 transition-all">
+              <Trash2 size={14} />
+              <span className="hidden sm:inline">Format</span>
+            </button>
+            <button 
               onClick={() => setIsNewRecordModalOpen(true)}
               className="p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center justify-center shrink-0 transition-all hover:-translate-y-0.5 hover:shadow-lg animate-subtle-pulse"
             >
@@ -1651,7 +1739,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
-              <div className="flex flex-col gap-6 sm:hidden pb-10">
+              <div className="flex flex-col gap-6 pb-10 max-w-2xl">
                 <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 overflow-hidden">
                   <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
                     <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Tetapan & Tindakan</h2>
@@ -1748,8 +1836,45 @@ export default function App() {
                       </div>
                       <ChevronRight size={18} className="text-zinc-400" />
                     </button>
+                    <button onClick={handleFormatData} className="w-full flex items-center justify-between p-4 text-left hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg text-red-600 dark:text-red-400">
+                          <Trash2 size={18} />
+                        </div>
+                        <span className="text-sm font-medium text-red-600 dark:text-red-400">Format Semua Data</span>
+                      </div>
+                      <ChevronRight size={18} className="text-red-400" />
+                    </button>
                   </div>
                 </div>
+                
+                <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 overflow-hidden">
+                  <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
+                    <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Tetapan Peringatan WhatsApp</h2>
+                  </div>
+                  <div className="p-4 flex flex-col gap-3">
+                    <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Template Mesej</label>
+                    <textarea
+                      rows={4}
+                      className="w-full px-3 py-2 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-zinc-900 dark:text-zinc-100 resize-y"
+                      value={whatsappTemplate}
+                      onChange={(e) => setWhatsappTemplate(e.target.value)}
+                    />
+                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                      Gunakan tag: <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-zinc-700 dark:text-zinc-300">{"{nama}"}</code>, <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-zinc-700 dark:text-zinc-300">{"{kes}"}</code>, <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-zinc-700 dark:text-zinc-300">{"{baki}"}</code>.
+                    </p>
+                    <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={whatsappIncludeLink}
+                        onChange={(e) => setWhatsappIncludeLink(e.target.checked)}
+                        className="rounded border-zinc-300 dark:border-zinc-700 text-emerald-600 focus:ring-emerald-500 dark:bg-zinc-900"
+                      />
+                      <span className="text-sm text-zinc-700 dark:text-zinc-300">Sertakan Pautan Penyata PDF (jika ada)</span>
+                    </label>
+                  </div>
+                </div>
+                
               </div>
                 </div>
               </motion.div>
@@ -1935,7 +2060,7 @@ export default function App() {
                                  <td className="px-4 py-3 text-center">
                                    {r.telefon ? (
                                       <a 
-                                        href={`https://wa.me/${r.telefon.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Salam, ini adalah peringatan mesra berkenaan baki tertunggak sebanyak ${formatRM(r.bakiFeeTerkini)} untuk kes ${r.kes}.`)}`}
+                                        href={`https://wa.me/${r.telefon.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(whatsappTemplate.replace(/\{nama\}/g, r.nama || '').replace(/\{kes\}/g, r.kes || '').replace(/\{baki\}/g, formatRM(r.bakiFeeTerkini)) + (whatsappIncludeLink && r.statementUrl ? '\n\nPautan Penyata: ' + r.statementUrl : ''))}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="inline-flex items-center justify-center p-1.5 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors"
@@ -2300,7 +2425,13 @@ export default function App() {
                             </td>
                             <td className="px-3 sm:px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200 border-r border-zinc-100 dark:border-zinc-800/50 break-words md:truncate md:max-w-none max-w-[140px]">
   <div className="flex items-center justify-between group">
-    <span>{record.nama}</span>
+    <span>
+      {index > 0 && filteredRecords[index - 1].nama === record.nama ? (
+        <span className="text-zinc-300 dark:text-zinc-700 font-normal select-none" title={record.nama}>"</span>
+      ) : (
+        record.nama
+      )}
+    </span>
     <button 
       onClick={(e) => { e.stopPropagation(); setClientProfileName(record.nama); }}
       className="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
@@ -2529,11 +2660,17 @@ export default function App() {
                     <input
                       type="text"
                       required
-                      className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100"
+                      className={`px-3 py-2 w-full border ${editingRecord.nama && records.some(r => r.id !== editingRecord.id && r.nama.toLowerCase().trim() === editingRecord.nama.toLowerCase().trim()) ? 'border-amber-400 focus:ring-amber-500/20 focus:border-amber-500' : 'border-zinc-200 dark:border-zinc-800 focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 transition-all font-medium text-zinc-900 dark:text-zinc-100`}
                       value={editingRecord.nama || ''}
                       onChange={(e) => setEditingRecord({ ...editingRecord, nama: e.target.value })}
                       autoFocus
                     />
+                    {editingRecord.nama && records.some(r => r.id !== editingRecord.id && r.nama.toLowerCase().trim() === editingRecord.nama.toLowerCase().trim()) && (
+                      <p className="text-xs text-amber-600 dark:text-amber-500 mt-1.5 flex items-center gap-1.5">
+                        <AlertTriangle size={12} />
+                        Nama pelanggan sudah wujud dalam sistem.
+                      </p>
+                    )}
                   </div>
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -2831,12 +2968,18 @@ export default function App() {
                     <input
                       type="text"
                       required
-                      className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100"
+                      className={`px-3 py-2 w-full border ${newRecordData.nama && records.some(r => r.nama.toLowerCase().trim() === newRecordData.nama.toLowerCase().trim()) ? 'border-amber-400 focus:ring-amber-500/20 focus:border-amber-500' : 'border-zinc-200 dark:border-zinc-800 focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 transition-all font-medium text-zinc-900 dark:text-zinc-100`}
                       placeholder="Contoh: Ali bin Abu"
                       value={newRecordData.nama || ''}
                       onChange={(e) => setNewRecordData({ ...newRecordData, nama: e.target.value })}
                       autoFocus
                     />
+                    {newRecordData.nama && records.some(r => r.nama.toLowerCase().trim() === newRecordData.nama.toLowerCase().trim()) && (
+                      <p className="text-xs text-amber-600 dark:text-amber-500 mt-1.5 flex items-center gap-1.5">
+                        <AlertTriangle size={12} />
+                        Nama pelanggan sudah wujud dalam sistem.
+                      </p>
+                    )}
                   </div>
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">

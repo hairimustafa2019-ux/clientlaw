@@ -22,6 +22,7 @@ export interface CaseRecord {
   bakiFeeTerkini: number;
   bakiMileage: number;
   paymentHistory?: PaymentEntry[];
+  statementUrl?: string;
 }
 
 export const records: CaseRecord[] = [

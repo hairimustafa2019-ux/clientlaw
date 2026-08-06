@@ -26,15 +26,18 @@ service cloud.firestore {
                data.bakiMileage is number &&
                data.userId == request.auth.uid &&
                (!("nota" in data) || (data.nota is string && data.nota.size() <= 2000)) &&
+               (!("telefon" in data) || (data.telefon is string && data.telefon.size() <= 100)) &&
+               (!("emel" in data) || (data.emel is string && data.emel.size() <= 500)) &&
+               (!("alamat" in data) || (data.alamat is string && data.alamat.size() <= 1000)) &&
                (!("paymentHistory" in data) || (data.paymentHistory is list && data.paymentHistory.size() <= 1000));
     }
 
     match /users/{userId}/records/{recordId} {
       allow read: if isSignedIn() && request.auth.uid == userId;
-      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(recordId) && isValidCaseRecord(incoming()) && incoming().keys().size() <= 12;
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(recordId) && isValidCaseRecord(incoming()) && incoming().keys().size() <= 15;
       allow update: if isSignedIn() && request.auth.uid == userId && isValidCaseRecord(incoming()) && incoming().userId == existing().userId && incoming().id == existing().id &&
                     (incoming().diff(existing()).affectedKeys().hasOnly([
-                        "id", "nama", "kes", "totalFee", "bayaranTerakhir", "tarikh", "bakiSebelum", "bakiFeeTerkini", "bakiMileage", "nota", "paymentHistory", "userId"
+                        "id", "nama", "telefon", "emel", "alamat", "kes", "totalFee", "bayaranTerakhir", "tarikh", "bakiSebelum", "bakiFeeTerkini", "bakiMileage", "nota", "paymentHistory", "userId"
                     ]));
       allow delete: if isSignedIn() && request.auth.uid == userId;
     }
