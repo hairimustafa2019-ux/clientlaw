@@ -11,6 +11,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { records as initialRecords, CaseRecord } from './data';
 import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
+import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
 import { auth, db, storage } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
@@ -139,6 +140,18 @@ export default function App() {
     localStorage.setItem('whatsappTemplate', whatsappTemplate);
   }, [whatsappTemplate]);
 
+  const [overdueDays, setOverdueDays] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('overdueDays');
+      return stored ? parseInt(stored, 10) : 30;
+    }
+    return 30;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('overdueDays', overdueDays.toString());
+  }, [overdueDays]);
+
   const [whatsappIncludeLink, setWhatsappIncludeLink] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('whatsappIncludeLink') === 'true';
@@ -169,6 +182,11 @@ export default function App() {
   const zipInstanceRef = useRef<JSZip | null>(null);
   const hiddenReceiptPrintRef = useRef<HTMLDivElement>(null);
   const [isGeneratingZip, setIsGeneratingZip] = useState(false);
+  const [isGeneratingCombinedPDF, setIsGeneratingCombinedPDF] = useState(false);
+  const [combinedPdfQueue, setCombinedPdfQueue] = useState<import('./data').CaseRecord[]>([]);
+  const [combinedPdfCurrentIndex, setCombinedPdfCurrentIndex] = useState(0);
+  const combinedPdfInstanceRef = useRef<any>(null);
+  const hiddenCombinedPdfPrintRef = useRef<HTMLDivElement>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Modal States
@@ -468,6 +486,54 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleExportDataLengkapExcel = () => {
+    // 1. Data Rekod Utama
+    const recordsData = filteredRecords.map(r => ({
+      'ID Rekod': r.id,
+      'Nama': r.nama,
+      'Telefon': r.telefon || '',
+      'Emel': r.emel || '',
+      'Alamat': r.alamat || '',
+      'Kategori Kes': r.kes,
+      'Total Fee': r.totalFee,
+      'Bayaran Terakhir': r.bayaranTerakhir,
+      'Tarikh Akhir': r.tarikh,
+      'Baki Sebelum': r.bakiSebelum,
+      'Baki Fee Terkini': r.bakiFeeTerkini,
+      'Baki Mileage': r.bakiMileage || 0,
+      'Nota': r.nota || '',
+      'URL Penyata': r.statementUrl || ''
+    }));
+
+    // 2. Data Sejarah Pembayaran
+    const paymentsData: any[] = [];
+    filteredRecords.forEach(r => {
+      if (r.paymentHistory && r.paymentHistory.length > 0) {
+        r.paymentHistory.forEach(p => {
+          paymentsData.push({
+            'ID Rekod': r.id,
+            'Nama Pelanggan': r.nama,
+            'No. Resit / ID Bayaran': p.id,
+            'Tarikh Bayaran': p.date,
+            'Bayaran Fee (RM)': p.amount || 0,
+            'Bayaran Mileage (RM)': p.mileageAmount || 0,
+            'Kaedah Bayaran': p.method,
+            'Nota': p.nota || ''
+          });
+        });
+      }
+    });
+
+    const wb = XLSX.utils.book_new();
+    const wsRecords = XLSX.utils.json_to_sheet(recordsData);
+    const wsPayments = XLSX.utils.json_to_sheet(paymentsData);
+
+    XLSX.utils.book_append_sheet(wb, wsRecords, "Rekod Pelanggan");
+    XLSX.utils.book_append_sheet(wb, wsPayments, "Sejarah Pembayaran");
+
+    XLSX.writeFile(wb, `Data_Lengkap_Pelanggan_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   const silentBackupToCloud = async (currentRecords: CaseRecord[]) => {
@@ -911,6 +977,78 @@ export default function App() {
     }
   };
 
+  const handlePrintAllSelected = () => {
+    const queue = selectedRecords.map(id => records.find(r => r.id === id)).filter(Boolean) as import('./data').CaseRecord[];
+    
+    if (queue.length === 0) {
+      alert("Tiada rekod pelanggan dipilih.");
+      return;
+    }
+    
+    combinedPdfInstanceRef.current = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+    setIsGeneratingCombinedPDF(true);
+    setCombinedPdfQueue(queue);
+    setCombinedPdfCurrentIndex(0);
+  };
+
+  useEffect(() => {
+    const processNextCombinedItem = async () => {
+      if (combinedPdfQueue && combinedPdfInstanceRef.current && hiddenCombinedPdfPrintRef.current) {
+        if (combinedPdfCurrentIndex < combinedPdfQueue.length) {
+          // Allow DOM to update and images to load
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          try {
+            const canvas = await html2canvas(hiddenCombinedPdfPrintRef.current, {
+              scale: 2,
+              useCORS: true,
+              logging: false,
+              backgroundColor: '#ffffff'
+            });
+            const imgData = canvas.toDataURL('image/png');
+            const pdf = combinedPdfInstanceRef.current;
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            const imgPropsHeight = (canvas.height * pdfWidth) / canvas.width;
+            
+            let heightLeft = imgPropsHeight;
+            let position = 0;
+            
+            if (combinedPdfCurrentIndex > 0) {
+               pdf.addPage();
+            }
+            
+            pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgPropsHeight);
+            heightLeft -= pageHeight;
+            
+            while (heightLeft >= 0) {
+              position = heightLeft - imgPropsHeight;
+              pdf.addPage();
+              pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgPropsHeight);
+              heightLeft -= pageHeight;
+            }
+            
+            setCombinedPdfCurrentIndex(prev => prev + 1);
+          } catch (err) {
+            console.error("Failed to generate PDF for combined item", err);
+            setCombinedPdfCurrentIndex(prev => prev + 1);
+          }
+        } else {
+          // Finished all queue items
+          const pdf = combinedPdfInstanceRef.current;
+          pdf.save('Penyata_Ringkas_Keseluruhan.pdf');
+          setIsGeneratingCombinedPDF(false);
+          setCombinedPdfQueue([]);
+          combinedPdfInstanceRef.current = null;
+        }
+      }
+    };
+    
+    if (isGeneratingCombinedPDF && combinedPdfQueue.length > 0) {
+      processNextCombinedItem();
+    }
+  }, [combinedPdfCurrentIndex, isGeneratingCombinedPDF, combinedPdfQueue]);
+
   const handleDownloadSelectedReceiptsZIP = () => {
     const queue: {record: CaseRecord, payment: import('./data').PaymentEntry}[] = [];
     selectedRecords.forEach(recordId => {
@@ -1195,16 +1333,8 @@ export default function App() {
     }
   };
 
-  // Derive summary statistics
-  const stats = useMemo(() => {
-    return records.reduce((acc, curr) => {
-      acc.totalFee += curr.totalFee;
-      acc.totalBakiTerkini += curr.bakiFeeTerkini;
-      acc.totalMileage += curr.bakiMileage;
-      return acc;
-    }, { totalFee: 0, totalBakiTerkini: 0, totalMileage: 0, totalKes: records.length });
-  }, [records]);
-
+  
+  
   // Filter records
   const filteredRecords = useMemo(() => {
     const list = records.filter(record => {
@@ -1252,16 +1382,37 @@ export default function App() {
     return list;
   }, [searchTerm, filterKes, filterStartDate, filterEndDate, records, dateSortOrder, nameSortOrder]);
 
-  // Extract unique cases for the dropdown
-  const uniqueKes = useMemo(() => {
-    const list = new Set(initialRecords.map(r => r.kes));
-    return ['Semua', ...Array.from(list)];
-  }, []);
+// Derive summary statistics
+  const stats = useMemo(() => {
+    const now = new Date().getTime();
+    const overdueMs = overdueDays * 24 * 60 * 60 * 1000;
+    
+    return filteredRecords.reduce((acc, curr) => {
+      acc.totalFee += curr.totalFee;
+      acc.totalBakiTerkini += curr.bakiFeeTerkini;
+      acc.totalMileage += curr.bakiMileage;
+      
+      if (curr.bakiFeeTerkini > 0) {
+        let lastDateStr = curr.tarikh;
+        if (curr.paymentHistory && curr.paymentHistory.length > 0) {
+          const sortedHistory = [...curr.paymentHistory].sort((a: any, b: any) => parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime());
+          lastDateStr = sortedHistory[0].date;
+        }
+        const lastDate = parseDateObj(lastDateStr).getTime();
+        if ((now - lastDate) >= overdueMs) {
+          acc.totalOverdueCases++;
+          acc.totalOverdueAmount += curr.bakiFeeTerkini;
+        }
+      }
+      
+      return acc;
+    }, { totalFee: 0, totalBakiTerkini: 0, totalMileage: 0, totalKes: filteredRecords.length, totalOverdueCases: 0, totalOverdueAmount: 0 });
+  }, [filteredRecords, overdueDays]);
 
-  // Compute chart data for balances by category
+// Compute chart data for balances by category
   const chartData = useMemo(() => {
     const totals: Record<string, number> = {};
-    records.forEach(record => {
+    filteredRecords.forEach(record => {
       if (!totals[record.kes]) totals[record.kes] = 0;
       totals[record.kes] += record.bakiFeeTerkini;
     });
@@ -1273,8 +1424,15 @@ export default function App() {
       }))
       .filter(item => item.baki > 0)
       .sort((a, b) => b.baki - a.baki);
-  }, [records]);
+  }, [filteredRecords]);
 
+// Extract unique cases for the dropdown
+  const uniqueKes = useMemo(() => {
+    const list = new Set(records.map(r => r.kes));
+    return ['Semua', ...Array.from(list)];
+  }, []);
+
+  
   // Export functions removed
 
 
@@ -1670,10 +1828,10 @@ export default function App() {
               </button>
             )}
             <button 
-              onClick={handleExportData}
-              className="hidden lg:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
+              onClick={handleExportDataLengkapExcel}
+              className="hidden lg:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg font-medium cursor-pointer shrink-0 transition-all">
               <Download size={14} />
-              <span className="hidden sm:inline">Eksport</span>
+              <span className="hidden sm:inline">Eksport Lengkap</span>
             </button>
             <input 
               type="file" 
@@ -1717,7 +1875,7 @@ export default function App() {
                 transition={{ duration: 0.2 }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
                   <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
                     <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Jumlah Kes</div>
                     <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{stats.totalKes}</div>
@@ -1728,14 +1886,19 @@ export default function App() {
                     <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalFee)}</div>
                   </div>
 
-                  <div className="flex flex-col gap-1 border-l-2 border-red-500 dark:border-red-500 pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-red-500 dark:text-red-400">Baki Fee Terkini</div>
-                    <div className="text-3xl font-light tracking-tight text-red-600 dark:text-red-500">{formatRM(stats.totalBakiTerkini)}</div>
+                  <div className="flex flex-col gap-1 border-l-2 border-amber-500 dark:border-amber-500 pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-amber-500 dark:text-amber-400">Baki Fee Terkini</div>
+                    <div className="text-3xl font-light tracking-tight text-amber-600 dark:text-amber-500">{formatRM(stats.totalBakiTerkini)}</div>
                   </div>
 
                   <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
                     <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Baki Mileage</div>
                     <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalMileage)}</div>
+                  </div>
+
+                  <div className="flex flex-col gap-1 border-l-2 border-red-500 dark:border-red-500 pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-red-500 dark:text-red-400">Tunggakan ({stats.totalOverdueCases} Kes)</div>
+                    <div className="text-3xl font-light tracking-tight text-red-600 dark:text-red-500">{formatRM(stats.totalOverdueAmount)}</div>
                   </div>
                 </div>
                 <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
@@ -1823,9 +1986,18 @@ export default function App() {
                         <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400">
                           <Download size={18} />
                         </div>
-                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Eksport Data CSV</span>
+                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Eksport Data CSV (Ringkas)</span>
                       </div>
                       <ChevronRight size={18} className="text-zinc-400" />
+                    </button>
+                    <button onClick={handleExportDataLengkapExcel} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-50 dark:bg-blue-500/10 rounded-lg text-blue-600 dark:text-blue-400">
+                          <Download size={18} />
+                        </div>
+                        <span className="text-sm font-medium text-blue-700 dark:text-blue-400">Eksport Data Lengkap (Excel)</span>
+                      </div>
+                      <ChevronRight size={18} className="text-blue-400" />
                     </button>
                     <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
@@ -1874,6 +2046,26 @@ export default function App() {
                     </label>
                   </div>
                 </div>
+
+                <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 overflow-hidden">
+                  <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
+                    <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Tetapan Penjejak Tunggakan</h2>
+                  </div>
+                  <div className="p-4 flex flex-col gap-3">
+                    <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Tempoh Tunggakan (Hari)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="365"
+                      className="w-full sm:w-32 px-3 py-2 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all text-zinc-900 dark:text-zinc-100"
+                      value={overdueDays}
+                      onChange={(e) => setOverdueDays(parseInt(e.target.value) || 30)}
+                    />
+                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                      Rekod pelanggan akan ditanda sebagai "Tunggakan" (Overdue) jika baki tertunggak melebihi RM 0 dan tiada bayaran dibuat melepasi tempoh hari yang ditetapkan ini.
+                    </p>
+                  </div>
+                </div>
                 
               </div>
                 </div>
@@ -1889,7 +2081,7 @@ export default function App() {
                 transition={{ duration: 0.2 }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
                   <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
                     <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Jumlah Kes</div>
                     <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{stats.totalKes}</div>
@@ -1900,14 +2092,19 @@ export default function App() {
                     <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalFee)}</div>
                   </div>
 
-                  <div className="flex flex-col gap-1 border-l-2 border-red-500 dark:border-red-500 pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-red-500 dark:text-red-400">Baki Fee Terkini</div>
-                    <div className="text-3xl font-light tracking-tight text-red-600 dark:text-red-500">{formatRM(stats.totalBakiTerkini)}</div>
+                  <div className="flex flex-col gap-1 border-l-2 border-amber-500 dark:border-amber-500 pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-amber-500 dark:text-amber-400">Baki Fee Terkini</div>
+                    <div className="text-3xl font-light tracking-tight text-amber-600 dark:text-amber-500">{formatRM(stats.totalBakiTerkini)}</div>
                   </div>
 
                   <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
                     <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Baki Mileage</div>
                     <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalMileage)}</div>
+                  </div>
+
+                  <div className="flex flex-col gap-1 border-l-2 border-red-500 dark:border-red-500 pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-red-500 dark:text-red-400">Tunggakan ({stats.totalOverdueCases} Kes)</div>
+                    <div className="text-3xl font-light tracking-tight text-red-600 dark:text-red-500">{formatRM(stats.totalOverdueAmount)}</div>
                   </div>
                 </div>
                 <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
@@ -1927,7 +2124,7 @@ export default function App() {
                      </button>
                    </div>
                    <div className="space-y-4">
-                     {records.slice(-5).reverse().map(record => (
+                     {filteredRecords.slice(-5).reverse().map(record => (
                        <div key={record.id} className="flex justify-between items-center py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-0 last:pb-0">
                          <div>
                            <p className="font-medium text-sm text-zinc-800 dark:text-zinc-200">{record.nama}</p>
@@ -1939,14 +2136,51 @@ export default function App() {
                          </div>
                        </div>
                      ))}
-                     {records.length === 0 && (
+                     {filteredRecords.length === 0 && (
                        <p className="text-sm text-zinc-500 text-center py-4">Tiada rekod buat masa ini.</p>
                      )}
                    </div>
                 </div>
 
                 {/* Quick Actions */}
-                <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm p-6 overflow-hidden flex flex-col">
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm p-6 overflow-hidden">
+                   <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 tracking-tight flex items-center gap-2 mb-6">
+                     <PieChart size={16} className="text-blue-500" />
+                     Baki Fee Mengikut Kes
+                   </h3>
+                   <div className="h-64 w-full">
+                     <ResponsiveContainer width="100%" height="100%">
+                       <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
+                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
+                         <XAxis 
+                           dataKey="name" 
+                           axisLine={false}
+                           tickLine={false}
+                           tick={{ fontSize: 10, fill: '#71717a' }}
+                           dy={10}
+                           interval={0}
+                           angle={-45}
+                           textAnchor="end"
+                         />
+                         <YAxis 
+                           axisLine={false}
+                           tickLine={false}
+                           tick={{ fontSize: 10, fill: '#71717a' }}
+                           tickFormatter={(value) => `RM${value}`}
+                         />
+                         <Tooltip 
+                           cursor={{ fill: '#f4f4f5' }}
+                           contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                           formatter={(value: number) => [`RM ${value}`, 'Baki Fee']}
+                         />
+                         <Bar dataKey="baki" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={32} />
+                       </BarChart>
+                     </ResponsiveContainer>
+                   </div>
+                </div>
+
+                {/* Quick Actions */}
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm p-6 overflow-hidden flex flex-col lg:col-span-2">
                    <div className="flex justify-between items-center mb-6">
                      <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 tracking-tight flex items-center gap-2">
                        <Zap size={16} className="text-blue-500" />
@@ -2021,8 +2255,19 @@ export default function App() {
                       </thead>
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
                         {(() => {
-                           const overdueRecords = records
-                             .filter(r => r.bakiFeeTerkini > 0)
+                           const now = new Date().getTime();
+                           const overdueMs = overdueDays * 24 * 60 * 60 * 1000;
+                           const overdueRecords = filteredRecords
+                             .filter(r => {
+                               if (r.bakiFeeTerkini <= 0) return false;
+                               let lastDateStr = r.tarikh;
+                               if (r.paymentHistory && r.paymentHistory.length > 0) {
+                                 const sortedHistory = [...r.paymentHistory].sort((a: any, b: any) => parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime());
+                                 lastDateStr = sortedHistory[0].date;
+                               }
+                               const lastDate = parseDateObj(lastDateStr).getTime();
+                               return (now - lastDate) >= overdueMs;
+                             })
                              .sort((a, b) => b.bakiFeeTerkini - a.bakiFeeTerkini);
                              
                            if (overdueRecords.length === 0) {
@@ -2102,6 +2347,14 @@ export default function App() {
                 <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full lg:w-auto">
                   {selectedRecords.length > 0 && (
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={handlePrintAllSelected}
+                        disabled={isGeneratingCombinedPDF}
+                        className="px-3 py-1.5 text-xs bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-500/20 font-medium cursor-pointer flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isGeneratingCombinedPDF ? <Loader2 size={12} className="animate-spin" /> : <Printer size={12} />}
+                        {isGeneratingCombinedPDF ? `Mencetak (${combinedPdfCurrentIndex + 1}/${combinedPdfQueue.length})...` : `Cetak Semua (${selectedRecords.length})`}
+                      </button>
                       <button
                         onClick={handleDownloadSelectedReceiptsZIP}
                         disabled={isGeneratingZip}
@@ -2391,7 +2644,18 @@ export default function App() {
                   <tbody className="text-[13px]">
                     <AnimatePresence>
                       {filteredRecords.length > 0 ? (
-                        filteredRecords.map((record, index) => (
+                        filteredRecords.map((record, index) => {
+                          const now = new Date().getTime();
+                          const overdueMs = overdueDays * 24 * 60 * 60 * 1000;
+                          let lastDateStr = record.tarikh;
+                          if (record.paymentHistory && record.paymentHistory.length > 0) {
+                            const sortedHistory = [...record.paymentHistory].sort((a: any, b: any) => parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime());
+                            lastDateStr = sortedHistory[0].date;
+                          }
+                          const lastDate = parseDateObj(lastDateStr).getTime();
+                          const isOverdue = record.bakiFeeTerkini > 0 && (now - lastDate) >= overdueMs;
+                          
+                          return (
                           <React.Fragment key={record.id}>
                             <motion.tr 
                               layout="position"
@@ -2400,7 +2664,7 @@ export default function App() {
                               exit={{ opacity: 0, scale: 0.95 }}
                               transition={{ duration: 0.2 }}
                               onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
-                              className={`border-b border-zinc-100 dark:border-zinc-800/50 hover:bg-zinc-50 dark:hover:bg-zinc-900 cursor-pointer transition-colors ${record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-zinc-50/50 dark:bg-zinc-900/30' : ''} ${record.bakiFeeTerkini > 2000 ? 'bg-amber-50/10 dark:bg-amber-900/10' : ''} ${expandedRowId === record.id ? 'bg-zinc-100/50 dark:bg-zinc-800/30' : ''}`}
+                              className={`border-b border-zinc-100 dark:border-zinc-800/50 hover:bg-zinc-50 dark:hover:bg-zinc-900 cursor-pointer transition-colors ${isOverdue ? 'bg-red-50/30 dark:bg-red-900/10 border-l-2 border-l-red-500' : (record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-zinc-50/50 dark:bg-zinc-900/30' : '')} ${record.bakiFeeTerkini > 2000 && !isOverdue ? 'bg-amber-50/10 dark:bg-amber-900/10' : ''} ${expandedRowId === record.id ? 'bg-zinc-100/50 dark:bg-zinc-800/30' : ''}`}
                             >
                             <td className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">
                               <div className="flex items-center justify-center gap-2 font-mono text-zinc-400">
@@ -2554,7 +2818,8 @@ export default function App() {
                             )}
                           </AnimatePresence>
                         </React.Fragment>
-                      ))
+                      );
+                      })
                     ) : (
                       <motion.tr 
                         initial={{ opacity: 0 }} 
@@ -3955,6 +4220,113 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+      {/* Hidden PDF renderer for Combined PDF generation */}
+      {combinedPdfQueue && combinedPdfCurrentIndex < combinedPdfQueue.length && combinedPdfQueue[combinedPdfCurrentIndex] && (
+        <div className="fixed top-0 left-0 -z-50 opacity-0 pointer-events-none overflow-hidden w-[800px]">
+          <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
+            <div ref={hiddenCombinedPdfPrintRef} className="w-full min-w-[700px] mx-auto font-sans text-black bg-white print:min-w-0 print:w-full print:p-0 p-8 sm:p-12 relative overflow-hidden h-[1122px] flex flex-col justify-between">
+              
+              <div>
+                  <div className="flex items-center pb-6 border-b border-gray-300 mb-8 gap-6">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-2xl overflow-hidden border border-gray-200">
+                      <img src="/logo.png" alt="Hairi Mustafa & Co Logo" className="w-full h-full object-cover" />
+                    </div>
+                    <div className="flex-1">
+                      <h1 className="text-[1.35rem] sm:text-2xl font-black text-black tracking-tight leading-tight uppercase">Tetuan Hairi Mustafa & Co</h1>
+                      <div className="flex flex-col gap-0.5 mt-2 text-xs sm:text-[13px] font-medium text-black uppercase tracking-wide">
+                        <p className="m-0">PEGUAM SYARIE & PERUNDING CARA ISLAM</p>
+                        <p className="m-0 text-black font-semibold">NO. 19-1 (TINGKAT 1), JALAN SAUJANA INDAH 4, TAMAN SAUJANA INDAH, 75450 BUKIT KATIL, MELAKA</p>
+                        <p className="m-0">TEL: 010-2434143 / 011-56531310 | EMAIL: tetuanhairi@gmail.com</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-start mb-8 text-sm">
+                    <div>
+                      <p className="text-[13px] font-mono mt-1">Ref: {combinedPdfQueue[combinedPdfCurrentIndex].id}</p>
+                      <p className="font-bold text-black text-lg mb-1">{combinedPdfQueue[combinedPdfCurrentIndex].nama}</p>
+                      <p className="text-black font-medium">Kategori Kes: {combinedPdfQueue[combinedPdfCurrentIndex].kes}</p>
+                    </div>
+                    <div className="text-right">
+                      <h2 className="text-2xl font-bold tracking-tight uppercase mb-1">Penyata Ringkas</h2>
+                      <p className="text-[13px] font-mono">Tarikh: {formatDateDMY(new Date().toISOString().split('T')[0])}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-6 mb-8">
+                    <div className="bg-gray-100 p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col">
+                      <span className="text-black font-semibold uppercase tracking-wider text-xs mb-2">Baki Fee Semasa</span>
+                      <p className="text-3xl font-bold font-mono text-black">{formatRM(combinedPdfQueue[combinedPdfCurrentIndex].bakiFeeTerkini)}</p>
+                    </div>
+                    <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 flex flex-col justify-between">
+                      <div>
+                        <span className="text-black font-medium text-sm mb-1 block">Bayaran Terakhir: <span className="font-bold">{formatRM(combinedPdfQueue[combinedPdfCurrentIndex].bayaranTerakhir)}</span></span>
+                        <span className="text-black text-xs block">
+                          Tarikh Terakhir Bayaran: {combinedPdfQueue[combinedPdfCurrentIndex].paymentHistory && combinedPdfQueue[combinedPdfCurrentIndex].paymentHistory.length > 0 
+                          ? formatDateDMY([...combinedPdfQueue[combinedPdfCurrentIndex].paymentHistory].sort((a: any, b: any) => parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime())[0].date)
+                          : '-'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t-[3px] border-b-[3px] border-gray-300 mb-8 overflow-hidden">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-white border-b border-gray-300">
+                        <tr>
+                          <th className="py-3 px-5 font-semibold text-black uppercase tracking-wider text-xs">Perkara</th>
+                          <th className="py-3 px-5 font-semibold text-black text-right uppercase tracking-wider text-xs">Jumlah</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-300 bg-white">
+                        <tr className="hover:bg-white transition-colors">
+                          <td className="py-4 px-5 text-black font-medium">Jumlah Bayaran Penuh (Fee)</td>
+                          <td className="py-4 px-5 text-right font-mono font-bold text-black">{formatRM(combinedPdfQueue[combinedPdfCurrentIndex].totalFee)}</td>
+                        </tr>
+                        <tr className="hover:bg-white transition-colors bg-gray-50 border-t border-gray-300">
+                          <td className="py-4 px-5 text-black font-medium">Jumlah Bayaran Terkumpul (Fee)</td>
+                          <td className="py-4 px-5 text-right font-mono font-medium text-emerald-600">
+                            -{formatRM((combinedPdfQueue[combinedPdfCurrentIndex].paymentHistory || []).reduce((acc, curr) => acc + (curr.amount || 0), 0))}
+                          </td>
+                        </tr>
+                        {combinedPdfQueue[combinedPdfCurrentIndex].bakiMileage !== undefined && combinedPdfQueue[combinedPdfCurrentIndex].bakiMileage > 0 && (
+                          <tr className="hover:bg-white transition-colors border-t border-gray-300">
+                            <td className="py-4 px-5 text-black font-medium">Baki Terkini (Mileage)</td>
+                            <td className="py-4 px-5 text-right font-mono text-amber-600 font-medium">
+                              {formatRM(combinedPdfQueue[combinedPdfCurrentIndex].bakiMileage || 0)}
+                            </td>
+                          </tr>
+                        )}
+                        <tr className="bg-gray-200 text-black border-t-2 border-gray-300">
+                          <td className="py-4 px-5 font-bold text-sm tracking-wide">BAKI TERKINI (FEE)</td>
+                          <td className="py-4 px-5 text-right font-mono font-bold text-lg">{formatRM(combinedPdfQueue[combinedPdfCurrentIndex].bakiFeeTerkini)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+              </div>
+
+              <div>
+                  <div className="flex justify-between items-start border-t border-gray-300 pt-6">
+                    <div className="text-sm font-bold text-black uppercase flex flex-col gap-2 text-left w-2/3">
+                      <div>Terma & Syarat:</div>
+                      <p className="normal-case font-normal text-zinc-600 text-[11px] leading-relaxed text-left text-justify">
+                        Penyata ringkas ini dikeluarkan sebagai rujukan status akaun pelanggan. Sila pastikan semua baki tertunggak (sekiranya ada) dijelaskan mengikut jadual yang telah dipersetujui. Untuk sebarang pertanyaan atau percanggahan maklumat, sila hubungi pihak kami dengan segera.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 pt-4 border-t border-dashed border-zinc-300 dark:border-zinc-700 text-center text-[10px] text-zinc-400 dark:text-zinc-500 italic">
+                    Penyata ini dijana oleh komputer, tiada tandatangan diperlukan.
+                  </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Hidden PDF renderer for ZIP generation */}
       {zipQueue && zipCurrentIndex < zipQueue.length && zipQueue[zipCurrentIndex] && (
         <div className="fixed top-0 left-0 -z-50 opacity-0 pointer-events-none overflow-hidden w-[800px]">
