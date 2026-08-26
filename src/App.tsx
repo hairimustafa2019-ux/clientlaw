@@ -356,6 +356,16 @@ export default function App() {
     }
   }, [records, user, authReady]);
 
+  // Auto-load PDF data one-time
+  useEffect(() => {
+    if (authReady && !localStorage.getItem('pdfDataLoaded_v1')) {
+      if (window.confirm("Kemas kini Sistem: Terdapat rekod data pelanggan baru (dari PDF). Adakah anda mahu memuatkan data ini ke dalam akaun anda sekarang?")) {
+        handleMuatDataPDF();
+      }
+      localStorage.setItem('pdfDataLoaded_v1', 'true');
+    }
+  }, [authReady]);
+
   const handleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
@@ -452,6 +462,37 @@ export default function App() {
         .catch(err => console.error('SW registration failed', err));
     }
   }, []);
+
+  const handleMuatDataPDF = async () => {
+    if (window.confirm("Adakah anda pasti mahu memuatkan data dari PDF? Ini akan menggantikan semua rekod semasa anda.")) {
+      setRecords(initialRecords);
+      if (user) {
+        try {
+          const batch = writeBatch(db);
+          
+          // Delete existing
+          const q = query(collection(db, `users/${user.uid}/records`));
+          const snapshot = await getDocs(q);
+          snapshot.forEach(doc => {
+            batch.delete(doc.ref);
+          });
+          
+          // Add new
+          initialRecords.forEach(rec => {
+            const docRef = doc(db, 'users', user.uid, 'records', rec.id);
+            batch.set(docRef, { ...rec, userId: user.uid });
+          });
+          
+          await batch.commit();
+        } catch(error) {
+          console.error("Gagal memuat data ke Cloud:", error);
+        }
+      } else {
+        localStorage.setItem('localOfflineRecords', JSON.stringify(initialRecords));
+      }
+      alert("Data dari PDF telah berjaya dimuatkan!");
+    }
+  };
 
   const handleFormatData = async () => {
     if (window.confirm("AMARAN: Adakah anda pasti mahu memadam SEMUA rekod? Tindakan ini tidak boleh dipulihkan.")) {
@@ -2007,6 +2048,15 @@ export default function App() {
                         <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Import Data CSV</span>
                       </div>
                       <ChevronRight size={18} className="text-zinc-400" />
+                    </button>
+                    <button onClick={handleMuatDataPDF} className="w-full flex items-center justify-between p-4 text-left hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors border-b border-zinc-100 dark:border-zinc-800">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
+                          <CloudUpload size={18} />
+                        </div>
+                        <span className="text-sm font-medium text-blue-600 dark:text-blue-400">Muat Data dari PDF</span>
+                      </div>
+                      <ChevronRight size={18} className="text-blue-400" />
                     </button>
                     <button onClick={handleFormatData} className="w-full flex items-center justify-between p-4 text-left hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
                       <div className="flex items-center gap-3">
