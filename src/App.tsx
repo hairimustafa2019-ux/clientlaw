@@ -216,12 +216,11 @@ export default function App() {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
     const telefon = formData.get('telefon') as string;
-    const emel = formData.get('emel') as string;
     const alamat = formData.get('alamat') as string;
     
     const updatedRecords = records.map(r => {
       if (r.nama === nama) {
-        return { ...r, telefon, emel, alamat };
+        return { ...r, telefon, alamat };
       }
       return r;
     });
@@ -316,25 +315,7 @@ export default function App() {
 
     const targetPath = `users/${user.uid}/records`;
     
-    // Auto sync local offline records when user logs in
-    const savedLocal = localStorage.getItem('localOfflineRecords');
-    if (savedLocal) {
-      try {
-        const parsed = JSON.parse(savedLocal);
-        if (parsed && parsed.length > 0) {
-          const batch = writeBatch(db);
-          for (const rec of parsed) {
-            const docRef = doc(db, 'users', user.uid, 'records', rec.id);
-            batch.set(docRef, { ...rec, userId: user.uid }, { merge: true });
-          }
-          batch.commit().then(() => {
-            localStorage.removeItem('localOfflineRecords');
-            console.log('Local records auto-synced to cloud.');
-          });
-        }
-      } catch (e) {}
-    }
-
+    // Auto sync local offline records disabled to prevent overwriting cloud with initialRecords
     const q = query(collection(db, targetPath));
 
     const unsubscribe = onSnapshot(q, async (snapshot) => {
@@ -351,7 +332,8 @@ export default function App() {
   }, [user, authReady]);
 
   useEffect(() => {
-    if (authReady && !user) {
+    // Only save to local storage if user is truly offline and not just logged out with initial data
+    if (authReady && !user && records.length > 0 && records !== initialRecords) {
       localStorage.setItem('localOfflineRecords', JSON.stringify(records));
     }
   }, [records, user, authReady]);
@@ -511,7 +493,7 @@ export default function App() {
   };
 
   const handleExportData = () => {
-    const headers = ['Nama', 'Telefon', 'Emel', 'Alamat', 'Kes', 'Total Fee', 'Bayaran Terakhir', 'Tarikh Akhir', 'Baki Sebelum', 'Baki Fee Terkini', 'Baki Mileage'];
+    const headers = ['Nama', 'Telefon', 'Alamat', 'Kes', 'Total Fee', 'Bayaran Terakhir', 'Tarikh Akhir', 'Baki Sebelum', 'Baki Fee Terkini', 'Baki Mileage'];
     const csvContent = [
       headers.join(','),
       ...filteredRecords.map(r => 
@@ -535,7 +517,7 @@ export default function App() {
       'ID Rekod': r.id,
       'Nama': r.nama,
       'Telefon': r.telefon || '',
-      'Emel': r.emel || '',
+      
       'Alamat': r.alamat || '',
       'Kategori Kes': r.kes,
       'Total Fee': r.totalFee,
@@ -668,7 +650,7 @@ export default function App() {
         id: headers.findIndex(h => h === 'id' || h.includes('id rekod')),
         nama: headers.findIndex(h => h.includes('nama')),
         telefon: headers.findIndex(h => h.includes('telefon')),
-        emel: headers.findIndex(h => h.includes('emel')),
+        
         alamat: headers.findIndex(h => h.includes('alamat')),
         kes: headers.findIndex(h => h.includes('kes')),
         totalFee: headers.findIndex(h => h.includes('total fee') || h.includes('jumlah fee')),
@@ -715,6 +697,9 @@ export default function App() {
           const newRecord: CaseRecord & { userId?: string } = {
             id,
             nama: rawNama,
+            telefon: rawTelefon,
+
+            alamat: rawAlamat,
             kes: rawKes,
             totalFee: rawTotalFee,
             bayaranTerakhir: rawBayaranTerakhir,
@@ -723,7 +708,7 @@ export default function App() {
             bakiFeeTerkini: rawBakiTerkini,
             bakiMileage: rawBakiMileage,
             paymentHistory: [],
-            userId: user ? user.uid : undefined
+            userId: user ? user.uid : ""
           };
           newRecordsFromCsv.push(newRecord);
           
@@ -739,12 +724,10 @@ export default function App() {
       }
       
       if (newRecordsFromCsv.length > 0) {
-        if (!user) {
-          setRecords(prev => [...newRecordsFromCsv, ...prev]);
-        }
-        alert(`${newRecordsFromCsv.length} rekod telah berjaya diimport!`);
+        setRecords(prev => [...newRecordsFromCsv, ...prev]);
+        alert(`${newRecordsFromCsv.length} rekod berjaya diimport!`);
       } else {
-        alert("Gagal memuatnaik. Sila pastikan format menepati templat.");
+        alert("Tiada data yang sah dijumpai dalam fail CSV.");
       }
       
       if (fileInputRef.current) {
@@ -757,17 +740,13 @@ export default function App() {
   const handleAddNewRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRecordData.nama || !newRecordData.totalFee) return;
-
     const totalFee = parseFloat(newRecordData.totalFee);
     const bakiMileage = parseFloat(newRecordData.bakiMileage) || 0;
     const id = `C-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
-
+    
     const newRecord: CaseRecord & { userId?: string } = {
       id,
       nama: newRecordData.nama,
-      telefon: newRecordData.telefon,
-      emel: newRecordData.emel,
-      alamat: newRecordData.alamat,
       kes: newRecordData.kes || 'Umum',
       totalFee: totalFee,
       bayaranTerakhir: 0,
@@ -775,10 +754,13 @@ export default function App() {
       bakiSebelum: totalFee,
       bakiFeeTerkini: totalFee,
       bakiMileage: bakiMileage,
-      nota: newRecordData.nota,
-      userId: user ? user.uid : undefined,
       paymentHistory: []
     };
+    if (newRecordData.telefon) newRecord.telefon = newRecordData.telefon;
+    
+    if (newRecordData.alamat) newRecord.alamat = newRecordData.alamat;
+    if (newRecordData.nota) newRecord.nota = newRecordData.nota;
+    if (user) newRecord.userId = user.uid;
 
     setRecords(prev => [newRecord, ...prev]);
     if (user) {
@@ -903,7 +885,7 @@ export default function App() {
       bakiFeeTerkini: 0,
       tarikh: dateStr,
       paymentHistory: [newPaymentEntry, ...(settlingRecord.paymentHistory || [])],
-      userId: user ? user.uid : undefined
+      userId: user ? user.uid : ""
     };
 
     setRecords(prev => prev.map(rec => rec.id === settlingRecord.id ? updatedRecord : rec));
@@ -979,7 +961,7 @@ export default function App() {
         bakiMileage: Math.max(0, (paymentRecord.bakiMileage || 0) - mileageAmt),
         tarikh: dateStr,
         paymentHistory: [newPaymentEntry, ...(paymentRecord.paymentHistory || [])],
-        userId: user ? user.uid : undefined
+        userId: user ? user.uid : ""
     };
 
     setRecords(prev => prev.map(rec => rec.id === paymentRecord.id ? updatedRecord : rec));
@@ -1187,7 +1169,7 @@ export default function App() {
 
   const handleExportCSV = () => {
     const headers = [
-      'No', 'Tarikh Kemaskini', 'Nama Pelanggan', 'No. Telefon', 'Emel', 'Alamat', 'Kategori Kes', 'Nota', 
+      'No', 'Tarikh Kemaskini', 'Nama Pelanggan', 'No. Telefon', 'Alamat', 'Kategori Kes', 'Nota', 
       'Jumlah Fee (RM)', 'Jumlah Bayaran (Fee) (RM)', 'Baki Fee (RM)', 
       'Jumlah Bayaran (Mileage) (RM)', 'Baki Mileage (RM)'
     ];
@@ -1203,7 +1185,6 @@ export default function App() {
           `"${r.tarikh || ''}"`,
           `"${r.nama || ''}"`,
           `"${r.telefon || ''}"`,
-          `"${r.emel || ''}"`,
           `"${(r.alamat || '').replace(/"/g, '""')}"`,
           `"${r.kes || ''}"`,
           `"${(r.nota || '').replace(/"/g, '""')}"`,
@@ -1910,10 +1891,10 @@ export default function App() {
             {activeTab === 'settings' && (
               <motion.div
                 key="settings"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
+                initial={{ opacity: 0, y: 15, scale: 0.99 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -15, scale: 0.99 }}
+                transition={{ type: "spring", stiffness: 300, damping: 25, mass: 0.8 }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
                 <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
@@ -2125,10 +2106,10 @@ export default function App() {
             {activeTab === 'dashboard' && (
               <motion.div
                 key="dashboard"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
+                initial={{ opacity: 0, y: 15, scale: 0.99 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -15, scale: 0.99 }}
+                transition={{ type: "spring", stiffness: 300, damping: 25, mass: 0.8 }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
                 <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
@@ -2381,10 +2362,10 @@ export default function App() {
             {activeTab === 'records' && (
               <motion.div
                 key="records"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
+                initial={{ opacity: 0, y: 15, scale: 0.99 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -15, scale: 0.99 }}
+                transition={{ type: "spring", stiffness: 300, damping: 25, mass: 0.8 }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
                 <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 pt-4 sm:pt-6 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
@@ -2829,6 +2810,13 @@ export default function App() {
                                 )}
 
                                 <button 
+                                  onClick={() => setEditingRecord(record)}
+                                  className="text-zinc-600 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-blue-400 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 p-1.5 rounded-lg transition-colors"
+                                  title="Kemaskini Maklumat"
+                                >
+                                  <Edit size={14} />
+                                </button>
+                                <button 
                                   onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
                                   className="text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm whitespace-nowrap flex items-center gap-1.5"
                                   title="Urus Rekod"
@@ -2901,10 +2889,10 @@ export default function App() {
             {activeTab === 'standalone' && (
               <motion.div
                 key="standalone"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
+                initial={{ opacity: 0, y: 15, scale: 0.99 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -15, scale: 0.99 }}
+                transition={{ type: "spring", stiffness: 300, damping: 25, mass: 0.8 }}
                 className="flex-1 flex flex-col min-h-0 overflow-hidden"
               >
                 <StandaloneReceipts initialData={standaloneInitialRecord} user={user} db={db} caseRecords={records} />
@@ -2999,16 +2987,7 @@ export default function App() {
                         onChange={(e) => setEditingRecord({ ...editingRecord, telefon: e.target.value })}
                       />
                     </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">Emel</label>
-                      <input
-                        type="email"
-                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
-                        placeholder="Contoh: ali@example.com"
-                        value={editingRecord.emel || ''}
-                        onChange={(e) => setEditingRecord({ ...editingRecord, emel: e.target.value })}
-                      />
-                    </div>
+                    
                   </div>
                   
                   <div>
@@ -3308,16 +3287,7 @@ export default function App() {
                         onChange={(e) => setNewRecordData({ ...newRecordData, telefon: e.target.value })}
                       />
                     </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">Emel</label>
-                      <input
-                        type="email"
-                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
-                        placeholder="Contoh: ali@example.com"
-                        value={newRecordData.emel || ''}
-                        onChange={(e) => setNewRecordData({ ...newRecordData, emel: e.target.value })}
-                      />
-                    </div>
+                    
                   </div>
                   
                   <div>
@@ -3551,9 +3521,21 @@ export default function App() {
                 
                 <form onSubmit={handleUpdatePayment} className="space-y-5">
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
-                      Jumlah Bayaran Fee (RM)
-                    </label>
+                    <div className="flex justify-between items-center mb-2">
+                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                        Jumlah Bayaran Fee (RM)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentAmount(paymentRecord.bakiFeeTerkini.toString());
+                          if (paymentError) setPaymentError('');
+                        }}
+                        className="text-[10px] bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20 px-2 py-1 rounded transition-colors font-medium cursor-pointer"
+                      >
+                        Penuh ({formatRM(paymentRecord.bakiFeeTerkini)})
+                      </button>
+                    </div>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <span className="text-zinc-500 dark:text-zinc-400 font-mono text-sm">RM</span>
@@ -3585,9 +3567,21 @@ export default function App() {
 
                   {(paymentRecord.bakiMileage || 0) > 0 && (
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                      <div className="flex justify-between items-center mb-2">
+                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
                         Jumlah Bayaran Mileage (RM)
                       </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentMileageAmount((paymentRecord.bakiMileage || 0).toString());
+                          if (paymentError) setPaymentError('');
+                        }}
+                        className="text-[10px] bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20 px-2 py-1 rounded transition-colors font-medium cursor-pointer"
+                      >
+                        Penuh ({formatRM(paymentRecord.bakiMileage || 0)})
+                      </button>
+                    </div>
                       <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                           <span className="text-zinc-500 dark:text-zinc-400 font-mono text-sm">RM</span>
@@ -4566,10 +4560,7 @@ export default function App() {
                             <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-1 uppercase">No. Telefon</label>
                             <input name="telefon" type="text" defaultValue={firstCase.telefon || ''} className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="01X-XXXXXXX" />
                           </div>
-                          <div>
-                            <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-1 uppercase">Emel</label>
-                            <input name="emel" type="email" defaultValue={firstCase.emel || ''} className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="emel@contoh.com" />
-                          </div>
+                          
                         </div>
                         <div>
                           <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-1 uppercase">Alamat</label>
