@@ -1654,23 +1654,11 @@ export default function App() {
                   </td>
                   <td className="px-4 py-2 text-center flex justify-center gap-2">
                     <button 
-                      title="Papar Resit"
+                      title="Papar/Cetak Resit"
                       onClick={() => setReceiptData({record, payment})}
                       className="p-1 text-blue-500 hover:text-blue-700 transition-colors rounded hover:bg-blue-50"
                     >
                       <FileText size={14} />
-                    </button>
-                    <button 
-                      title="Cetak Pantas (Muat Turun PDF)"
-                      onClick={() => {
-                        setQuickPrintData({record, payment});
-                        setQuickPrintId(payment.id);
-                        setIsGeneratingQuickPrint(true);
-                      }}
-                      disabled={quickPrintId === payment.id}
-                      className="p-1 text-emerald-600 hover:text-emerald-700 transition-colors rounded hover:bg-emerald-50 disabled:opacity-50"
-                    >
-                      {quickPrintId === payment.id ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
                     </button>
                     <button 
                       onClick={async () => {
@@ -4557,8 +4545,7 @@ export default function App() {
                 {/* Printable Area Ends */}
           </div>
         </div>
-      );
-      })()}
+      )}
       {/* Client Profile Modal */}
       <AnimatePresence>
         {clientProfileName && (
