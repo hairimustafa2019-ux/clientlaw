@@ -1,0 +1,61 @@
+
+--- hiddenReceiptPrintRef ---
+text-zinc-600
+bg-zinc-50
+border-zinc-200
+text-zinc-700
+text-zinc-800
+text-zinc-200
+border-zinc-900
+border-zinc-100
+--- hiddenCombinedPdfPrintRef ---
+border-gray-200
+bg-gray-100
+bg-gray-50
+text-emerald-600
+text-amber-600
+text-zinc-600
+border-zinc-700
+text-zinc-400
+--- simplePrintRef ---
+text-emerald-600
+text-amber-600
+text-gray-500
+bg-gray-50
+border-zinc-100
+border-zinc-800
+bg-zinc-50
+bg-zinc-900
+border-zinc-200
+border-zinc-700
+bg-zinc-100
+bg-zinc-800
+text-zinc-600
+text-zinc-300
+bg-zinc-950
+text-zinc-700
+text-zinc-200
+bg-blue-600
+bg-blue-700
+--- receiptPrintRef ---
+text-zinc-600
+bg-zinc-50
+border-zinc-200
+text-zinc-700
+text-zinc-800
+text-zinc-200
+border-zinc-900
+border-zinc-100
+--- invoicePrintRef ---
+bg-zinc-900
+border-zinc-200
+border-zinc-800
+border-zinc-100
+bg-zinc-50
+text-zinc-100
+text-zinc-600
+text-zinc-400
+text-zinc-300
+bg-zinc-100
+bg-zinc-800
+bg-zinc-950

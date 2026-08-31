@@ -94,7 +94,35 @@ const formatDateISO = (dateStr: string) => {
   return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
 };
 
-export default function App() {
+export default 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+  componentDidCatch(error, errorInfo) {
+    this.setState({ error, errorInfo });
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return <div style={{padding: 20, color: 'red', background: 'white', zIndex: 9999, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%'}}>
+        <h2>Something went wrong.</h2>
+        <details style={{ whiteSpace: 'pre-wrap' }}>
+          {this.state.error && this.state.error.toString()}
+          <br />
+          {this.state.errorInfo && this.state.errorInfo.componentStack}
+        </details>
+      </div>;
+    }
+    return this.props.children; 
+  }
+}
+
+function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'records' | 'standalone' | 'settings'>('dashboard');
@@ -193,6 +221,10 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Modal States
+  const [invoiceRecord, setInvoiceRecord] = useState<CaseRecord | null>(null);
+  const [invoiceType, setInvoiceType] = useState<'INVOIS' | 'SEBUT HARGA'>('INVOIS');
+  const [isGeneratingInvoicePDF, setIsGeneratingInvoicePDF] = useState(false);
+  const invoicePrintRef = useRef<HTMLDivElement>(null);
   const [paymentRecord, setPaymentRecord] = useState<CaseRecord | null>(null);
   const [statementRecord, setStatementRecord] = useState<CaseRecord | null>(null);
   const [simpleStatementRecord, setSimpleStatementRecord] = useState<CaseRecord | null>(null);
@@ -447,37 +479,6 @@ export default function App() {
         .catch(err => console.error('SW registration failed', err));
     }
   }, []);
-
-  const handleMuatDataPDF = async () => {
-    if (window.confirm("Adakah anda pasti mahu memuatkan data dari PDF? Ini akan menggantikan semua rekod semasa anda.")) {
-      setRecords(initialRecords);
-      if (user) {
-        try {
-          const batch = writeBatch(db);
-          
-          // Delete existing
-          const q = query(collection(db, `users/${user.uid}/records`));
-          const snapshot = await getDocs(q);
-          snapshot.forEach(doc => {
-            batch.delete(doc.ref);
-          });
-          
-          // Add new
-          initialRecords.forEach(rec => {
-            const docRef = doc(db, 'users', user.uid, 'records', rec.id);
-            batch.set(docRef, { ...rec, userId: user.uid });
-          });
-          
-          await batch.commit();
-        } catch(error) {
-          console.error("Gagal memuat data ke Cloud:", error);
-        }
-      } else {
-        localStorage.setItem('localOfflineRecords', JSON.stringify(initialRecords));
-      }
-      alert("Data dari PDF telah berjaya dimuatkan!");
-    }
-  };
 
   const handleFormatData = async () => {
     if (window.confirm("AMARAN: Adakah anda pasti mahu memadam SEMUA rekod? Tindakan ini tidak boleh dipulihkan.")) {
@@ -1346,6 +1347,40 @@ export default function App() {
     }
   };
 
+  const handleDownloadInvoicePDF = async () => {
+    if (!invoicePrintRef.current || !invoiceRecord) return;
+    
+    setIsGeneratingInvoicePDF(true);
+    try {
+      const canvas = await html2canvas(invoicePrintRef.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+      const imgData = canvas.toDataURL('image/png');
+      
+      const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      
+      const imgPropsHeight = (canvas.height * pdfWidth) / canvas.width;
+      const finalHeight = Math.min(imgPropsHeight, pageHeight);
+      const finalWidth = (canvas.width * finalHeight) / canvas.height;
+      const xOffset = (pdfWidth - finalWidth) / 2;
+      
+      pdf.addImage(imgData, 'PNG', xOffset, 0, finalWidth, finalHeight);
+      
+      const safeName = invoiceRecord.nama.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filename = `${invoiceType === 'INVOIS' ? 'Invois' : 'Sebut_Harga'}_${safeName}.pdf`;
+      pdf.save(filename);
+    } catch (error) {
+      console.error('Error generating invoice PDF:', error);
+    } finally {
+      setIsGeneratingInvoicePDF(false);
+    }
+  };
+
   const handleDownloadReceiptPDF = async () => {
     if (!receiptPrintRef.current || !receiptData) return;
     
@@ -1489,36 +1524,36 @@ export default function App() {
 
 
     const renderExpandedDetails = (record: any) => (
-<div className="p-4 sm:p-6 m-2 sm:m-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm">
+<div className="p-4 sm:p-6 m-2 sm:m-4 bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7]  rounded-xl shadow-sm">
   <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8">
     <div>
-      <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4 flex items-center gap-2">
+      <h4 className="text-sm font-semibold text-[#18181b]  mb-4 flex items-center gap-2">
         <FileText size={16} className="text-blue-500"/> Maklumat Kes
       </h4>
       <div className="space-y-3 text-sm">
-        <p className="flex justify-between items-center"><span className="text-zinc-500">ID Rekod</span> <span className="font-mono text-zinc-900 dark:text-zinc-100 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded">{record.id}</span></p>
-        <p className="flex justify-between items-center"><span className="text-zinc-500">Kategori</span> <span className="font-medium text-zinc-900 dark:text-zinc-100">{record.kes}</span></p>
-        <p className="flex justify-between items-center"><span className="text-zinc-500">Dikemaskini</span> <span className="text-zinc-900 dark:text-zinc-100">{formatDateDMY(record.tarikh)}</span></p>
+        <p className="flex justify-between items-center"><span className="text-[#71717a]">ID Rekod</span> <span className="font-mono text-[#18181b]  bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded">{record.id}</span></p>
+        <p className="flex justify-between items-center"><span className="text-[#71717a]">Kategori</span> <span className="font-medium text-[#18181b] ">{record.kes}</span></p>
+        <p className="flex justify-between items-center"><span className="text-[#71717a]">Dikemaskini</span> <span className="text-[#18181b] ">{formatDateDMY(record.tarikh)}</span></p>
         {record.nota && (
-          <div className="pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-800">
-            <p className="text-zinc-500 mb-1">Nota / Ringkasan</p>
-            <p className="text-zinc-900 dark:text-zinc-100 whitespace-pre-line">{record.nota}</p>
+          <div className="pt-2 mt-2 border-t border-[#f4f4f5] ">
+            <p className="text-[#71717a] mb-1">Nota / Ringkasan</p>
+            <p className="text-[#18181b]  whitespace-pre-line">{record.nota}</p>
           </div>
         )}
       </div>
     </div>
     <div>
-      <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4 flex items-center gap-2">
+      <h4 className="text-sm font-semibold text-[#18181b]  mb-4 flex items-center gap-2">
         <Wallet size={16} className="text-blue-500"/> Pecahan Kewangan
       </h4>
       <div className="space-y-3 text-sm">
-        <p className="flex justify-between items-center"><span className="text-zinc-500">Jumlah Fee</span> <span className="font-mono text-zinc-900 dark:text-zinc-100">{formatRM(record.totalFee)}</span></p>
-        <p className="flex justify-between items-center"><span className="text-zinc-500">Baki Terdahulu</span> <span className="font-mono text-zinc-900 dark:text-zinc-100">{formatRM(record.bakiSebelum)}</span></p>
-        <p className="flex justify-between items-center"><span className="text-zinc-500">Bayaran Terakhir</span> <span className="font-mono font-medium text-emerald-600 dark:text-emerald-500">{record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}</span></p>
+        <p className="flex justify-between items-center"><span className="text-[#71717a]">Jumlah Fee</span> <span className="font-mono text-[#18181b] ">{formatRM(record.totalFee)}</span></p>
+        <p className="flex justify-between items-center"><span className="text-[#71717a]">Baki Terdahulu</span> <span className="font-mono text-[#18181b] ">{formatRM(record.bakiSebelum)}</span></p>
+        <p className="flex justify-between items-center"><span className="text-[#71717a]">Bayaran Terakhir</span> <span className="font-mono font-medium text-[#059669] dark:text-emerald-500">{record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}</span></p>
         <div className="flex justify-between items-center">
-          <span className="text-zinc-500">Baki Terkini</span>
+          <span className="text-[#71717a]">Baki Terkini</span>
           <div className="flex items-center gap-1.5">
-            <span className={`font-mono font-bold ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-zinc-100'}`}>
+            <span className={`font-mono font-bold ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-[#18181b] '}`}>
               {formatRM(record.bakiFeeTerkini)}
             </span>
             {record.bakiFeeTerkini > 0 && (
@@ -1532,10 +1567,10 @@ export default function App() {
             )}
           </div>
         </div>
-        <div className="flex justify-between items-center pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-800">
-          <span className="text-zinc-500">Baki Mileage</span>
+        <div className="flex justify-between items-center pt-2 mt-2 border-t border-[#f4f4f5] ">
+          <span className="text-[#71717a]">Baki Mileage</span>
           <div className="flex items-center gap-1.5">
-            <span className="font-mono font-medium text-amber-600 dark:text-amber-500">
+            <span className="font-mono font-medium text-[#d97706] dark:text-amber-500">
               {formatRM(record.bakiMileage)}
             </span>
             <button 
@@ -1551,13 +1586,13 @@ export default function App() {
     </div>
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+        <h4 className="text-sm font-semibold text-[#18181b]  flex items-center gap-2">
           <History size={16} className="text-blue-500"/> Rekod Bayaran
         </h4>
         <div className="flex items-center gap-2">
           <button 
             onClick={() => setStatementRecord(record)}
-            className="text-xs bg-zinc-100 hover:bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-zinc-200 dark:border-zinc-700"
+            className="text-xs bg-zinc-100 hover:bg-zinc-200 text-[#3f3f46] dark:bg-zinc-800 dark:hover:bg-zinc-700  px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-[#e4e4e7] "
             title="Cetak Penyata Akaun Penuh"
           >
             <Printer size={12} />
@@ -1565,11 +1600,19 @@ export default function App() {
           </button>
           <button 
             onClick={() => setSimpleStatementRecord(record)}
-            className="text-xs bg-zinc-100 hover:bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-zinc-200 dark:border-zinc-700"
+            className="text-xs bg-zinc-100 hover:bg-zinc-200 text-[#3f3f46] dark:bg-zinc-800 dark:hover:bg-zinc-700  px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-[#e4e4e7] "
             title="Cetak Penyata Ringkas"
           >
             <Printer size={12} />
             <span>Penyata Ringkas</span>
+          </button>
+          <button 
+            onClick={() => { setInvoiceType('INVOIS'); setInvoiceRecord(record); }}
+            className="text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 dark:text-emerald-400 px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-emerald-200 dark:border-emerald-800/50"
+            title="Cetak Invois / Sebut Harga"
+          >
+            <FileText size={12} />
+            <span>Invois</span>
           </button>
           {record.bakiFeeTerkini > 0 && (
             <button 
@@ -1584,13 +1627,13 @@ export default function App() {
         </div>
       </div>
       {record.paymentHistory && record.paymentHistory.length > 0 ? (
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+        <div className="overflow-x-auto rounded-lg border border-[#e4e4e7] ">
           <table className="w-full text-left text-[13px] md:whitespace-nowrap">
-            <thead className="bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 uppercase text-[10px] font-bold tracking-wider">
+            <thead className="bg-[#fafafa] dark:bg-zinc-900 text-[#71717a] dark:text-[#a1a1aa] uppercase text-[10px] font-bold tracking-wider">
               <tr>
-                <th className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">ID</th>
+                <th className="px-4 py-3 border-r border-[#f4f4f5] /50">ID</th>
                 <th 
-                  className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group"
+                  className="px-4 py-3 border-r border-[#f4f4f5] /50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group"
                   onClick={() => {
                     if (paymentSortColumn === 'date') {
                       setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1602,15 +1645,15 @@ export default function App() {
                 >
                   <div className="flex items-center gap-1">
                     Tarikh
-                    <span className="text-zinc-400">
+                    <span className="text-[#a1a1aa]">
                       {paymentSortColumn === 'date' ? (paymentSortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUp size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" />}
                     </span>
                   </div>
                 </th>
-                <th className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">Kaedah</th>
-                <th className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">Nota</th>
+                <th className="px-4 py-3 border-r border-[#f4f4f5] /50">Kaedah</th>
+                <th className="px-4 py-3 border-r border-[#f4f4f5] /50">Nota</th>
                 <th 
-                  className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group text-right"
+                  className="px-4 py-3 border-r border-[#f4f4f5] /50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group text-right"
                   onClick={() => {
                     if (paymentSortColumn === 'amount') {
                       setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1621,13 +1664,13 @@ export default function App() {
                   }}
                 >
                   <div className="flex items-center justify-end gap-1">
-                    <span className="text-zinc-400">
+                    <span className="text-[#a1a1aa]">
                       {paymentSortColumn === 'amount' ? (paymentSortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUp size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" />}
                     </span>
                     Fee (RM)
                   </div>
                 </th>
-                <th className="px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 text-right">Mileage (RM)</th>
+                <th className="px-4 py-3 border-r border-[#f4f4f5] /50 text-right">Mileage (RM)</th>
                 <th className="px-4 py-3 text-center w-12">Tindakan</th>
               </tr>
             </thead>
@@ -1639,17 +1682,17 @@ export default function App() {
                 else if (paymentSortColumn === 'amount') comparison = (a.amount || 0) - (b.amount || 0);
                 return paymentSortDirection === 'asc' ? comparison : -comparison;
               }).map((payment: any) => (
-                <tr key={payment.id} className="border-b border-zinc-100 dark:border-zinc-800/50 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-500 font-mono text-xs">{payment.id}</td>
-                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-700 dark:text-zinc-300 font-mono text-[11px]">{formatDateDMY(payment.date)}</td>
-                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-700 dark:text-zinc-300 text-xs">{payment.method}</td>
-                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-zinc-600 dark:text-zinc-400 text-xs max-w-[160px] truncate" title={payment.nota || ''}>
-                    {payment.nota || <span className="text-zinc-400 dark:text-zinc-600 italic">-</span>}
+                <tr key={payment.id} className="border-b border-[#f4f4f5] /50 last:border-0 hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
+                  <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-[#71717a] font-mono text-xs">{payment.id}</td>
+                  <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-[#3f3f46]  font-mono text-[11px]">{formatDateDMY(payment.date)}</td>
+                  <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-[#3f3f46]  text-xs">{payment.method}</td>
+                  <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-[#52525b] dark:text-[#a1a1aa] text-xs max-w-[160px] truncate" title={payment.nota || ''}>
+                    {payment.nota || <span className="text-[#a1a1aa] dark:text-[#52525b] italic">-</span>}
                   </td>
-                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-right text-emerald-600 dark:text-emerald-500 font-medium font-mono text-sm">
+                  <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-right text-[#059669] dark:text-emerald-500 font-medium font-mono text-sm">
                     {payment.amount ? '+' + formatRM(payment.amount) : '-'}
                   </td>
-                  <td className="px-4 py-2 border-r border-zinc-100 dark:border-zinc-800/50 text-right text-amber-600 dark:text-amber-500 font-medium font-mono text-sm">
+                  <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-right text-[#d97706] dark:text-amber-500 font-medium font-mono text-sm">
                     {payment.mileageAmount ? '+' + formatRM(payment.mileageAmount) : '-'}
                   </td>
                   <td className="px-4 py-2 text-center flex justify-center gap-2">
@@ -1668,7 +1711,7 @@ export default function App() {
                         setIsGeneratingQuickPrint(true);
                       }}
                       disabled={quickPrintId === payment.id}
-                      className="p-1 text-emerald-600 hover:text-emerald-700 transition-colors rounded hover:bg-emerald-50 disabled:opacity-50"
+                      className="p-1 text-[#059669] hover:text-emerald-700 transition-colors rounded hover:bg-emerald-50 disabled:opacity-50"
                     >
                       {quickPrintId === payment.id ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
                     </button>
@@ -1694,7 +1737,7 @@ export default function App() {
                           }
                         }
                       }}
-                      className="text-zinc-400 dark:text-zinc-500 hover:text-red-600 p-1 rounded transition-colors"
+                      className="text-[#a1a1aa] dark:text-[#71717a] hover:text-red-600 p-1 rounded transition-colors"
                     >
                       <Trash2 size={12} />
                     </button>
@@ -1705,7 +1748,7 @@ export default function App() {
           </table>
         </div>
       ) : (
-        <div className="text-center p-4 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-sm text-zinc-500 dark:text-zinc-400 text-sm">
+        <div className="text-center p-4 bg-[#fafafa] dark:bg-zinc-900 border border-[#e4e4e7]  rounded-sm text-[#71717a] dark:text-[#a1a1aa] text-sm">
           Tiada rekod bayaran buat masa ini.
         </div>
       )}
@@ -1716,10 +1759,10 @@ export default function App() {
 
   if (!authReady) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+      <div className="flex h-screen w-full items-center justify-center bg-[#fafafa] dark:bg-zinc-950">
         <div className="flex flex-col items-center gap-4 text-center">
           <Loader2 size={36} className="text-blue-600 animate-spin" />
-          <p className="text-zinc-500 dark:text-zinc-400 text-sm font-medium">Sila tunggu sebentar...</p>
+          <p className="text-[#71717a] dark:text-[#a1a1aa] text-sm font-medium">Sila tunggu sebentar...</p>
         </div>
       </div>
     );
@@ -1727,15 +1770,15 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="flex min-h-screen w-full items-center justify-center bg-zinc-50 dark:bg-zinc-950 px-4">
-        <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-8 flex flex-col items-center animate-fade-in">
+      <div className="flex min-h-screen w-full items-center justify-center bg-[#fafafa] dark:bg-zinc-950 px-4">
+        <div className="w-full max-w-md bg-[#ffffff] dark:bg-zinc-900 rounded-2xl shadow-xl border border-[#f4f4f5]  p-8 flex flex-col items-center animate-fade-in">
           <div className="flex flex-col items-center gap-3 mb-8">
             <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-16 w-auto" alt="Logo" />
             <div className="text-center">
-              <span className="font-bold text-lg tracking-tight text-zinc-900 dark:text-white uppercase leading-tight block">HAIRI MUSTAFA</span>
+              <span className="font-bold text-lg tracking-tight text-[#18181b] dark:text-white uppercase leading-tight block">HAIRI MUSTAFA</span>
               <span className="font-bold text-[12px] tracking-widest text-blue-600 dark:text-blue-400 uppercase leading-none block mt-1">ASSOCIATES</span>
             </div>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 text-center mt-3 max-w-[280px]">
+            <p className="text-xs text-[#71717a] dark:text-[#a1a1aa] text-center mt-3 max-w-[280px]">
               Sistem Pengurusan Rekod Pelanggan & Penerbitan Resit Peguam Syarie
             </p>
           </div>
@@ -1743,7 +1786,7 @@ export default function App() {
           <div className="w-full space-y-4">
             <button
               onClick={handleLogin}
-              className="w-full flex items-center justify-center gap-3 px-4 py-3 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300 font-medium transition-all shadow-sm cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+              className="w-full flex items-center justify-center gap-3 px-4 py-3 border border-[#e4e4e7]  rounded-xl bg-[#ffffff] dark:bg-zinc-950 hover:bg-[#fafafa] dark:hover:bg-zinc-900 text-[#3f3f46]  font-medium transition-all shadow-sm cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" width="24" height="24">
                 <g transform="matrix(1, 0, 0, 1, 0, 0)">
@@ -1758,10 +1801,10 @@ export default function App() {
           </div>
 
           <div className="mt-8 text-center">
-            <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-medium">
+            <p className="text-[10px] text-[#a1a1aa] dark:text-[#71717a] font-medium">
               Sila log masuk untuk mengakses data dan resit syarikat.
             </p>
-            <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-2">
+            <p className="text-[10px] text-[#a1a1aa] dark:text-[#71717a] mt-2">
               Hak Cipta Terpelihara &copy; {new Date().getFullYear()} Hairi Mustafa Associates
             </p>
           </div>
@@ -1771,54 +1814,54 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen w-full bg-zinc-50 dark:bg-black font-sans overflow-hidden text-zinc-900 dark:text-zinc-100">
+    <div className="flex h-screen w-full bg-[#fafafa] dark:bg-black font-sans overflow-hidden text-[#18181b] ">
       
       {/* Sidebar for Desktop */}
 
-      <aside className="w-64 bg-white dark:bg-zinc-950 border-r border-zinc-100 dark:border-zinc-900 hidden md:flex flex-col z-30 shrink-0 print:hidden relative">
-        <div className="h-16 flex items-center px-6 border-b border-zinc-100 dark:border-zinc-900 shrink-0">
+      <aside className="w-64 bg-[#ffffff] dark:bg-zinc-950 border-r border-[#f4f4f5] dark:border-[#18181b] hidden md:flex flex-col z-30 shrink-0 print:hidden relative">
+        <div className="h-16 flex items-center px-6 border-b border-[#f4f4f5] dark:border-[#18181b] shrink-0">
           <div className="flex items-center gap-2">
             <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-8 w-auto" alt="Logo" />
-            <span className="font-bold text-[12px] tracking-tight text-zinc-900 dark:text-white uppercase leading-tight">HAIRI MUSTAFA <span className="text-blue-600 block">ASSOCIATES</span></span>
+            <span className="font-bold text-[12px] tracking-tight text-[#18181b] dark:text-white uppercase leading-tight">HAIRI MUSTAFA <span className="text-blue-600 block">ASSOCIATES</span></span>
           </div>
         </div>
         
         <div className="px-6 py-5 shrink-0">
           <div className="flex items-center gap-1.5 sm:gap-3 overflow-x-auto no-scrollbar mask-edges">
-            <div className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center shrink-0 border border-zinc-200 dark:border-zinc-800">
-              <span className="font-bold text-zinc-600 dark:text-zinc-400">HM</span>
+            <div className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center shrink-0 border border-[#e4e4e7] ">
+              <span className="font-bold text-[#52525b] dark:text-[#a1a1aa]">HM</span>
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-semibold truncate text-zinc-900 dark:text-zinc-100">Hairi Mustafa</p>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">Peguam Syarie</p>
+              <p className="text-sm font-semibold truncate text-[#18181b] ">Hairi Mustafa</p>
+              <p className="text-xs text-[#71717a] dark:text-[#a1a1aa] truncate">Peguam Syarie</p>
             </div>
           </div>
-          <div className="text-[10px] uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-500 mt-4 font-medium">Pengurusan Kes</div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-[#a1a1aa] dark:text-[#71717a] mt-4 font-medium">Pengurusan Kes</div>
         </div>
         <nav className="flex-1 px-4 space-y-1">
           <button 
             onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
-            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'dashboard' ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-50 dark:hover:bg-zinc-900/50'}`}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'dashboard' ? 'bg-zinc-100 dark:bg-zinc-900 text-[#18181b] dark:text-white' : 'text-[#71717a] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white hover:bg-[#fafafa] dark:hover:bg-zinc-900/50'}`}
           >
             Papan Pemuka
           </button>
           <button 
             onClick={() => { setActiveTab('records'); setIsMobileMenuOpen(false); }}
-            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'records' ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-50 dark:hover:bg-zinc-900/50'}`}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'records' ? 'bg-zinc-100 dark:bg-zinc-900 text-[#18181b] dark:text-white' : 'text-[#71717a] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white hover:bg-[#fafafa] dark:hover:bg-zinc-900/50'}`}
           >
             Rekod Pelanggan
           </button>
 
           <button 
             onClick={() => { { setActiveTab('standalone'); setIsMobileMenuOpen(false); }; setStandaloneInitialRecord(null); }}
-            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'standalone' ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-50 dark:hover:bg-zinc-900/50'}`}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'standalone' ? 'bg-zinc-100 dark:bg-zinc-900 text-[#18181b] dark:text-white' : 'text-[#71717a] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white hover:bg-[#fafafa] dark:hover:bg-zinc-900/50'}`}
           >
             Paparan Resit
           </button>
           
           <button 
             onClick={() => { setActiveTab('settings'); setIsMobileMenuOpen(false); }}
-            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'settings' ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-50 dark:hover:bg-zinc-900/50'}`}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'settings' ? 'bg-zinc-100 dark:bg-zinc-900 text-[#18181b] dark:text-white' : 'text-[#71717a] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white hover:bg-[#fafafa] dark:hover:bg-zinc-900/50'}`}
           >
             Tetapan
           </button>
@@ -1826,38 +1869,38 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-zinc-950">
+      <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#ffffff] dark:bg-zinc-950">
         {/* Top Bar */}
-        <header className="h-16 border-b border-zinc-100 dark:border-zinc-900 flex items-center justify-between px-4 sm:px-8 shrink-0 print:hidden z-10 bg-white dark:bg-zinc-950">
+        <header className="h-16 border-b border-[#f4f4f5] dark:border-[#18181b] flex items-center justify-between px-4 sm:px-8 shrink-0 print:hidden z-10 bg-[#ffffff] dark:bg-zinc-950">
           <div className="flex items-center gap-2 sm:gap-4">
-            <h1 className="text-lg font-semibold text-zinc-900 dark:text-white tracking-tight">
+            <h1 className="text-lg font-semibold text-[#18181b] dark:text-white tracking-tight">
               {activeTab === 'dashboard' ? 'Papan Pemuka' : activeTab === 'records' ? 'Rekod Pelanggan' : activeTab === 'settings' ? 'Tetapan' : 'Paparan Resit'}
             </h1>
           </div>
           <div className="flex items-center gap-3">
 
             {user && (
-              <div className={"hidden md:flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider border transition-colors " + (isOnline ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50" : "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800/50")}>
+              <div className={"hidden md:flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider border transition-colors " + (isOnline ? "bg-emerald-50 dark:bg-emerald-500/10 text-[#059669] dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50" : "bg-amber-50 dark:bg-amber-500/10 text-[#d97706] dark:text-amber-400 border-amber-200 dark:border-amber-800/50")}>
                 <div className={"w-1.5 h-1.5 rounded-full " + (isOnline ? "bg-emerald-500" : "bg-amber-500 animate-pulse")}></div>
                 {isOnline ? 'Auto-Sync' : 'Offline'}
               </div>
             )}
             <button onClick={() => setDarkMode(!darkMode)}
- className="hidden sm:flex p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors" title={darkMode ? "Tukar ke Mod Siang" : "Tukar ke Mod Gelap"}>
+ className="hidden sm:flex p-2 text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white transition-colors" title={darkMode ? "Tukar ke Mod Siang" : "Tukar ke Mod Gelap"}>
               {darkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
 
             {!user ? (
               <button 
                 onClick={handleLogin}
-                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
+                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-[#ffffff] dark:text-[#18181b] rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
                 <LogIn size={14} />
                 <span className="hidden sm:inline">Log Masuk</span>
               </button>
             ) : (
               <button 
                 onClick={handleLogout}
-                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
+                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
                 <LogOut size={14} />
                 <span className="hidden sm:inline">Log Keluar</span>
               </button>
@@ -1865,7 +1908,7 @@ export default function App() {
             {isInstallable && (
               <button 
                 onClick={handleInstallApp}
-                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
+                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
                 <Download size={14} />
                 <span className="hidden sm:inline">Pasang</span>
               </button>
@@ -1874,7 +1917,7 @@ export default function App() {
               <button 
                 onClick={handleRefreshData}
                 disabled={isRefreshing}
-                className="hidden lg:flex p-2 sm:px-4 sm:py-2 text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-lg font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 shrink-0 transition-all"
+                className="hidden lg:flex p-2 sm:px-4 sm:py-2 text-sm text-[#059669] dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-lg font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 shrink-0 transition-all"
                 title="Semak Semula Data dari Cloud"
               >
                 {isRefreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
@@ -1906,7 +1949,7 @@ export default function App() {
             />
             <button 
               onClick={() => fileInputRef.current?.click()}
-              className="hidden lg:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
+              className="hidden lg:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
               <Upload size={14} />
               <span className="hidden sm:inline">Import</span>
             </button>
@@ -1918,7 +1961,7 @@ export default function App() {
             </button>
             <button 
               onClick={() => setIsNewRecordModalOpen(true)}
-              className="p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center justify-center shrink-0 transition-all hover:-translate-y-0.5 hover:shadow-lg animate-subtle-pulse"
+              className="p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-[#ffffff] dark:text-[#18181b] rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center justify-center shrink-0 transition-all hover:-translate-y-0.5 hover:shadow-lg animate-subtle-pulse"
             >
               <Plus size={16} className="sm:hidden" />
               <span className="hidden sm:inline">+ Rekod Baru</span>
@@ -1933,31 +1976,31 @@ export default function App() {
             {activeTab === 'settings' && (
               <motion.div
                 key="settings"
-                initial={{ opacity: 0, y: 15, scale: 0.99 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -15, scale: 0.99 }}
-                transition={{ type: "spring", stiffness: 300, damping: 25, mass: 0.8 }}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
                 <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
-                  <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Jumlah Kes</div>
-                    <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{stats.totalKes}</div>
+                  <div className="flex flex-col gap-1 border-l-2 border-[#e4e4e7]  pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-[#71717a] dark:text-[#a1a1aa]">Jumlah Kes</div>
+                    <div className="text-3xl font-light tracking-tight text-[#27272a] dark:text-[#e4e4e7]">{stats.totalKes}</div>
                   </div>
                   
-                  <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Total Fee</div>
-                    <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalFee)}</div>
+                  <div className="flex flex-col gap-1 border-l-2 border-[#e4e4e7]  pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-[#71717a] dark:text-[#a1a1aa]">Total Fee</div>
+                    <div className="text-3xl font-light tracking-tight text-[#27272a] dark:text-[#e4e4e7]">{formatRM(stats.totalFee)}</div>
                   </div>
 
                   <div className="flex flex-col gap-1 border-l-2 border-amber-500 dark:border-amber-500 pl-4">
                     <div className="text-[10px] font-medium tracking-widest uppercase text-amber-500 dark:text-amber-400">Baki Fee Terkini</div>
-                    <div className="text-3xl font-light tracking-tight text-amber-600 dark:text-amber-500">{formatRM(stats.totalBakiTerkini)}</div>
+                    <div className="text-3xl font-light tracking-tight text-[#d97706] dark:text-amber-500">{formatRM(stats.totalBakiTerkini)}</div>
                   </div>
 
-                  <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Baki Mileage</div>
-                    <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalMileage)}</div>
+                  <div className="flex flex-col gap-1 border-l-2 border-[#e4e4e7]  pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-[#71717a] dark:text-[#a1a1aa]">Baki Mileage</div>
+                    <div className="text-3xl font-light tracking-tight text-[#27272a] dark:text-[#e4e4e7]">{formatRM(stats.totalMileage)}</div>
                   </div>
 
                   <div className="flex flex-col gap-1 border-l-2 border-red-500 dark:border-red-500 pl-4">
@@ -1967,43 +2010,43 @@ export default function App() {
                 </div>
                 <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
               <div className="flex flex-col gap-6 pb-10 max-w-2xl">
-                <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 overflow-hidden">
-                  <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
-                    <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Tetapan & Tindakan</h2>
+                <div className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-sm border border-[#f4f4f5]  overflow-hidden">
+                  <div className="p-4 border-b border-[#f4f4f5] ">
+                    <h2 className="text-sm font-bold text-[#18181b] ">Tetapan & Tindakan</h2>
                   </div>
                   <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                    <button onClick={() => setDarkMode(!darkMode)} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                    <button onClick={() => setDarkMode(!darkMode)} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400">
+                        <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
                           {darkMode ? <Sun size={18} /> : <Moon size={18} />}
                         </div>
-                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{darkMode ? "Mod Siang" : "Mod Gelap"}</span>
+                        <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">{darkMode ? "Mod Siang" : "Mod Gelap"}</span>
                       </div>
-                      <ChevronRight size={18} className="text-zinc-400" />
+                      <ChevronRight size={18} className="text-[#a1a1aa]" />
                     </button>
-                    <button onClick={() => setAutoBackupEnabled(!autoBackupEnabled)} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                    <button onClick={() => setAutoBackupEnabled(!autoBackupEnabled)} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600 dark:text-blue-400">
                           <Cloud size={18} />
                         </div>
-                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Auto-Backup (Setiap Perubahan)</span>
+                        <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Auto-Backup (Setiap Perubahan)</span>
                       </div>
-                      <div className="text-zinc-400">
+                      <div className="text-[#a1a1aa]">
                         {autoBackupEnabled ? <ToggleRight size={24} className="text-blue-500" /> : <ToggleLeft size={24} />}
                       </div>
                     </button>
                     {!user ? (
-                      <button onClick={handleLogin} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                      <button onClick={handleLogin} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
                         <div className="flex items-center gap-3">
-                          <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400">
+                          <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
                             <LogIn size={18} />
                           </div>
-                          <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Log Masuk</span>
+                          <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Log Masuk</span>
                         </div>
-                        <ChevronRight size={18} className="text-zinc-400" />
+                        <ChevronRight size={18} className="text-[#a1a1aa]" />
                       </button>
                     ) : (
-                      <button onClick={handleLogout} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                      <button onClick={handleLogout} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
                         <div className="flex items-center gap-3">
                           <div className="p-2 bg-red-50 dark:bg-red-500/10 rounded-lg text-red-600 dark:text-red-400">
                             <LogOut size={18} />
@@ -2013,48 +2056,48 @@ export default function App() {
                       </button>
                     )}
                     {isInstallable && (
-                      <button onClick={handleInstallApp} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                      <button onClick={handleInstallApp} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
                         <div className="flex items-center gap-3">
-                          <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400">
+                          <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
                             <Download size={18} />
                           </div>
-                          <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Pasang Aplikasi</span>
+                          <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Pasang Aplikasi</span>
                         </div>
-                        <ChevronRight size={18} className="text-zinc-400" />
+                        <ChevronRight size={18} className="text-[#a1a1aa]" />
                       </button>
                     )}
                     {user && (
-                      <button onClick={handleRefreshData} disabled={isRefreshing} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors disabled:opacity-50">
+                      <button onClick={handleRefreshData} disabled={isRefreshing} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors disabled:opacity-50">
                         <div className="flex items-center gap-3">
-                          <div className="p-2 bg-emerald-50 dark:bg-emerald-500/10 rounded-lg text-emerald-600 dark:text-emerald-400">
+                          <div className="p-2 bg-emerald-50 dark:bg-emerald-500/10 rounded-lg text-[#059669] dark:text-emerald-400">
                             {isRefreshing ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
                           </div>
-                          <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Refresh Data</span>
+                          <span className="text-sm font-medium text-[#059669] dark:text-emerald-400">Refresh Data</span>
                         </div>
-                        <ChevronRight size={18} className="text-zinc-400" />
+                        <ChevronRight size={18} className="text-[#a1a1aa]" />
                       </button>
                     )}
                     {user && (
-                      <button onClick={handleBackupToCloud} disabled={isBackingUp} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors disabled:opacity-50">
+                      <button onClick={handleBackupToCloud} disabled={isBackingUp} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors disabled:opacity-50">
                         <div className="flex items-center gap-3">
                           <div className="p-2 bg-blue-50 dark:bg-blue-500/10 rounded-lg text-blue-600 dark:text-blue-400">
                             {isBackingUp ? <Loader2 size={18} className="animate-spin" /> : <CloudUpload size={18} />}
                           </div>
                           <span className="text-sm font-medium text-blue-600 dark:text-blue-400">Cloud Backup</span>
                         </div>
-                        <ChevronRight size={18} className="text-zinc-400" />
+                        <ChevronRight size={18} className="text-[#a1a1aa]" />
                       </button>
                     )}
-                    <button onClick={handleExportData} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                    <button onClick={handleExportData} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400">
+                        <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
                           <Download size={18} />
                         </div>
-                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Eksport Data CSV (Ringkas)</span>
+                        <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Eksport Data CSV (Ringkas)</span>
                       </div>
-                      <ChevronRight size={18} className="text-zinc-400" />
+                      <ChevronRight size={18} className="text-[#a1a1aa]" />
                     </button>
-                    <button onClick={handleExportDataLengkapExcel} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                    <button onClick={handleExportDataLengkapExcel} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-blue-50 dark:bg-blue-500/10 rounded-lg text-blue-600 dark:text-blue-400">
                           <Download size={18} />
@@ -2063,23 +2106,14 @@ export default function App() {
                       </div>
                       <ChevronRight size={18} className="text-blue-400" />
                     </button>
-                    <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                    <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400">
+                        <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
                           <Upload size={18} />
                         </div>
-                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Import Data CSV</span>
+                        <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Import Data CSV</span>
                       </div>
-                      <ChevronRight size={18} className="text-zinc-400" />
-                    </button>
-                    <button onClick={handleMuatDataPDF} className="w-full flex items-center justify-between p-4 text-left hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors border-b border-zinc-100 dark:border-zinc-800">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
-                          <CloudUpload size={18} />
-                        </div>
-                        <span className="text-sm font-medium text-blue-600 dark:text-blue-400">Muat Data dari PDF</span>
-                      </div>
-                      <ChevronRight size={18} className="text-blue-400" />
+                      <ChevronRight size={18} className="text-[#a1a1aa]" />
                     </button>
                     <button onClick={handleFormatData} className="w-full flex items-center justify-between p-4 text-left hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
                       <div className="flex items-center gap-3">
@@ -2093,48 +2127,48 @@ export default function App() {
                   </div>
                 </div>
                 
-                <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 overflow-hidden">
-                  <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
-                    <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Tetapan Peringatan WhatsApp</h2>
+                <div className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-sm border border-[#f4f4f5]  overflow-hidden">
+                  <div className="p-4 border-b border-[#f4f4f5] ">
+                    <h2 className="text-sm font-bold text-[#18181b] ">Tetapan Peringatan WhatsApp</h2>
                   </div>
                   <div className="p-4 flex flex-col gap-3">
-                    <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Template Mesej</label>
+                    <label className="text-xs font-semibold text-[#71717a] dark:text-[#a1a1aa] uppercase tracking-wider">Template Mesej</label>
                     <textarea
                       rows={4}
-                      className="w-full px-3 py-2 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-zinc-900 dark:text-zinc-100 resize-y"
+                      className="w-full px-3 py-2 border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-[#18181b]  resize-y"
                       value={whatsappTemplate}
                       onChange={(e) => setWhatsappTemplate(e.target.value)}
                     />
-                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                      Gunakan tag: <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-zinc-700 dark:text-zinc-300">{"{nama}"}</code>, <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-zinc-700 dark:text-zinc-300">{"{kes}"}</code>, <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-zinc-700 dark:text-zinc-300">{"{baki}"}</code>.
+                    <p className="text-[11px] text-[#71717a] dark:text-[#a1a1aa]">
+                      Gunakan tag: <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-[#3f3f46] ">{"{nama}"}</code>, <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-[#3f3f46] ">{"{kes}"}</code>, <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-[#3f3f46] ">{"{baki}"}</code>.
                     </p>
                     <label className="flex items-center gap-2 mt-2 cursor-pointer">
                       <input 
                         type="checkbox" 
                         checked={whatsappIncludeLink}
                         onChange={(e) => setWhatsappIncludeLink(e.target.checked)}
-                        className="rounded border-zinc-300 dark:border-zinc-700 text-emerald-600 focus:ring-emerald-500 dark:bg-zinc-900"
+                        className="rounded border-[#d4d4d8]  text-[#059669] focus:ring-emerald-500 dark:bg-zinc-900"
                       />
-                      <span className="text-sm text-zinc-700 dark:text-zinc-300">Sertakan Pautan Penyata PDF (jika ada)</span>
+                      <span className="text-sm text-[#3f3f46] ">Sertakan Pautan Penyata PDF (jika ada)</span>
                     </label>
                   </div>
                 </div>
 
-                <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 overflow-hidden">
-                  <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
-                    <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Tetapan Penjejak Tunggakan</h2>
+                <div className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-sm border border-[#f4f4f5]  overflow-hidden">
+                  <div className="p-4 border-b border-[#f4f4f5] ">
+                    <h2 className="text-sm font-bold text-[#18181b] ">Tetapan Penjejak Tunggakan</h2>
                   </div>
                   <div className="p-4 flex flex-col gap-3">
-                    <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Tempoh Tunggakan (Hari)</label>
+                    <label className="text-xs font-semibold text-[#71717a] dark:text-[#a1a1aa] uppercase tracking-wider">Tempoh Tunggakan (Hari)</label>
                     <input
                       type="number"
                       min="1"
                       max="365"
-                      className="w-full sm:w-32 px-3 py-2 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all text-zinc-900 dark:text-zinc-100"
+                      className="w-full sm:w-32 px-3 py-2 border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all text-[#18181b] "
                       value={overdueDays}
                       onChange={(e) => setOverdueDays(parseInt(e.target.value) || 30)}
                     />
-                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                    <p className="text-[11px] text-[#71717a] dark:text-[#a1a1aa]">
                       Rekod pelanggan akan ditanda sebagai "Tunggakan" (Overdue) jika baki tertunggak melebihi RM 0 dan tiada bayaran dibuat melepasi tempoh hari yang ditetapkan ini.
                     </p>
                   </div>
@@ -2148,31 +2182,31 @@ export default function App() {
             {activeTab === 'dashboard' && (
               <motion.div
                 key="dashboard"
-                initial={{ opacity: 0, y: 15, scale: 0.99 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -15, scale: 0.99 }}
-                transition={{ type: "spring", stiffness: 300, damping: 25, mass: 0.8 }}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
                 <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
-                  <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Jumlah Kes</div>
-                    <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{stats.totalKes}</div>
+                  <div className="flex flex-col gap-1 border-l-2 border-[#e4e4e7]  pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-[#71717a] dark:text-[#a1a1aa]">Jumlah Kes</div>
+                    <div className="text-3xl font-light tracking-tight text-[#27272a] dark:text-[#e4e4e7]">{stats.totalKes}</div>
                   </div>
                   
-                  <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Total Fee</div>
-                    <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalFee)}</div>
+                  <div className="flex flex-col gap-1 border-l-2 border-[#e4e4e7]  pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-[#71717a] dark:text-[#a1a1aa]">Total Fee</div>
+                    <div className="text-3xl font-light tracking-tight text-[#27272a] dark:text-[#e4e4e7]">{formatRM(stats.totalFee)}</div>
                   </div>
 
                   <div className="flex flex-col gap-1 border-l-2 border-amber-500 dark:border-amber-500 pl-4">
                     <div className="text-[10px] font-medium tracking-widest uppercase text-amber-500 dark:text-amber-400">Baki Fee Terkini</div>
-                    <div className="text-3xl font-light tracking-tight text-amber-600 dark:text-amber-500">{formatRM(stats.totalBakiTerkini)}</div>
+                    <div className="text-3xl font-light tracking-tight text-[#d97706] dark:text-amber-500">{formatRM(stats.totalBakiTerkini)}</div>
                   </div>
 
-                  <div className="flex flex-col gap-1 border-l-2 border-zinc-200 dark:border-zinc-800 pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-zinc-500 dark:text-zinc-400">Baki Mileage</div>
-                    <div className="text-3xl font-light tracking-tight text-zinc-800 dark:text-zinc-200">{formatRM(stats.totalMileage)}</div>
+                  <div className="flex flex-col gap-1 border-l-2 border-[#e4e4e7]  pl-4">
+                    <div className="text-[10px] font-medium tracking-widest uppercase text-[#71717a] dark:text-[#a1a1aa]">Baki Mileage</div>
+                    <div className="text-3xl font-light tracking-tight text-[#27272a] dark:text-[#e4e4e7]">{formatRM(stats.totalMileage)}</div>
                   </div>
 
                   <div className="flex flex-col gap-1 border-l-2 border-red-500 dark:border-red-500 pl-4">
@@ -2183,9 +2217,9 @@ export default function App() {
                 <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 shrink-0 w-full">
                 {/* Recent Cases */}
-                <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm p-6 overflow-hidden">
+                <div className="bg-[#ffffff] dark:bg-zinc-900 border border-[#f4f4f5]  rounded-xl shadow-sm p-6 overflow-hidden">
                    <div className="flex justify-between items-center mb-6">
-                     <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 tracking-tight flex items-center gap-2">
+                     <h3 className="text-sm font-semibold text-[#27272a] dark:text-[#e4e4e7] tracking-tight flex items-center gap-2">
                        <Clock size={16} className="text-blue-500" />
                        Kes Terkini
                      </h3>
@@ -2198,26 +2232,26 @@ export default function App() {
                    </div>
                    <div className="space-y-4">
                      {filteredRecords.slice(-5).reverse().map(record => (
-                       <div key={record.id} className="flex justify-between items-center py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-0 last:pb-0">
+                       <div key={record.id} className="flex justify-between items-center py-3 border-b border-[#f4f4f5]  last:border-0 last:pb-0">
                          <div>
-                           <p className="font-medium text-sm text-zinc-800 dark:text-zinc-200">{record.nama}</p>
-                           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{record.kes} &middot; {formatDateDMY(record.tarikh)}</p>
+                           <p className="font-medium text-sm text-[#27272a] dark:text-[#e4e4e7]">{record.nama}</p>
+                           <p className="text-xs text-[#71717a] dark:text-[#a1a1aa] mt-0.5">{record.kes} &middot; {formatDateDMY(record.tarikh)}</p>
                          </div>
                          <div className="text-right">
-                           <p className="font-mono text-sm font-semibold text-zinc-800 dark:text-zinc-200">{formatRM(record.bakiFeeTerkini)}</p>
-                           <p className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Baki Fee</p>
+                           <p className="font-mono text-sm font-semibold text-[#27272a] dark:text-[#e4e4e7]">{formatRM(record.bakiFeeTerkini)}</p>
+                           <p className="text-[10px] text-[#71717a] dark:text-[#a1a1aa] uppercase tracking-wider">Baki Fee</p>
                          </div>
                        </div>
                      ))}
                      {filteredRecords.length === 0 && (
-                       <p className="text-sm text-zinc-500 text-center py-4">Tiada rekod buat masa ini.</p>
+                       <p className="text-sm text-[#71717a] text-center py-4">Tiada rekod buat masa ini.</p>
                      )}
                    </div>
                 </div>
 
                 {/* Quick Actions */}
-                <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm p-6 overflow-hidden">
-                   <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 tracking-tight flex items-center gap-2 mb-6">
+                <div className="bg-[#ffffff] dark:bg-zinc-900 border border-[#f4f4f5]  rounded-xl shadow-sm p-6 overflow-hidden">
+                   <h3 className="text-sm font-semibold text-[#27272a] dark:text-[#e4e4e7] tracking-tight flex items-center gap-2 mb-6">
                      <PieChart size={16} className="text-blue-500" />
                      Baki Fee Mengikut Kes
                    </h3>
@@ -2253,9 +2287,9 @@ export default function App() {
                 </div>
 
                 {/* Quick Actions */}
-                <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm p-6 overflow-hidden flex flex-col lg:col-span-2">
+                <div className="bg-[#ffffff] dark:bg-zinc-900 border border-[#f4f4f5]  rounded-xl shadow-sm p-6 overflow-hidden flex flex-col lg:col-span-2">
                    <div className="flex justify-between items-center mb-6">
-                     <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 tracking-tight flex items-center gap-2">
+                     <h3 className="text-sm font-semibold text-[#27272a] dark:text-[#e4e4e7] tracking-tight flex items-center gap-2">
                        <Zap size={16} className="text-blue-500" />
                        Tindakan Pantas
                      </h3>
@@ -2263,33 +2297,33 @@ export default function App() {
                    <div className="grid grid-cols-2 gap-3 sm:gap-4 flex-1">
                      <button
                        onClick={() => setIsNewRecordModalOpen(true)}
-                       className="p-5 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all text-left flex flex-col gap-4 group cursor-pointer h-full hover:shadow-md hover:-translate-y-1 animate-subtle-pulse"
+                       className="p-5 rounded-xl border border-[#f4f4f5]  bg-[#fafafa]/50 dark:bg-zinc-900/50 hover:bg-[#fafafa] dark:hover:bg-zinc-800 transition-all text-left flex flex-col gap-4 group cursor-pointer h-full hover:shadow-md hover:-translate-y-1 animate-subtle-pulse"
                      >
                        <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-105 transition-transform">
                          <Plus size={20} />
                        </div>
                        <div>
-                         <p className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">Rekod Baru</p>
-                         <p className="hidden sm:block text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">Daftar pelanggan dan butiran kes baru ke dalam sistem.</p>
+                         <p className="font-semibold text-sm text-[#27272a] dark:text-[#e4e4e7]">Rekod Baru</p>
+                         <p className="hidden sm:block text-[11px] text-[#71717a] dark:text-[#a1a1aa] mt-1 leading-relaxed">Daftar pelanggan dan butiran kes baru ke dalam sistem.</p>
                        </div>
                      </button>
                      <button
                        onClick={() => { { setActiveTab('standalone'); setIsMobileMenuOpen(false); }; setStandaloneInitialRecord(null); }}
-                       className="p-5 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left flex flex-col gap-4 group cursor-pointer h-full"
+                       className="p-5 rounded-xl border border-[#f4f4f5]  bg-[#fafafa]/50 dark:bg-zinc-900/50 hover:bg-[#fafafa] dark:hover:bg-zinc-800 transition-colors text-left flex flex-col gap-4 group cursor-pointer h-full"
                      >
-                       <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                       <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 text-[#059669] dark:text-emerald-400 flex items-center justify-center group-hover:scale-105 transition-transform">
                          <CreditCard size={20} />
                        </div>
                        <div>
-                         <p className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">Paparan Resit</p>
-                         <p className="hidden sm:block text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">Jana resit pembayaran am tanpa memaut ke rekod kes sedia ada.</p>
+                         <p className="font-semibold text-sm text-[#27272a] dark:text-[#e4e4e7]">Paparan Resit</p>
+                         <p className="hidden sm:block text-[11px] text-[#71717a] dark:text-[#a1a1aa] mt-1 leading-relaxed">Jana resit pembayaran am tanpa memaut ke rekod kes sedia ada.</p>
                        </div>
                      </button>
                    </div>
                    
-                   <div className="mt-6 pt-6 border-t border-zinc-100 dark:border-zinc-800">
+                   <div className="mt-6 pt-6 border-t border-[#f4f4f5] ">
                      <div className="flex items-center justify-between mb-3">
-                       <h4 className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Bayaran Segera (Pelanggan Aktif Terkini)</h4>
+                       <h4 className="text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] uppercase tracking-wider">Bayaran Segera (Pelanggan Aktif Terkini)</h4>
                      </div>
                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         {['50', '100', '200', '500'].map(amount => (
@@ -2307,16 +2341,16 @@ export default function App() {
               </div>
               
               {/* Peringatan Tunggakan Section */}
-              <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm p-6 overflow-hidden">
+              <div className="bg-[#ffffff] dark:bg-zinc-900 border border-[#f4f4f5]  rounded-xl shadow-sm p-6 overflow-hidden">
                  <div className="flex justify-between items-center mb-6">
-                   <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 tracking-tight flex items-center gap-2">
+                   <h3 className="text-sm font-semibold text-[#27272a] dark:text-[#e4e4e7] tracking-tight flex items-center gap-2">
                      <AlertTriangle size={16} className="text-amber-500" />
                      Sistem Peringatan Baki Tertunggak
                    </h3>
                  </div>
                  <div className="overflow-x-auto">
                     <table className="w-full text-left text-[13px] whitespace-nowrap">
-                      <thead className="bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 uppercase text-[10px] font-bold tracking-wider">
+                      <thead className="bg-[#fafafa] dark:bg-zinc-900 text-[#71717a] dark:text-[#a1a1aa] uppercase text-[10px] font-bold tracking-wider">
                         <tr>
                           <th className="px-4 py-3 rounded-tl-lg">Nama Pelanggan</th>
                           <th className="px-4 py-3">No. Telefon</th>
@@ -2346,7 +2380,7 @@ export default function App() {
                            if (overdueRecords.length === 0) {
                              return (
                                <tr>
-                                 <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">Tiada tunggakan direkodkan.</td>
+                                 <td colSpan={5} className="px-4 py-8 text-center text-[#71717a]">Tiada tunggakan direkodkan.</td>
                                </tr>
                              );
                            }
@@ -2358,22 +2392,22 @@ export default function App() {
                                lastPaymentDate = formatDateDMY(sortedHistory[0].date);
                              }
                              return (
-                               <tr key={r.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                                 <td className="px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200">
+                               <tr key={r.id} className="hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
+                                 <td className="px-4 py-3 font-medium text-[#27272a] dark:text-[#e4e4e7]">
                                    <div className="flex items-center justify-between group">
                                      <span>{r.nama}</span>
                                      <button 
                                        onClick={(e) => { e.stopPropagation(); setClientProfileName(r.nama); }}
-                                       className="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
+                                       className="text-[#a1a1aa] hover:text-blue-600 dark:hover:text-blue-400 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
                                        title="Profil Pelanggan"
                                      >
                                        <Users size={14} />
                                      </button>
                                    </div>
                                  </td>
-                                 <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{r.telefon || '-'}</td>
-                                 <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{r.kes}</td>
-                                 <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{lastPaymentDate}</td>
+                                 <td className="px-4 py-3 text-[#52525b] dark:text-[#a1a1aa]">{r.telefon || '-'}</td>
+                                 <td className="px-4 py-3 text-[#52525b] dark:text-[#a1a1aa]">{r.kes}</td>
+                                 <td className="px-4 py-3 text-[#52525b] dark:text-[#a1a1aa]">{lastPaymentDate}</td>
                                  <td className="px-4 py-3 text-right font-mono font-medium text-red-600 dark:text-red-400">{formatRM(r.bakiFeeTerkini)}</td>
                                  <td className="px-4 py-3 text-center">
                                    {r.telefon ? (
@@ -2381,7 +2415,7 @@ export default function App() {
                                         href={`https://wa.me/${r.telefon.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(whatsappTemplate.replace(/\{nama\}/g, r.nama || '').replace(/\{kes\}/g, r.kes || '').replace(/\{baki\}/g, formatRM(r.bakiFeeTerkini)) + (whatsappIncludeLink && r.statementUrl ? '\n\nPautan Penyata: ' + r.statementUrl : ''))}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="inline-flex items-center justify-center p-1.5 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors"
+                                        className="inline-flex items-center justify-center p-1.5 text-[#059669] bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors"
                                         title="Hantar Peringatan WhatsApp"
                                       >
                                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-message-circle"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
@@ -2404,16 +2438,16 @@ export default function App() {
             {activeTab === 'records' && (
               <motion.div
                 key="records"
-                initial={{ opacity: 0, y: 15, scale: 0.99 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -15, scale: 0.99 }}
-                transition={{ type: "spring", stiffness: 300, damping: 25, mass: 0.8 }}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
                 <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 pt-4 sm:pt-6 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
-                  <div className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-sm flex flex-col h-full overflow-hidden">
-              <div className="p-4 bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-100 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 tracking-tight flex items-center gap-2">
+                  <div className="flex-1 bg-[#ffffff] dark:bg-zinc-900 border border-[#f4f4f5]  rounded-xl shadow-sm flex flex-col h-full overflow-hidden">
+              <div className="p-4 bg-[#fafafa] dark:bg-zinc-900/50 border-b border-[#f4f4f5]  flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <span className="text-sm font-semibold text-[#27272a] dark:text-[#e4e4e7] tracking-tight flex items-center gap-2">
                   <FileText size={16} className="text-blue-500" />
                   Senarai Rekod Kes
                 </span>
@@ -2447,11 +2481,11 @@ export default function App() {
                   )}
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Search size={14} className="text-zinc-400" />
+                      <Search size={14} className="text-[#a1a1aa]" />
                     </div>
                     <input
                       type="text"
-                      className="pl-9 pr-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg w-full sm:w-56 bg-white dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-zinc-400"
+                      className="pl-9 pr-3 py-2 text-sm border border-[#e4e4e7]  rounded-lg w-full sm:w-56 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-[#a1a1aa]"
                       placeholder="Cari nama pelanggan..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
@@ -2459,10 +2493,10 @@ export default function App() {
                   </div>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Filter size={14} className="text-zinc-400" />
+                      <Filter size={14} className="text-[#a1a1aa]" />
                     </div>
                     <select
-                      className="pl-9 pr-8 py-2 appearance-none text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg w-full sm:w-40 bg-white dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium text-zinc-700 dark:text-zinc-300 transition-all cursor-pointer"
+                      className="pl-9 pr-8 py-2 appearance-none text-sm border border-[#e4e4e7]  rounded-lg w-full sm:w-40 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium text-[#3f3f46]  transition-all cursor-pointer"
                       value={filterKes}
                       onChange={(e) => setFilterKes(e.target.value)}
                     >
@@ -2471,15 +2505,15 @@ export default function App() {
                       ))}
                     </select>
                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                      <ChevronDown size={14} className="text-zinc-400" />
+                      <ChevronDown size={14} className="text-[#a1a1aa]" />
                     </div>
                   </div>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <ArrowUpDown size={14} className="text-zinc-400" />
+                      <ArrowUpDown size={14} className="text-[#a1a1aa]" />
                     </div>
                     <select
-                      className="pl-9 pr-8 py-2 appearance-none text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg w-full sm:w-44 bg-white dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium text-zinc-700 dark:text-zinc-300 transition-all cursor-pointer"
+                      className="pl-9 pr-8 py-2 appearance-none text-sm border border-[#e4e4e7]  rounded-lg w-full sm:w-44 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium text-[#3f3f46]  transition-all cursor-pointer"
                       value={dateSortOrder || ''}
                       onChange={(e) => {
                         const val = e.target.value;
@@ -2494,21 +2528,21 @@ export default function App() {
                       <option value="asc">Tarikh: Terlama</option>
                     </select>
                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                      <ChevronDown size={14} className="text-zinc-400" />
+                      <ChevronDown size={14} className="text-[#a1a1aa]" />
                     </div>
                   </div>
                   <div className="flex items-center gap-2 w-full sm:w-auto">
                     <input
                       type="date"
-                      className="px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg flex-1 sm:flex-none sm:w-36 bg-white dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-zinc-700 dark:text-zinc-300 transition-all"
+                      className="px-3 py-2 text-sm border border-[#e4e4e7]  rounded-lg flex-1 sm:flex-none sm:w-36 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-[#3f3f46]  transition-all"
                       value={filterStartDate}
                       onChange={(e) => setFilterStartDate(e.target.value)}
                       title="Tarikh Mula"
                     />
-                    <span className="text-zinc-400 text-sm font-medium px-1">-</span>
+                    <span className="text-[#a1a1aa] text-sm font-medium px-1">-</span>
                     <input
                       type="date"
-                      className="px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg flex-1 sm:flex-none sm:w-36 bg-white dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-zinc-700 dark:text-zinc-300 transition-all"
+                      className="px-3 py-2 text-sm border border-[#e4e4e7]  rounded-lg flex-1 sm:flex-none sm:w-36 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-[#3f3f46]  transition-all"
                       value={filterEndDate}
                       onChange={(e) => setFilterEndDate(e.target.value)}
                       title="Tarikh Akhir"
@@ -2517,7 +2551,7 @@ export default function App() {
                   
                   <button 
                     onClick={handleExportCSV}
-                    className="px-3 py-2 text-sm bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-500/20 font-medium cursor-pointer flex items-center gap-2 transition-all shrink-0 ml-auto"
+                    className="px-3 py-2 text-sm bg-emerald-50 text-[#059669] dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-500/20 font-medium cursor-pointer flex items-center gap-2 transition-all shrink-0 ml-auto"
                     title="Eksport Senarai ke CSV"
                   >
                     <FileText size={14} />
@@ -2527,17 +2561,17 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="overflow-auto flex-1 bg-zinc-50/50 md:bg-white dark:bg-zinc-950/50 md:dark:bg-zinc-950 p-3 sm:p-4 md:p-0">
+              <div className="overflow-auto flex-1 bg-[#fafafa]/50 md:bg-[#ffffff] dark:bg-zinc-950/50 md:dark:bg-zinc-950 p-3 sm:p-4 md:p-0">
                 {/* Mobile View: List */}
-                <div className="md:hidden bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm overflow-hidden mb-4 divide-y divide-zinc-200 dark:divide-zinc-800">
+                <div className="md:hidden bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7]  rounded-xl shadow-sm overflow-hidden mb-4 divide-y divide-zinc-200 dark:divide-zinc-800">
                   {filteredRecords.length > 0 ? (
                     filteredRecords.map((record) => (
-                      <div key={record.id} className="p-3 sm:p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer transition-colors relative" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
+                      <div key={record.id} className="p-3 sm:p-4 hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 cursor-pointer transition-colors relative" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
                         <div className="flex items-start gap-3">
                           <div className="pt-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
                              <input
                                 type="checkbox"
-                                className="cursor-pointer rounded border-zinc-200 dark:border-zinc-700 w-4 h-4 text-blue-600 focus:ring-blue-500 transition-colors"
+                                className="cursor-pointer rounded border-[#e4e4e7]  w-4 h-4 text-blue-600 focus:ring-blue-500 transition-colors"
                                checked={selectedRecords.includes(record.id)}
                                onChange={(e) => {
                                  if (e.target.checked) {
@@ -2550,30 +2584,30 @@ export default function App() {
                           </div>
                           <div className="flex-1 min-w-0">
                              <div className="flex justify-between items-start gap-2">
-                               <h4 className="font-bold text-zinc-900 dark:text-zinc-100 text-[13px] sm:text-sm truncate leading-tight flex items-center gap-1">
+                               <h4 className="font-bold text-[#18181b]  text-[13px] sm:text-sm truncate leading-tight flex items-center gap-1">
   {record.nama}
   <button 
     onClick={(e) => { e.stopPropagation(); setClientProfileName(record.nama); }}
-    className="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 p-1 rounded-md"
+    className="text-[#a1a1aa] hover:text-blue-600 dark:hover:text-blue-400 p-1 rounded-md"
     title="Profil Pelanggan"
   >
     <Users size={14} />
   </button>
 </h4>
-                               <span className={`font-bold text-[13px] sm:text-sm shrink-0 leading-tight ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-zinc-800 dark:text-zinc-200'}`}>
+                               <span className={`font-bold text-[13px] sm:text-sm shrink-0 leading-tight ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-[#27272a] dark:text-[#e4e4e7]'}`}>
                                  {formatRM(record.bakiFeeTerkini)}
                                </span>
                              </div>
                              
                              <div className="flex justify-between items-center mt-1">
-                               <p className="text-zinc-500 dark:text-zinc-400 text-[11px] truncate">{record.kes}</p>
-                               <span className="text-amber-600 dark:text-amber-500 text-[11px] font-medium shrink-0">
+                               <p className="text-[#71717a] dark:text-[#a1a1aa] text-[11px] truncate">{record.kes}</p>
+                               <span className="text-[#d97706] dark:text-amber-500 text-[11px] font-medium shrink-0">
                                  Mil: {formatRM(record.bakiMileage)}
                                </span>
                              </div>
 
                              <div className="flex justify-between items-center mt-1.5">
-                               <span className="text-zinc-400 text-[10px] flex items-center gap-1">
+                               <span className="text-[#a1a1aa] text-[10px] flex items-center gap-1">
                                  {formatDateDMY(record.tarikh)}
                                </span>
                                <div className="flex items-center gap-1.5">
@@ -2582,7 +2616,7 @@ export default function App() {
                                  ) : (
                                    <span className="text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 font-sans">Belum</span>
                                  )}
-                                 <ChevronDown size={14} className={`text-zinc-400 transition-transform ${expandedRowId === record.id ? 'rotate-180' : ''}`} />
+                                 <ChevronDown size={14} className={`text-[#a1a1aa] transition-transform ${expandedRowId === record.id ? 'rotate-180' : ''}`} />
                                </div>
                              </div>
                           </div>
@@ -2596,7 +2630,7 @@ export default function App() {
                               exit={{ height: 0, opacity: 0 }}
                               className="overflow-hidden"
                             >
-                               <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800/50 flex flex-wrap gap-2 w-full">
+                               <div className="mt-4 pt-3 border-t border-[#f4f4f5] /50 flex flex-wrap gap-2 w-full">
                                  <button onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }} className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-400 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer hover:shadow-md hover:-translate-y-0.5 animate-subtle-pulse">
                                    <Plus size={14} /> Bayaran
                                  </button>
@@ -2604,14 +2638,14 @@ export default function App() {
                                    <Car size={14} /> ± Mil
                                  </button>
                                  {record.bakiFeeTerkini > 0 && (
-                                   <button onClick={(e) => { e.stopPropagation(); setSettlingRecord(record); }} title="Set Baki Fee terus kepada RM0" className="p-1.5 px-2 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 rounded-lg transition-colors flex items-center justify-center gap-1 text-[13px] font-medium border border-emerald-200 dark:border-emerald-800/50 shrink-0">
+                                   <button onClick={(e) => { e.stopPropagation(); setSettlingRecord(record); }} title="Set Baki Fee terus kepada RM0" className="p-1.5 px-2 text-[#059669] hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 rounded-lg transition-colors flex items-center justify-center gap-1 text-[13px] font-medium border border-emerald-200 dark:border-emerald-800/50 shrink-0">
                                      <CheckCircle size={14} /> RM0
                                    </button>
                                  )}
-                                 <button onClick={(e) => { e.stopPropagation(); setEditingRecord(record); }} className="p-1.5 px-2 text-zinc-500 hover:text-zinc-700 bg-zinc-50 hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-400 transition-colors flex items-center justify-center">
+                                 <button onClick={(e) => { e.stopPropagation(); setEditingRecord(record); }} className="p-1.5 px-2 text-[#71717a] hover:text-[#3f3f46] bg-[#fafafa] hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-[#a1a1aa] transition-colors flex items-center justify-center">
                                    <Edit size={16} />
                                  </button>
-                                 <button onClick={(e) => { e.stopPropagation(); setStatementRecord(record); }} className="p-1.5 px-2 text-zinc-500 hover:text-zinc-700 bg-zinc-50 hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-400 transition-colors flex items-center justify-center">
+                                 <button onClick={(e) => { e.stopPropagation(); setStatementRecord(record); }} className="p-1.5 px-2 text-[#71717a] hover:text-[#3f3f46] bg-[#fafafa] hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-[#a1a1aa] transition-colors flex items-center justify-center">
                                    <Printer size={16} />
                                  </button>
                                  <button onClick={(e) => { e.stopPropagation(); setDeletingRecord(record); }} className="p-1.5 px-2 text-red-500 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded-lg dark:bg-red-500/10 dark:hover:bg-red-500/20 transition-colors flex items-center justify-center">
@@ -2619,7 +2653,7 @@ export default function App() {
                                  </button>
                                </div>
                                
-                               <div className="mt-3 pt-1 border-t border-zinc-100 dark:border-zinc-800 -mx-3 sm:-mx-4">
+                               <div className="mt-3 pt-1 border-t border-[#f4f4f5]  -mx-3 sm:-mx-4">
                                  {renderExpandedDetails(record)}
                                </div>
                             </motion.div>
@@ -2628,19 +2662,19 @@ export default function App() {
                       </div>
                     ))
                   ) : (
-                    <div className="text-center py-10 bg-white dark:bg-zinc-900 shadow-sm text-zinc-400 dark:text-zinc-500 font-medium">
+                    <div className="text-center py-10 bg-[#ffffff] dark:bg-zinc-900 shadow-sm text-[#a1a1aa] dark:text-[#71717a] font-medium">
                       Tiada rekod dijumpai.
                     </div>
                   )}
                 </div>
                 {/* Desktop View: Table */}
                 <table className="hidden md:table w-full text-left border-collapse whitespace-nowrap">
-                  <thead className="sticky top-0 bg-zinc-50 dark:bg-zinc-900/50 z-10">
-                    <tr className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase border-b border-zinc-100 dark:border-zinc-800 tracking-wider">
-                      <th className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-center w-12 flex justify-center items-center h-full">
+                  <thead className="sticky top-0 bg-[#fafafa] dark:bg-zinc-900/50 z-10">
+                    <tr className="text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] uppercase border-b border-[#f4f4f5]  tracking-wider">
+                      <th className="px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  text-center w-12 flex justify-center items-center h-full">
                         <input 
                           type="checkbox" 
-                          className="cursor-pointer rounded border-zinc-200 dark:border-zinc-700 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500 transition-colors"
+                          className="cursor-pointer rounded border-[#e4e4e7]  w-3.5 h-3.5 text-blue-600 focus:ring-blue-500 transition-colors"
                           checked={filteredRecords.length > 0 && filteredRecords.every(r => selectedRecords.includes(r.id))}
                           onChange={(e) => {
                             if (e.target.checked) {
@@ -2655,7 +2689,7 @@ export default function App() {
                         />
                       </th>
                       <th 
-                        className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 cursor-pointer select-none hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
+                        className="px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  cursor-pointer select-none hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
                         onClick={() => {
                           if (nameSortOrder === 'asc') {
                             setNameSortOrder('desc');
@@ -2675,16 +2709,16 @@ export default function App() {
                           ) : nameSortOrder === 'desc' ? (
                             <ArrowDown size={13} className="text-blue-600 dark:text-blue-400" />
                           ) : (
-                            <ArrowUpDown size={13} className="text-zinc-400 opacity-50 group-hover:opacity-100 transition-opacity" />
+                            <ArrowUpDown size={13} className="text-[#a1a1aa] opacity-50 group-hover:opacity-100 transition-opacity" />
                           )}
                         </div>
                       </th>
-                      <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800">Kategori Kes</th>
-                      <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800">Nota Kes</th>
-                      <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Total Fee</th>
-                      <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Bayaran Terakhir</th>
+                      <th className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5] ">Kategori Kes</th>
+                      <th className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5] ">Nota Kes</th>
+                      <th className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  text-right">Total Fee</th>
+                      <th className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  text-right">Bayaran Terakhir</th>
                       <th 
-                        className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-center cursor-pointer select-none hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
+                        className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  text-center cursor-pointer select-none hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
                         onClick={() => {
                           if (dateSortOrder === 'desc') {
                             setDateSortOrder('asc');
@@ -2704,13 +2738,13 @@ export default function App() {
                           ) : dateSortOrder === 'asc' ? (
                             <ArrowUp size={13} className="text-blue-600 dark:text-blue-400" />
                           ) : (
-                            <ArrowUpDown size={13} className="text-zinc-400 opacity-50 group-hover:opacity-100 transition-opacity" />
+                            <ArrowUpDown size={13} className="text-[#a1a1aa] opacity-50 group-hover:opacity-100 transition-opacity" />
                           )}
                         </div>
                       </th>
-                      <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Baki Sebelum</th>
-                      <th className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Baki Terkini</th>
-                      <th className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800 text-right">Baki Mileage</th>
+                      <th className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  text-right">Baki Sebelum</th>
+                      <th className="px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  text-right">Baki Terkini</th>
+                      <th className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  text-right">Baki Mileage</th>
                       <th className="px-3 sm:px-4 py-3 text-center">Tindakan</th>
                     </tr>
                   </thead>
@@ -2737,13 +2771,13 @@ export default function App() {
                               exit={{ opacity: 0, scale: 0.95 }}
                               transition={{ duration: 0.2 }}
                               onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
-                              className={`border-b border-zinc-100 dark:border-zinc-800/50 hover:bg-zinc-50 dark:hover:bg-zinc-900 cursor-pointer transition-colors ${isOverdue ? 'bg-red-50/30 dark:bg-red-900/10 border-l-2 border-l-red-500' : (record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-zinc-50/50 dark:bg-zinc-900/30' : '')} ${record.bakiFeeTerkini > 2000 && !isOverdue ? 'bg-amber-50/10 dark:bg-amber-900/10' : ''} ${expandedRowId === record.id ? 'bg-zinc-100/50 dark:bg-zinc-800/30' : ''}`}
+                              className={`border-b border-[#f4f4f5] /50 hover:bg-[#fafafa] dark:hover:bg-zinc-900 cursor-pointer transition-colors ${isOverdue ? 'bg-red-50/30 dark:bg-red-900/10 border-l-2 border-l-red-500' : (record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-[#fafafa]/50 dark:bg-zinc-900/30' : '')} ${record.bakiFeeTerkini > 2000 && !isOverdue ? 'bg-amber-50/10 dark:bg-amber-900/10' : ''} ${expandedRowId === record.id ? 'bg-zinc-100/50 dark:bg-zinc-800/30' : ''}`}
                             >
-                            <td className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">
-                              <div className="flex items-center justify-center gap-2 font-mono text-zinc-400">
+                            <td className="px-3 sm:px-4 py-3 border-r border-[#f4f4f5] /50">
+                              <div className="flex items-center justify-center gap-2 font-mono text-[#a1a1aa]">
                                 <input 
                                   type="checkbox" 
-                                  className="cursor-pointer rounded border-zinc-200 dark:border-zinc-700 w-3.5 h-3.5 text-blue-600 focus:ring-blue-500 mt-0.5"
+                                  className="cursor-pointer rounded border-[#e4e4e7]  w-3.5 h-3.5 text-blue-600 focus:ring-blue-500 mt-0.5"
                                   onClick={(e) => e.stopPropagation()}
                                   checked={selectedRecords.includes(record.id)}
                                   onChange={(e) => {
@@ -2755,35 +2789,35 @@ export default function App() {
                                   }}
                                 />
                                 <span className="cursor-pointer" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
-                                  {expandedRowId === record.id ? <ChevronDown size={14} className="text-zinc-600 dark:text-zinc-400" /> : <ChevronRight size={14} className="text-zinc-400 dark:text-zinc-600" />}
+                                  {expandedRowId === record.id ? <ChevronDown size={14} className="text-[#52525b] dark:text-[#a1a1aa]" /> : <ChevronRight size={14} className="text-[#a1a1aa] dark:text-[#52525b]" />}
                                 </span>
                                 <span className="hidden sm:inline text-xs">{index + 1}</span>
                               </div>
                             </td>
-                            <td className="px-3 sm:px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200 border-r border-zinc-100 dark:border-zinc-800/50 break-words md:truncate md:max-w-none max-w-[140px]">
+                            <td className="px-3 sm:px-4 py-3 font-medium text-[#27272a] dark:text-[#e4e4e7] border-r border-[#f4f4f5] /50 break-words md:truncate md:max-w-none max-w-[140px]">
   <div className="flex items-center justify-between group">
     <span>
       {index > 0 && filteredRecords[index - 1].nama === record.nama ? (
-        <span className="text-zinc-300 dark:text-zinc-700 font-normal select-none" title={record.nama}>"</span>
+        <span className="text-zinc-300 dark:text-[#3f3f46] font-normal select-none" title={record.nama}>"</span>
       ) : (
         record.nama
       )}
     </span>
     <button 
       onClick={(e) => { e.stopPropagation(); setClientProfileName(record.nama); }}
-      className="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
+      className="text-[#a1a1aa] hover:text-blue-600 dark:hover:text-blue-400 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
       title="Profil Pelanggan"
     >
       <Users size={14} />
     </button>
   </div>
 </td>
-                            <td className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">
+                            <td className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5] /50">
                               <span className="text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">
                                 {record.kes}
                               </span>
                             </td>
-                            <td className=" px-3 sm:px-4 py-1.5 border-r border-zinc-100 dark:border-zinc-800/50" onClick={(e) => e.stopPropagation()}>
+                            <td className=" px-3 sm:px-4 py-1.5 border-r border-[#f4f4f5] /50" onClick={(e) => e.stopPropagation()}>
                               <input 
                                 type="text" 
                                 defaultValue={record.nota || ''}
@@ -2794,28 +2828,28 @@ export default function App() {
                                     e.currentTarget.blur();
                                   }
                                 }}
-                                className="w-full min-w-[150px] bg-transparent border border-transparent hover:border-zinc-300 dark:hover:border-zinc-700 focus:border-blue-500 dark:focus:border-blue-500 focus:bg-white dark:focus:bg-zinc-800 rounded px-2 py-1.5 text-[12px] text-zinc-700 dark:text-zinc-300 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600 outline-none"
+                                className="w-full min-w-[150px] bg-transparent border border-transparent hover:border-[#d4d4d8] dark:hover:border-zinc-700 focus:border-blue-500 dark:focus:border-blue-500 focus:bg-[#ffffff] dark:focus:bg-zinc-800 rounded px-2 py-1.5 text-[12px] text-[#3f3f46]  transition-colors placeholder:text-[#a1a1aa] dark:placeholder:text-[#52525b] outline-none"
                               />
                             </td>
-                            <td className=" px-3 sm:px-4 py-3 font-mono text-zinc-600 dark:text-zinc-400 border-r border-zinc-100 dark:border-zinc-800/50 text-right">{formatRM(record.totalFee)}</td>
-                            <td className=" px-3 sm:px-4 py-3 font-mono border-r border-zinc-100 dark:border-zinc-800/50 text-emerald-600 dark:text-emerald-500 text-right bg-emerald-50/50 dark:bg-emerald-900/10">
+                            <td className=" px-3 sm:px-4 py-3 font-mono text-[#52525b] dark:text-[#a1a1aa] border-r border-[#f4f4f5] /50 text-right">{formatRM(record.totalFee)}</td>
+                            <td className=" px-3 sm:px-4 py-3 font-mono border-r border-[#f4f4f5] /50 text-[#059669] dark:text-emerald-500 text-right bg-emerald-50/50 dark:bg-emerald-900/10">
                               {record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}
                             </td>
-                            <td className=" px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50 text-center text-zinc-500 font-mono text-[11px]">{formatDateDMY(record.tarikh)}</td>
-                            <td className=" px-3 sm:px-4 py-3 font-mono border-r border-zinc-100 dark:border-zinc-800/50 text-right text-zinc-400">{formatRM(record.bakiSebelum)}</td>
-                            <td className="px-3 sm:px-4 py-3 border-r border-zinc-100 dark:border-zinc-800/50">
+                            <td className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5] /50 text-center text-[#71717a] font-mono text-[11px]">{formatDateDMY(record.tarikh)}</td>
+                            <td className=" px-3 sm:px-4 py-3 font-mono border-r border-[#f4f4f5] /50 text-right text-[#a1a1aa]">{formatRM(record.bakiSebelum)}</td>
+                            <td className="px-3 sm:px-4 py-3 border-r border-[#f4f4f5] /50">
                               <div className="flex items-center justify-end gap-2 font-mono font-bold">
                                 {record.bakiFeeTerkini <= 0 ? (
                                   <span className="text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 font-sans">Selesai</span>
                                 ) : (
                                   <span className="text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 font-sans">Belum</span>
                                 )}
-                                <span className={record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-zinc-800 dark:text-zinc-200'}>
+                                <span className={record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-[#27272a] dark:text-[#e4e4e7]'}>
                                   {formatRM(record.bakiFeeTerkini)}
                                 </span>
                               </div>
                             </td>
-                            <td className=" px-3 sm:px-4 py-3 font-mono border-r border-zinc-100 dark:border-zinc-800/50 text-right text-amber-600 dark:text-amber-500">
+                            <td className=" px-3 sm:px-4 py-3 font-mono border-r border-[#f4f4f5] /50 text-right text-[#d97706] dark:text-amber-500">
                               {formatRM(record.bakiMileage)}
                             </td>
                             <td className="px-3 sm:px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
@@ -2846,14 +2880,14 @@ export default function App() {
                                     className="text-emerald-700 dark:text-emerald-300 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-1 shrink-0 shadow-sm cursor-pointer"
                                     title="Set Baki Fee terus kepada RM0"
                                   >
-                                    <CheckCircle size={13} className="text-emerald-600 dark:text-emerald-400" />
+                                    <CheckCircle size={13} className="text-[#059669] dark:text-emerald-400" />
                                     <span>Set RM0</span>
                                   </button>
                                 )}
 
                                 <button 
                                   onClick={() => setEditingRecord(record)}
-                                  className="text-zinc-600 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-blue-400 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 p-1.5 rounded-lg transition-colors"
+                                  className="text-[#52525b]  hover:text-blue-600 dark:hover:text-blue-400 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 p-1.5 rounded-lg transition-colors"
                                   title="Kemaskini Maklumat"
                                 >
                                   <Edit size={14} />
@@ -2868,7 +2902,7 @@ export default function App() {
 
                                 <button 
                                   onClick={() => setDeletingRecord(record)}
-                                  className="text-zinc-400 dark:text-zinc-500 hover:text-red-600 dark:hover:text-red-400 transition-colors bg-zinc-100 dark:bg-zinc-800 p-1.5 rounded-lg"
+                                  className="text-[#a1a1aa] dark:text-[#71717a] hover:text-red-600 dark:hover:text-red-400 transition-colors bg-zinc-100 dark:bg-zinc-800 p-1.5 rounded-lg"
                                   title="Padam Pelanggan"
                                 >
                                   <Trash2 size={14} />
@@ -2882,7 +2916,7 @@ export default function App() {
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 exit={{ opacity: 0 }}
-                                className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50"
+                                className="border-b border-[#f4f4f5]  bg-[#fafafa] dark:bg-zinc-900/50"
                               >
                                 <td colSpan={10} className="p-0 whitespace-normal">
                                   <motion.div
@@ -2906,7 +2940,7 @@ export default function App() {
                         animate={{ opacity: 1 }} 
                         exit={{ opacity: 0 }}
                       >
-                        <td colSpan={10} className="px-4 py-8 text-center text-zinc-400 dark:text-zinc-500 font-medium">
+                        <td colSpan={10} className="px-4 py-8 text-center text-[#a1a1aa] dark:text-[#71717a] font-medium">
                           Tiada rekod dijumpai.
                         </td>
                       </motion.tr>
@@ -2915,12 +2949,12 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
-              <div className="p-4 bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-800 flex justify-between items-center text-xs text-zinc-500 dark:text-zinc-400">
-                <div>Menunjukkan <span className="font-medium text-zinc-900 dark:text-zinc-100">{filteredRecords.length}</span> daripada <span className="font-medium text-zinc-900 dark:text-zinc-100">{records.length}</span> rekod</div>
+              <div className="p-4 bg-[#ffffff] dark:bg-zinc-950 border-t border-[#e4e4e7]  flex justify-between items-center text-xs text-[#71717a] dark:text-[#a1a1aa]">
+                <div>Menunjukkan <span className="font-medium text-[#18181b] ">{filteredRecords.length}</span> daripada <span className="font-medium text-[#18181b] ">{records.length}</span> rekod</div>
                 <div className="flex gap-2 hidden sm:flex">
-                  <button className="px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors" disabled>Kembali</button>
-                  <button className="px-3 py-1.5 border-none rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-medium shadow-sm">1</button>
-                  <button className="px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors" disabled>Seterusnya</button>
+                  <button className="px-3 py-1.5 border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-900 hover:bg-[#fafafa] dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors" disabled>Kembali</button>
+                  <button className="px-3 py-1.5 border-none rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-[#18181b] font-medium shadow-sm">1</button>
+                  <button className="px-3 py-1.5 border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-900 hover:bg-[#fafafa] dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors" disabled>Seterusnya</button>
                 </div>
               </div>
             </div>
@@ -2931,10 +2965,10 @@ export default function App() {
             {activeTab === 'standalone' && (
               <motion.div
                 key="standalone"
-                initial={{ opacity: 0, y: 15, scale: 0.99 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -15, scale: 0.99 }}
-                transition={{ type: "spring", stiffness: 300, damping: 25, mass: 0.8 }}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
                 className="flex-1 flex flex-col min-h-0 overflow-hidden"
               >
                 <StandaloneReceipts initialData={standaloneInitialRecord} user={user} db={db} caseRecords={records} />
@@ -2944,31 +2978,31 @@ export default function App() {
         </div>
         
         {/* Mobile Bottom Navigation */}
-        <div className="md:hidden fixed bottom-0 left-0 right-0 h-[60px] box-content pb-safe bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-around z-40">
+        <div className="md:hidden fixed bottom-0 left-0 right-0 h-[60px] box-content pb-safe bg-[#ffffff] dark:bg-zinc-950 border-t border-[#e4e4e7]  flex items-center justify-around z-40">
           <button 
             onClick={() => setActiveTab('dashboard')}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === 'dashboard' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-zinc-400'}`}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === 'dashboard' ? 'text-blue-600 dark:text-blue-400' : 'text-[#71717a] dark:text-[#a1a1aa]'}`}
           >
             <Home size={20} className={activeTab === 'dashboard' ? 'fill-current' : ''} />
             <span className="text-[10px] font-medium">Utama</span>
           </button>
           <button 
             onClick={() => setActiveTab('records')}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === 'records' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-zinc-400'}`}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === 'records' ? 'text-blue-600 dark:text-blue-400' : 'text-[#71717a] dark:text-[#a1a1aa]'}`}
           >
             <FileText size={20} className={activeTab === 'records' ? 'fill-current' : ''} />
             <span className="text-[10px] font-medium">Rekod</span>
           </button>
           <button 
             onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === 'standalone' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-zinc-400'}`}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === 'standalone' ? 'text-blue-600 dark:text-blue-400' : 'text-[#71717a] dark:text-[#a1a1aa]'}`}
           >
             <Printer size={20} className={activeTab === 'standalone' ? 'fill-current' : ''} />
             <span className="text-[10px] font-medium">Resit</span>
           </button>
           <button 
             onClick={() => { setActiveTab('settings'); setStandaloneInitialRecord(null); }}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === 'settings' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-zinc-400'}`}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === 'settings' ? 'text-blue-600 dark:text-blue-400' : 'text-[#71717a] dark:text-[#a1a1aa]'}`}
           >
             <Settings size={20} className={activeTab === 'settings' ? 'fill-current' : ''} />
             <span className="text-[10px] font-medium">Tetapan</span>
@@ -2985,33 +3019,33 @@ export default function App() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden"
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden"
             >
-              <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 shrink-0">
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+              <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 shrink-0">
+                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
                   <Edit size={18} className="text-amber-500" />
                   Edit Rekod Pelanggan
                 </h3>
-                <button onClick={() => setEditingRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setEditingRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
               <div className="p-6 overflow-y-auto">
                 <form onSubmit={handleEditRecordSubmit} className="space-y-5">
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                       Nama Pelanggan / Entiti
                     </label>
                     <input
                       type="text"
                       required
-                      className={`px-3 py-2 w-full border ${editingRecord.nama && records.some(r => r.id !== editingRecord.id && r.nama.toLowerCase().trim() === editingRecord.nama.toLowerCase().trim()) ? 'border-amber-400 focus:ring-amber-500/20 focus:border-amber-500' : 'border-zinc-200 dark:border-zinc-800 focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 transition-all font-medium text-zinc-900 dark:text-zinc-100`}
+                      className={`px-3 py-2 w-full border ${editingRecord.nama && records.some(r => r.id !== editingRecord.id && r.nama.toLowerCase().trim() === editingRecord.nama.toLowerCase().trim()) ? 'border-amber-400 focus:ring-amber-500/20 focus:border-amber-500' : 'border-[#e4e4e7]  focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b] `}
                       value={editingRecord.nama || ''}
                       onChange={(e) => setEditingRecord({ ...editingRecord, nama: e.target.value })}
                       autoFocus
                     />
                     {editingRecord.nama && records.some(r => r.id !== editingRecord.id && r.nama.toLowerCase().trim() === editingRecord.nama.toLowerCase().trim()) && (
-                      <p className="text-xs text-amber-600 dark:text-amber-500 mt-1.5 flex items-center gap-1.5">
+                      <p className="text-xs text-[#d97706] dark:text-amber-500 mt-1.5 flex items-center gap-1.5">
                         <AlertTriangle size={12} />
                         Nama pelanggan sudah wujud dalam sistem.
                       </p>
@@ -3020,10 +3054,10 @@ export default function App() {
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">No. Telefon</label>
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">No. Telefon</label>
                       <input
                         type="text"
-                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
                         placeholder="Contoh: 0123456789"
                         value={editingRecord.telefon || ''}
                         onChange={(e) => setEditingRecord({ ...editingRecord, telefon: e.target.value })}
@@ -3033,10 +3067,10 @@ export default function App() {
                   </div>
                   
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">Alamat</label>
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">Alamat</label>
                     <textarea
                       rows={2}
-                      className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                      className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
                       placeholder="Alamat penuh..."
                       value={editingRecord.alamat || ''}
                       onChange={(e) => setEditingRecord({ ...editingRecord, alamat: e.target.value })}
@@ -3045,25 +3079,25 @@ export default function App() {
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                         Kategori Kes
                       </label>
                       <input
                         type="text"
                         required
-                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100"
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] "
                         value={editingRecord.kes}
                         onChange={(e) => setEditingRecord({ ...editingRecord, kes: e.target.value })}
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                         Tarikh
                       </label>
                       <input
                         type="date"
                         required
-                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100"
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] "
                         value={formatDateISO(editingRecord.tarikh)}
                         onChange={(e) => setEditingRecord({ ...editingRecord, tarikh: formatDateDMY(e.target.value) })}
                       />
@@ -3072,7 +3106,7 @@ export default function App() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                         Total Fee (RM)
                       </label>
                       <input
@@ -3080,7 +3114,7 @@ export default function App() {
                         step="0.01"
                         min="0"
                         required
-                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg font-mono text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg font-mono text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
                         value={editingRecord.totalFee}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value) || 0;
@@ -3092,17 +3126,17 @@ export default function App() {
                           })
                         }}
                       />
-                      <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1.5">Baki fee akan dikira semula secara automatik</p>
+                      <p className="text-[10px] text-[#a1a1aa] dark:text-[#71717a] mt-1.5">Baki fee akan dikira semula secara automatik</p>
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                         Baki Mileage (RM)
                       </label>
                       <div className="flex items-center gap-2">
                         <button 
                           type="button" 
                           onClick={() => setEditingRecord({...editingRecord, bakiMileage: Math.max(0, (editingRecord.bakiMileage || 0) - 50)})}
-                          className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
+                          className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg font-bold text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
                           title="Tolak RM50"
                         >
                           -50
@@ -3110,40 +3144,40 @@ export default function App() {
                         <input
                           type="number"
                           step="0.01"
-                          className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg font-mono text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100 text-center"
+                          className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg font-mono text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b]  text-center"
                           value={editingRecord.bakiMileage}
                           onChange={(e) => setEditingRecord({ ...editingRecord, bakiMileage: parseFloat(e.target.value) || 0 })}
                         />
                         <button 
                           type="button" 
                           onClick={() => setEditingRecord({...editingRecord, bakiMileage: (editingRecord.bakiMileage || 0) + 50})}
-                          className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
+                          className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg font-bold text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
                           title="Tambah RM50"
                         >
                           +50
                         </button>
                       </div>
-                      <p className="text-[10px] text-zinc-500 mt-1.5">Gunakan butang untuk tambah/tolak, atau taip jumlah terus.</p>
+                      <p className="text-[10px] text-[#71717a] mt-1.5">Gunakan butang untuk tambah/tolak, atau taip jumlah terus.</p>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                       Nota / Ringkasan Kes
                     </label>
                     <textarea
-                      className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100 resize-y min-h-[80px]"
+                      className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b]  resize-y min-h-[80px]"
                       placeholder="Masukkan nota tambahan (pilihan)"
                       value={editingRecord.nota || ''}
                       onChange={(e) => setEditingRecord({ ...editingRecord, nota: e.target.value })}
                     />
                   </div>
 
-                  <div className="flex justify-end gap-3 pt-6 border-t border-zinc-100 dark:border-zinc-800/50 mt-6">
+                  <div className="flex justify-end gap-3 pt-6 border-t border-[#f4f4f5] /50 mt-6">
                     <button 
                       type="button"
                       onClick={() => setEditingRecord(null)}
-                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
+                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
                     >
                       Batal
                     </button>
@@ -3169,20 +3203,20 @@ export default function App() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-sm overflow-hidden"
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-sm overflow-hidden"
             >
               <div className="p-8 text-center">
                 <div className="w-16 h-16 rounded-full bg-red-50 dark:bg-red-500/10 flex items-center justify-center mx-auto mb-6">
                   <AlertTriangle size={28} className="text-red-500 dark:text-red-400" />
                 </div>
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 text-lg mb-3">Padam Rekod Terpilih</h3>
-                <p className="text-zinc-500 dark:text-zinc-400 text-sm mb-8 leading-relaxed">
-                  Adakah anda pasti untuk memadam <strong className="text-zinc-900 dark:text-zinc-100">{selectedRecords.length}</strong> rekod yang terpilih? Tindakan ini tidak boleh dikembalikan.
+                <h3 className="font-semibold text-[#18181b]  text-lg mb-3">Padam Rekod Terpilih</h3>
+                <p className="text-[#71717a] dark:text-[#a1a1aa] text-sm mb-8 leading-relaxed">
+                  Adakah anda pasti untuk memadam <strong className="text-[#18181b] ">{selectedRecords.length}</strong> rekod yang terpilih? Tindakan ini tidak boleh dikembalikan.
                 </p>
                 <div className="flex justify-center gap-3">
                   <button 
                     onClick={() => setIsDeletingSelected(false)}
-                    className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
+                    className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-[#fafafa] dark:hover:bg-zinc-800 text-[#52525b]  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
                   >
                     Batal
                   </button>
@@ -3207,20 +3241,20 @@ export default function App() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-sm overflow-hidden"
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-sm overflow-hidden"
             >
               <div className="p-8 text-center">
                 <div className="w-16 h-16 rounded-full bg-red-50 dark:bg-red-500/10 flex items-center justify-center mx-auto mb-6">
                   <AlertTriangle size={28} className="text-red-500 dark:text-red-400" />
                 </div>
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 text-lg mb-3">Padam Rekod Kes</h3>
-                <p className="text-zinc-500 dark:text-zinc-400 text-sm mb-8 leading-relaxed">
-                  Adakah anda pasti untuk memadam rekod kes <strong className="text-zinc-900 dark:text-zinc-100">{deletingRecord.nama}</strong>? Tindakan ini tidak boleh dikembalikan.
+                <h3 className="font-semibold text-[#18181b]  text-lg mb-3">Padam Rekod Kes</h3>
+                <p className="text-[#71717a] dark:text-[#a1a1aa] text-sm mb-8 leading-relaxed">
+                  Adakah anda pasti untuk memadam rekod kes <strong className="text-[#18181b] ">{deletingRecord.nama}</strong>? Tindakan ini tidak boleh dikembalikan.
                 </p>
                 <div className="flex justify-center gap-3">
                   <button 
                     onClick={() => setDeletingRecord(null)}
-                    className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
+                    className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-[#fafafa] dark:hover:bg-zinc-800 text-[#52525b]  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
                   >
                     Batal
                   </button>
@@ -3245,20 +3279,20 @@ export default function App() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md overflow-hidden"
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-md overflow-hidden"
             >
               <div className="p-6 text-center">
                 <div className="w-14 h-14 rounded-full bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center mx-auto mb-4 border border-emerald-100 dark:border-emerald-900/30">
-                  <CheckCircle size={30} className="text-emerald-600 dark:text-emerald-400" />
+                  <CheckCircle size={30} className="text-[#059669] dark:text-emerald-400" />
                 </div>
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 text-lg mb-2">Pengesahan Set Baki Fee RM0</h3>
-                <p className="text-zinc-600 dark:text-zinc-400 text-sm mb-6 leading-relaxed">
-                  Adakah anda pasti untuk menetapkan baki fee bagi pelanggan <strong className="text-zinc-900 dark:text-zinc-100">{settlingRecord.nama}</strong> ({settlingRecord.kes}) daripada <span className="font-mono font-bold text-amber-600 dark:text-amber-400">{formatRM(settlingRecord.bakiFeeTerkini)}</span> terus kepada <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">RM0.00</span>?
+                <h3 className="font-semibold text-[#18181b]  text-lg mb-2">Pengesahan Set Baki Fee RM0</h3>
+                <p className="text-[#52525b] dark:text-[#a1a1aa] text-sm mb-6 leading-relaxed">
+                  Adakah anda pasti untuk menetapkan baki fee bagi pelanggan <strong className="text-[#18181b] ">{settlingRecord.nama}</strong> ({settlingRecord.kes}) daripada <span className="font-mono font-bold text-[#d97706] dark:text-amber-400">{formatRM(settlingRecord.bakiFeeTerkini)}</span> terus kepada <span className="font-mono font-bold text-[#059669] dark:text-emerald-400">RM0.00</span>?
                 </p>
                 <div className="flex justify-center gap-3">
                   <button 
                     onClick={() => setSettlingRecord(null)}
-                    className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
+                    className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-[#fafafa] dark:hover:bg-zinc-800 text-[#52525b]  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
                   >
                     Batal
                   </button>
@@ -3284,34 +3318,34 @@ export default function App() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden"
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden"
             >
-              <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 shrink-0">
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+              <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 shrink-0">
+                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
                   <Users size={18} className="text-blue-500" />
                   Rekod Pelanggan Baru
                 </h3>
-                <button onClick={() => setIsNewRecordModalOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setIsNewRecordModalOpen(false)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
               <div className="p-6 overflow-y-auto">
                 <form onSubmit={handleAddNewRecord} className="space-y-5">
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                       Nama Pelanggan / Entiti
                     </label>
                     <input
                       type="text"
                       required
-                      className={`px-3 py-2 w-full border ${newRecordData.nama && records.some(r => r.nama.toLowerCase().trim() === newRecordData.nama.toLowerCase().trim()) ? 'border-amber-400 focus:ring-amber-500/20 focus:border-amber-500' : 'border-zinc-200 dark:border-zinc-800 focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 transition-all font-medium text-zinc-900 dark:text-zinc-100`}
+                      className={`px-3 py-2 w-full border ${newRecordData.nama && records.some(r => r.nama.toLowerCase().trim() === newRecordData.nama.toLowerCase().trim()) ? 'border-amber-400 focus:ring-amber-500/20 focus:border-amber-500' : 'border-[#e4e4e7]  focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b] `}
                       placeholder="Contoh: Ali bin Abu"
                       value={newRecordData.nama || ''}
                       onChange={(e) => setNewRecordData({ ...newRecordData, nama: e.target.value })}
                       autoFocus
                     />
                     {newRecordData.nama && records.some(r => r.nama.toLowerCase().trim() === newRecordData.nama.toLowerCase().trim()) && (
-                      <p className="text-xs text-amber-600 dark:text-amber-500 mt-1.5 flex items-center gap-1.5">
+                      <p className="text-xs text-[#d97706] dark:text-amber-500 mt-1.5 flex items-center gap-1.5">
                         <AlertTriangle size={12} />
                         Nama pelanggan sudah wujud dalam sistem.
                       </p>
@@ -3320,10 +3354,10 @@ export default function App() {
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">No. Telefon</label>
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">No. Telefon</label>
                       <input
                         type="text"
-                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
                         placeholder="Contoh: 0123456789"
                         value={newRecordData.telefon || ''}
                         onChange={(e) => setNewRecordData({ ...newRecordData, telefon: e.target.value })}
@@ -3333,10 +3367,10 @@ export default function App() {
                   </div>
                   
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">Alamat</label>
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">Alamat</label>
                     <textarea
                       rows={2}
-                      className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                      className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
                       placeholder="Alamat penuh..."
                       value={newRecordData.alamat || ''}
                       onChange={(e) => setNewRecordData({ ...newRecordData, alamat: e.target.value })}
@@ -3345,26 +3379,26 @@ export default function App() {
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                         Kategori Kes
                       </label>
                       <input
                         type="text"
                         required
-                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100"
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] "
                         placeholder="Contoh: Saman Sivil"
                         value={newRecordData.kes}
                         onChange={(e) => setNewRecordData({ ...newRecordData, kes: e.target.value })}
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                         Tarikh
                       </label>
                       <input
                         type="date"
                         required
-                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100"
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] "
                         value={newRecordData.tarikh}
                         onChange={(e) => setNewRecordData({ ...newRecordData, tarikh: e.target.value })}
                       />
@@ -3373,7 +3407,7 @@ export default function App() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                         Total Fee (RM)
                       </label>
                       <input
@@ -3381,21 +3415,21 @@ export default function App() {
                         step="0.01"
                         min="0"
                         required
-                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg font-mono text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg font-mono text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
                         placeholder="0.00"
                         value={newRecordData.totalFee}
                         onChange={(e) => setNewRecordData({ ...newRecordData, totalFee: e.target.value })}
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                         Baki Mileage (RM)
                       </label>
                       <input
                         type="number"
                         step="0.01"
                         min="0"
-                        className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg font-mono text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-zinc-100"
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg font-mono text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
                         placeholder="0.00"
                         value={newRecordData.bakiMileage}
                         onChange={(e) => setNewRecordData({ ...newRecordData, bakiMileage: e.target.value })}
@@ -3404,22 +3438,22 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                       Nota / Ringkasan Kes
                     </label>
                     <textarea
-                      className="px-3 py-2 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100 resize-y min-h-[60px]"
+                      className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b]  resize-y min-h-[60px]"
                       placeholder="Masukkan nota tambahan (pilihan)"
                       value={newRecordData.nota || ''}
                       onChange={(e) => setNewRecordData({ ...newRecordData, nota: e.target.value })}
                     />
                   </div>
 
-                  <div className="flex justify-end gap-3 pt-6 border-t border-zinc-100 dark:border-zinc-800/50 mt-6">
+                  <div className="flex justify-end gap-3 pt-6 border-t border-[#f4f4f5] /50 mt-6">
                     <button 
                       type="button"
                       onClick={() => setIsNewRecordModalOpen(false)}
-                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
+                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
                     >
                       Batal
                     </button>
@@ -3445,57 +3479,57 @@ export default function App() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-sm flex flex-col overflow-hidden"
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-sm flex flex-col overflow-hidden"
             >
-              <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 shrink-0">
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+              <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 shrink-0">
+                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
                   <Car size={18} className="text-teal-500" />
                   Pelarasan Mileage
                 </h3>
-                <button onClick={() => setMileageAdjustmentRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setMileageAdjustmentRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
               <div className="p-6">
                 <div className="mb-5 p-4 rounded-lg bg-teal-50 dark:bg-teal-900/10 border border-teal-100 dark:border-teal-900/30">
                   <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500 dark:text-zinc-400">Baki Semasa (Mileage):</span>
+                    <span className="text-[#71717a] dark:text-[#a1a1aa]">Baki Semasa (Mileage):</span>
                     <span className="font-mono font-bold text-teal-700 dark:text-teal-400">{formatRM(mileageAdjustmentRecord.bakiMileage || 0)}</span>
                   </div>
                 </div>
                 
                 <form onSubmit={handleMileageAdjustmentSubmit} className="space-y-5">
-                  <div className="flex rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800">
+                  <div className="flex rounded-lg overflow-hidden border border-[#e4e4e7] ">
                     <button 
                       type="button" 
                       onClick={() => setMileageAdjustmentType('tambah')}
-                      className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${mileageAdjustmentType === 'tambah' ? 'bg-teal-500 text-white shadow-sm' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                      className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${mileageAdjustmentType === 'tambah' ? 'bg-teal-500 text-white shadow-sm' : 'bg-[#fafafa] dark:bg-zinc-900 text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                     >
                       Tambah (+)
                     </button>
                     <button 
                       type="button" 
                       onClick={() => setMileageAdjustmentType('tolak')}
-                      className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer border-l border-zinc-200 dark:border-zinc-800 ${mileageAdjustmentType === 'tolak' ? 'bg-teal-500 text-white border-transparent shadow-sm' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                      className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer border-l border-[#e4e4e7]  ${mileageAdjustmentType === 'tolak' ? 'bg-teal-500 text-white border-transparent shadow-sm' : 'bg-[#fafafa] dark:bg-zinc-900 text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                     >
                       Tolak (-)
                     </button>
                   </div>
                   
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                       Jumlah Pelarasan (RM)
                     </label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <span className="text-zinc-500 dark:text-zinc-400 font-mono text-sm">RM</span>
+                        <span className="text-[#71717a] dark:text-[#a1a1aa] font-mono text-sm">RM</span>
                       </div>
                       <input
                         type="number"
                         step="0.01"
                         min="0.01"
                         required
-                        className="pl-10 pr-4 py-2.5 w-full border border-zinc-200 dark:border-zinc-800 focus:ring-teal-500/20 focus:border-teal-500 rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950"
+                        className="pl-10 pr-4 py-2.5 w-full border border-[#e4e4e7]  focus:ring-teal-500/20 focus:border-teal-500 rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b]  bg-[#ffffff] dark:bg-zinc-950"
                         placeholder="0.00"
                         value={mileageAdjustmentAmount}
                         onChange={(e) => setMileageAdjustmentAmount(e.target.value)}
@@ -3508,7 +3542,7 @@ export default function App() {
                     <button 
                       type="button"
                       onClick={() => setMileageAdjustmentRecord(null)}
-                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
+                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
                     >
                       Batal
                     </button>
@@ -3532,30 +3566,30 @@ export default function App() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden"
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden"
             >
-              <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 shrink-0">
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+              <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 shrink-0">
+                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
                   <CreditCard size={18} className="text-blue-500" />
                   Kemaskini Bayaran
                 </h3>
-                <button onClick={() => setPaymentRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setPaymentRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
               <div className="p-6 overflow-y-auto">
                 <div className="mb-6 p-4 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30 space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500 dark:text-zinc-400">Pelanggan:</span>
-                    <span className="font-semibold text-zinc-800 dark:text-zinc-200">{paymentRecord.nama}</span>
+                    <span className="text-[#71717a] dark:text-[#a1a1aa]">Pelanggan:</span>
+                    <span className="font-semibold text-[#27272a] dark:text-[#e4e4e7]">{paymentRecord.nama}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500 dark:text-zinc-400">Baki Semasa (Fee):</span>
+                    <span className="text-[#71717a] dark:text-[#a1a1aa]">Baki Semasa (Fee):</span>
                     <span className="font-mono font-bold text-red-600">{formatRM(paymentRecord.bakiFeeTerkini)}</span>
                   </div>
                   {(paymentRecord.bakiMileage || 0) > 0 && (
                     <div className="flex justify-between text-sm pt-2 mt-2 border-t border-blue-100 italic">
-                      <span className="text-zinc-500 dark:text-zinc-400">Baki Semasa (Mileage):</span>
+                      <span className="text-[#71717a] dark:text-[#a1a1aa]">Baki Semasa (Mileage):</span>
                       <span className="font-mono font-bold text-red-600">{formatRM(paymentRecord.bakiMileage || 0)}</span>
                     </div>
                   )}
@@ -3564,7 +3598,7 @@ export default function App() {
                 <form onSubmit={handleUpdatePayment} className="space-y-5">
                   <div>
                     <div className="flex justify-between items-center mb-2">
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] uppercase tracking-wider">
                         Jumlah Bayaran Fee (RM)
                       </label>
                       <button
@@ -3580,14 +3614,14 @@ export default function App() {
                     </div>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <span className="text-zinc-500 dark:text-zinc-400 font-mono text-sm">RM</span>
+                        <span className="text-[#71717a] dark:text-[#a1a1aa] font-mono text-sm">RM</span>
                       </div>
                       <input
                         type="number"
                         step="0.01"
                         min="0"
                         max={paymentRecord.bakiFeeTerkini}
-                        className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-zinc-200 dark:border-zinc-800 focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950`}
+                        className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-[#e4e4e7]  focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b]  bg-[#ffffff] dark:bg-zinc-950`}
                         placeholder="0.00"
                         value={paymentAmount}
                         onChange={(e) => {
@@ -3598,7 +3632,7 @@ export default function App() {
                       />
                     </div>
                     {paymentAmount && !isNaN(parseFloat(paymentAmount)) && (
-                      <div className="mt-2 text-[11px] font-medium text-zinc-500 dark:text-zinc-400 flex items-center justify-between bg-zinc-50 dark:bg-zinc-900 px-3 py-2 rounded-md">
+                      <div className="mt-2 text-[11px] font-medium text-[#71717a] dark:text-[#a1a1aa] flex items-center justify-between bg-[#fafafa] dark:bg-zinc-900 px-3 py-2 rounded-md">
                         <span>Baki Selepas Bayaran (Fee):</span>
                         <span className="text-blue-600 dark:text-blue-400 font-bold">
                           RM {Math.max(0, paymentRecord.bakiFeeTerkini - parseFloat(paymentAmount)).toFixed(2)}
@@ -3610,7 +3644,7 @@ export default function App() {
                   {(paymentRecord.bakiMileage || 0) > 0 && (
                     <div>
                       <div className="flex justify-between items-center mb-2">
-                      <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] uppercase tracking-wider">
                         Jumlah Bayaran Mileage (RM)
                       </label>
                       <button
@@ -3626,14 +3660,14 @@ export default function App() {
                     </div>
                       <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <span className="text-zinc-500 dark:text-zinc-400 font-mono text-sm">RM</span>
+                          <span className="text-[#71717a] dark:text-[#a1a1aa] font-mono text-sm">RM</span>
                         </div>
                         <input
                           type="number"
                           step="0.01"
                           min="0"
                           max={paymentRecord.bakiMileage}
-                          className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-zinc-200 dark:border-zinc-800 focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950`}
+                          className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-[#e4e4e7]  focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b]  bg-[#ffffff] dark:bg-zinc-950`}
                           placeholder="0.00"
                           value={paymentMileageAmount}
                           onChange={(e) => {
@@ -3643,7 +3677,7 @@ export default function App() {
                         />
                       </div>
                       {paymentMileageAmount && !isNaN(parseFloat(paymentMileageAmount)) && (
-                        <div className="mt-2 text-[11px] font-medium text-zinc-500 dark:text-zinc-400 flex items-center justify-between bg-zinc-50 dark:bg-zinc-900 px-3 py-2 rounded-md">
+                        <div className="mt-2 text-[11px] font-medium text-[#71717a] dark:text-[#a1a1aa] flex items-center justify-between bg-[#fafafa] dark:bg-zinc-900 px-3 py-2 rounded-md">
                           <span>Baki Selepas Bayaran (Mileage):</span>
                           <span className="text-blue-600 dark:text-blue-400 font-bold">
                             RM {Math.max(0, paymentRecord.bakiMileage - parseFloat(paymentMileageAmount)).toFixed(2)}
@@ -3657,25 +3691,25 @@ export default function App() {
                     <p className="mt-1.5 text-xs text-red-500 font-medium">{paymentError}</p>
                   )}
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                       Tarikh Bayaran
                     </label>
                     <input
                       type="date"
                       required
-                      className="pl-3 pr-4 py-2.5 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100"
+                      className="pl-3 pr-4 py-2.5 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] "
                       value={paymentDate}
                       onChange={(e) => setPaymentDate(e.target.value)}
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                       Kaedah Bayaran
                     </label>
                     <div className="relative">
                       <select
                         required
-                        className="pl-3 pr-8 py-2.5 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100 appearance-none"
+                        className="pl-3 pr-8 py-2.5 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b]  appearance-none"
                         value={paymentMethod}
                         onChange={(e) => setPaymentMethod(e.target.value)}
                       >
@@ -3684,27 +3718,27 @@ export default function App() {
                         <option value="QR">QR</option>
                       </select>
                       <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                        <ChevronDown size={14} className="text-zinc-400" />
+                        <ChevronDown size={14} className="text-[#a1a1aa]" />
                       </div>
                     </div>
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
                       Nota Bayaran
                     </label>
                     <input
                       type="text"
-                      className="pl-3 pr-4 py-2.5 w-full border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm bg-white dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-zinc-900 dark:text-zinc-100"
+                      className="pl-3 pr-4 py-2.5 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] "
                       placeholder="Contoh: Bayaran pendahuluan, ansuran ke-2, dll."
                       value={paymentNote}
                       onChange={(e) => setPaymentNote(e.target.value)}
                     />
                   </div>
-                  <div className="flex justify-end gap-3 pt-6 border-t border-zinc-100 dark:border-zinc-800/50 mt-6">
+                  <div className="flex justify-end gap-3 pt-6 border-t border-[#f4f4f5] /50 mt-6">
                     <button 
                       type="button" 
                       onClick={() => setPaymentRecord(null)}
-                      className="px-5 py-2.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
+                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
                     >
                       Batal
                     </button>
@@ -3723,31 +3757,179 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Statement Modal & Print Layout */}
+      {/* Invoice / Quotation Modal & Print Layout */}
       <AnimatePresence>
-        {statementRecord && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:static print:bg-white print:p-0 print:block">
+        {invoiceRecord && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:static print:bg-[#ffffff] print:p-0 print:block">
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-3xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-3xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
             >
-              <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 print:hidden">
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-                  <Printer size={18} className="text-zinc-600 dark:text-zinc-400" />
+              <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 print:hidden">
+                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
+                  <FileText size={18} className="text-[#52525b] dark:text-[#a1a1aa]" />
+                  Pratinjau: {invoiceType === 'INVOIS' ? 'Invois (Bil Tuntutan)' : 'Sebut Harga'}
+                </h3>
+                <button onClick={() => setInvoiceRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-4 sm:p-5 flex flex-col sm:flex-row gap-4 items-center justify-between border-b border-[#f4f4f5]  bg-[#ffffff] dark:bg-zinc-900 print:hidden shrink-0">
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <button
+                    onClick={() => setInvoiceType('INVOIS')}
+                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-colors ${invoiceType === 'INVOIS' ? 'bg-blue-600 text-white shadow-sm' : 'bg-zinc-100 text-[#3f3f46] hover:bg-zinc-200 dark:bg-zinc-800  dark:hover:bg-zinc-700'}`}
+                  >
+                    Invois
+                  </button>
+                  <button
+                    onClick={() => setInvoiceType('SEBUT HARGA')}
+                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-colors ${invoiceType === 'SEBUT HARGA' ? 'bg-blue-600 text-white shadow-sm' : 'bg-zinc-100 text-[#3f3f46] hover:bg-zinc-200 dark:bg-zinc-800  dark:hover:bg-zinc-700'}`}
+                  >
+                    Sebut Harga
+                  </button>
+                </div>
+                
+                <button
+                  onClick={handleDownloadInvoicePDF}
+                  disabled={isGeneratingInvoicePDF}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                >
+                  {isGeneratingInvoicePDF ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                  <span>{isGeneratingInvoicePDF ? 'Menjana PDF...' : 'Muat Turun PDF'}</span>
+                </button>
+              </div>
+
+              <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-zinc-100 dark:bg-zinc-950 flex items-start justify-center print:bg-[#ffffff] print:p-0 print:overflow-visible print:block">
+                {(() => {
+                  const totalFeePayments = invoiceRecord.paymentHistory?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+                  const totalMileagePayments = invoiceRecord.paymentHistory?.reduce((sum, p) => sum + (p.mileageAmount || 0), 0) || 0;
+                  const originalFee = invoiceRecord.bakiFeeTerkini + totalFeePayments;
+                  const originalMileage = invoiceRecord.bakiMileage !== undefined ? (invoiceRecord.bakiMileage + totalMileagePayments) : 0;
+                  const totalAgreed = originalFee + originalMileage;
+                  const totalPaid = totalFeePayments + totalMileagePayments;
+                  const currentBalance = invoiceRecord.bakiFeeTerkini + (invoiceRecord.bakiMileage || 0);
+
+                  return (
+                    <div ref={invoicePrintRef} className="w-[794px] h-[1122px] mx-auto font-sans text-[#000000] bg-[#ffffff] flex flex-col p-10 shrink-0 shadow-xl print:shadow-none print:p-0 relative">
+                      {/* Header */}
+                      <div className="flex items-center pb-6 border-b-2 border-[#000000] mb-8 gap-6">
+                        <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-[75px] w-auto" alt="Logo" />
+                        <div className="flex-1">
+                          <h1 className="text-[18px] font-bold uppercase m-0 leading-tight">TETUAN HAIRI MUSTAFA & ASSOCIATES</h1>
+                          <p className="text-[11px] font-bold italic m-0 mt-0.5 text-[#222]">PEGUAM SYARIE * PESURUHJAYA SUMPAH</p>
+                          <div className="text-[11px] mt-1 leading-[1.3]">
+                            <p className="m-0">LOT 02, BANGUNAN ARKED MARA, 09100 BALING, KEDAH</p>
+                            <p className="m-0">TEL: 010-2434143 / 011-56531310 | EMAIL: tetuanhairi@gmail.com</p>
+                          </div>
+                        </div>
+                        <div className="text-right whitespace-nowrap">
+                          <h2 className="text-2xl font-bold tracking-tight uppercase mb-1">{invoiceType === 'INVOIS' ? 'INVOIS' : 'SEBUT HARGA'}</h2>
+                          <p className="text-[13px] font-mono mt-1">No: {invoiceType === 'INVOIS' ? 'INV' : 'QT'}-{invoiceRecord.id.substring(0, 6).toUpperCase()}</p>
+                          <p className="text-[13px] font-mono">Tarikh: {formatDateDMY(new Date().toISOString().split('T')[0])}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-start mb-8 text-sm">
+                        <div>
+                          <p className="font-bold uppercase tracking-wider text-[#000000] mb-1">Kepada:</p>
+                          <p className="font-bold text-[16px] text-[#000000] uppercase mb-1">{invoiceRecord.nama}</p>
+                          {invoiceRecord.phone && <p className="text-[#000000]">No. Tel: {invoiceRecord.phone}</p>}
+                          {invoiceRecord.alamat && <p className="text-[#000000] max-w-xs">{invoiceRecord.alamat}</p>}
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold uppercase tracking-wider text-[#000000] mb-1">Maklumat Kes:</p>
+                          <p className="text-[#000000] font-medium">{invoiceRecord.kes}</p>
+                        </div>
+                      </div>
+
+                      <div className="border-t-[3px] border-b-[3px] border-[#d1d5db] mb-8 flex-1">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b-2 border-[#d1d5db]">
+                              <th className="py-3 px-4 font-bold text-left uppercase">Perkara / Butiran</th>
+                              <th className="py-3 px-4 font-bold text-right uppercase w-[200px] border-l-2 border-[#d1d5db]">Jumlah (RM)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td className="py-4 px-4 font-medium text-[#000000] uppercase">Yuran Guaman (Fee)</td>
+                              <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-[#d1d5db]">{originalFee.toFixed(2)}</td>
+                            </tr>
+                            {originalMileage > 0 && (
+                              <tr>
+                                <td className="py-4 px-4 font-medium text-[#000000] uppercase">Tuntutan Perjalanan (Mileage)</td>
+                                <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-[#d1d5db]">{originalMileage.toFixed(2)}</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="text-right space-y-4 mb-12">
+                        <div className="text-sm font-bold text-[#000000] flex justify-end gap-12">
+                          <span>JUMLAH KESELURUHAN:</span>
+                          <span className="w-32">RM {totalAgreed.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                        </div>
+                        {invoiceType === 'INVOIS' && totalPaid > 0 && (
+                          <div className="text-sm font-bold text-[#000000] flex justify-end gap-12">
+                            <span>TOLAK BAYARAN DITERIMA:</span>
+                            <span className="w-32">- RM {totalPaid.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                          </div>
+                        )}
+                        <div className="text-sm font-bold text-[#000000] flex justify-end gap-12 pt-3 border-t border-[#d1d5db]">
+                          <span>{invoiceType === 'INVOIS' ? 'BAKI PERLU DIBAYAR:' : 'JUMLAH SEBUT HARGA:'}</span>
+                          <span className="w-32 text-lg">RM {(invoiceType === 'INVOIS' ? currentBalance : totalAgreed).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end pt-12">
+                        <div className="text-center">
+                          <div className="h-[85px]"></div>
+                          <p className="font-bold text-sm text-[#18181b] uppercase">Hairi Mustafa & Associates</p>
+                          <p className="text-xs text-[#71717a] mt-1">Peguam Syarie & Pesuruhjaya Sumpah</p>
+                        </div>
+                      </div>
+                      <div className="mt-12 pt-6 border-t border-dashed border-[#d4d4d8] text-center text-[10px] text-[#71717a] italic">
+                        Dokumen ini dijana oleh komputer. Tandatangan tidak diperlukan.
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Statement Modal & Print Layout */}
+      <AnimatePresence>
+        {statementRecord && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 /60 backdrop-blur-sm print:static print:bg-[#ffffff] print:p-0 print:block">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="bg-[#ffffff]  rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-3xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
+            >
+              <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 /50 print:hidden">
+                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
+                  <Printer size={18} className="text-[#52525b] " />
                   Pratinjau Penyata Penuh
                 </h3>
-                <button onClick={() => setStatementRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setStatementRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] :text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 :bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
  
- <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-zinc-100 dark:bg-zinc-950 flex items-start justify-center print:bg-white print:p-0 print:overflow-visible print:block">
+ <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-zinc-100  flex items-start justify-center print:bg-[#ffffff] print:p-0 print:overflow-visible print:block">
  {/* Printable Area Starts */}
- <div ref={printRef} className="w-full min-w-[700px] mx-auto font-sans text-black bg-white print:min-w-0 print:w-full print:p-0">
+ <div ref={printRef} className="w-full min-w-[700px] mx-auto font-sans text-[#000000] bg-[#ffffff] print:min-w-0 print:w-full print:p-0">
  {/* Header */}
- <div className="flex items-center pb-6 border-b-2 border-black mb-8 gap-6">
+ <div className="flex items-center pb-6 border-b-2 border-[#000000] mb-8 gap-6">
  <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-[75px] w-auto" alt="Logo" />
  <div className="flex-1">
  <h1 className="text-[18px] font-bold uppercase m-0 leading-tight">TETUAN HAIRI MUSTAFA & ASSOCIATES</h1>
@@ -3765,35 +3947,35 @@ export default function App() {
  </div>
 
  {/* Client Info */}
- <div className="flex justify-between items-start text-sm mb-10 bg-white p-6  border border-gray-300 ">
+ <div className="flex justify-between items-start text-sm mb-10 bg-[#ffffff] p-6  border border-[#d1d5db] ">
  <div>
- <p className="text-xs font-bold text-black uppercase tracking-wider mb-2">Kepada</p>
- <p className="font-bold text-black text-lg mb-1">{statementRecord.nama}</p>
- <p className="text-black font-medium">Kategori Kes: {statementRecord.kes}</p>
+ <p className="text-xs font-bold text-[#000000] uppercase tracking-wider mb-2">Kepada</p>
+ <p className="font-bold text-[#000000] text-lg mb-1">{statementRecord.nama}</p>
+ <p className="text-[#000000] font-medium">Kategori Kes: {statementRecord.kes}</p>
  </div>
  <div className="text-right">
- <p className="text-xs font-bold text-black uppercase tracking-wider mb-2">Ringkasan Baki</p>
- <p className="text-3xl font-bold font-mono text-black ">{formatRM(statementRecord.bakiFeeTerkini)}</p>
- <p className="text-black font-medium text-xs mt-1">Jumlah Perlu Dibayar</p>
+ <p className="text-xs font-bold text-[#000000] uppercase tracking-wider mb-2">Ringkasan Baki</p>
+ <p className="text-3xl font-bold font-mono text-[#000000] ">{formatRM(statementRecord.bakiFeeTerkini)}</p>
+ <p className="text-[#000000] font-medium text-xs mt-1">Jumlah Perlu Dibayar</p>
  </div>
  </div>
 
  {/* Cost Breakdown */}
  <div className="mb-10">
- <h3 className="text-sm font-bold text-black uppercase tracking-wider mb-4 border-b border-gray-300 pb-2">Perincian Kos & Tuntutan</h3>
+ <h3 className="text-sm font-bold text-[#000000] uppercase tracking-wider mb-4 border-b border-[#d1d5db] pb-2">Perincian Kos & Tuntutan</h3>
  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
- <div className="p-5 border border-gray-300  bg-white ">
- <p className="text-xs font-bold text-black uppercase tracking-wider mb-3 border-b border-gray-300 pb-2">Yuran Profesional</p>
+ <div className="p-5 border border-[#d1d5db]  bg-[#ffffff] ">
+ <p className="text-xs font-bold text-[#000000] uppercase tracking-wider mb-3 border-b border-[#d1d5db] pb-2">Yuran Profesional</p>
  <div className="flex justify-between items-center space-y-2">
- <span className="text-sm font-medium text-black ">Jumlah Yuran Keseluruhan</span>
- <span className="font-mono font-bold text-black ">{formatRM(statementRecord.totalFee)}</span>
+ <span className="text-sm font-medium text-[#000000] ">Jumlah Yuran Keseluruhan</span>
+ <span className="font-mono font-bold text-[#000000] ">{formatRM(statementRecord.totalFee)}</span>
  </div>
  </div>
- <div className="p-5 border border-gray-300  bg-white ">
- <p className="text-xs font-bold text-black uppercase tracking-wider mb-3 border-b border-gray-300 pb-2">Tuntutan Perjalanan</p>
+ <div className="p-5 border border-[#d1d5db]  bg-[#ffffff] ">
+ <p className="text-xs font-bold text-[#000000] uppercase tracking-wider mb-3 border-b border-[#d1d5db] pb-2">Tuntutan Perjalanan</p>
  <div className="flex justify-between items-center space-y-2">
- <span className="text-sm font-medium text-black ">Tuntutan Mileage</span>
- <span className="font-mono font-bold text-amber-600">{formatRM(statementRecord.bakiMileage)}</span>
+ <span className="text-sm font-medium text-[#000000] ">Tuntutan Mileage</span>
+ <span className="font-mono font-bold text-[#d97706]">{formatRM(statementRecord.bakiMileage)}</span>
  </div>
  </div>
  </div>
@@ -3801,41 +3983,41 @@ export default function App() {
 
  {/* Summary Table */}
  <div className="mb-10">
- <h3 className="text-sm font-bold text-black uppercase tracking-wider mb-4 border-b border-gray-300 pb-2">Ringkasan Yuran</h3>
- <div className="border border-gray-300  overflow-x-auto print:overflow-visible">
+ <h3 className="text-sm font-bold text-[#000000] uppercase tracking-wider mb-4 border-b border-[#d1d5db] pb-2">Ringkasan Yuran</h3>
+ <div className="border border-[#d1d5db]  overflow-x-auto print:overflow-visible">
  <table className="w-full text-sm min-w-[300px]">
- <tbody className="divide-y divide-gray-300 ">
- <tr className="hover:bg-white transition-colors">
- <td className="py-4 px-5 text-black font-medium whitespace-nowrap w-2/3">Jumlah Yuran Keseluruhan</td>
- <td className="py-4 px-5 text-right font-mono font-bold text-black ">{formatRM(statementRecord.totalFee)}</td>
+ <tbody className="divide-y divide-[#d1d5db] ">
+ <tr className="hover:bg-[#ffffff] transition-colors">
+ <td className="py-4 px-5 text-[#000000] font-medium whitespace-nowrap w-2/3">Jumlah Yuran Keseluruhan</td>
+ <td className="py-4 px-5 text-right font-mono font-bold text-[#000000] ">{formatRM(statementRecord.totalFee)}</td>
  </tr>
- <tr className="hover:bg-white transition-colors bg-gray-100 ">
- <td className="py-4 px-5 text-black font-medium">Baki Mileage / Tuntutan Perjalanan</td>
- <td className="py-4 px-5 text-right font-mono text-amber-600 font-medium">{formatRM(statementRecord.bakiMileage)}</td>
+ <tr className="hover:bg-[#ffffff] transition-colors bg-[#f3f4f6] ">
+ <td className="py-4 px-5 text-[#000000] font-medium">Baki Mileage / Tuntutan Perjalanan</td>
+ <td className="py-4 px-5 text-right font-mono text-[#d97706] font-medium">{formatRM(statementRecord.bakiMileage)}</td>
  </tr>
  {statementRecord.paymentHistory && statementRecord.paymentHistory.length > 0 && (
  <>
- <tr className="hover:bg-white transition-colors bg-gray-100 ">
- <td className="py-4 px-5 text-black font-medium">Jumlah Pembayaran Diterima (Fee)</td>
- <td className="py-4 px-5 text-right font-mono text-emerald-600 font-medium">
+ <tr className="hover:bg-[#ffffff] transition-colors bg-[#f3f4f6] ">
+ <td className="py-4 px-5 text-[#000000] font-medium">Jumlah Pembayaran Diterima (Fee)</td>
+ <td className="py-4 px-5 text-right font-mono text-[#059669] font-medium">
  -{formatRM(statementRecord.paymentHistory.reduce((acc, curr) => acc + (curr.amount || 0), 0))}
  </td>
  </tr>
  {statementRecord.paymentHistory.some(p => (p.mileageAmount || 0) > 0) && (
- <tr className="hover:bg-white transition-colors bg-gray-100 border-t border-gray-300 ">
- <td className="py-4 px-5 text-black font-medium">Jumlah Pembayaran Diterima (Mileage)</td>
- <td className="py-4 px-5 text-right font-mono text-emerald-600 font-medium">
+ <tr className="hover:bg-[#ffffff] transition-colors bg-[#f3f4f6] border-t border-[#d1d5db] ">
+ <td className="py-4 px-5 text-[#000000] font-medium">Jumlah Pembayaran Diterima (Mileage)</td>
+ <td className="py-4 px-5 text-right font-mono text-[#059669] font-medium">
  -{formatRM(statementRecord.paymentHistory.reduce((acc, curr) => acc + (curr.mileageAmount || 0), 0))}
  </td>
  </tr>
  )}
  </>
  )}
- <tr className="bg-gray-200 text-black">
+ <tr className="bg-[#e5e7eb] text-[#000000]">
  <td className="py-3 px-5 font-bold text-sm tracking-wide">BAKI TERKINI (FEE)</td>
  <td className="py-3 px-5 text-right font-mono font-bold text-lg">{formatRM(statementRecord.bakiFeeTerkini)}</td>
  </tr>
- <tr className="bg-gray-200 text-black border-t border-gray-300">
+ <tr className="bg-[#e5e7eb] text-[#000000] border-t border-[#d1d5db]">
  <td className="py-3 px-5 font-bold text-sm tracking-wide">BAKI TERKINI (MILEAGE)</td>
  <td className="py-3 px-5 text-right font-mono font-bold text-lg">{formatRM(statementRecord.bakiMileage || 0)}</td>
  </tr>
@@ -3846,42 +4028,42 @@ export default function App() {
 
  {/* Payment History */}
  <div>
- <h3 className="text-sm font-bold text-black uppercase tracking-wider mb-4 border-b border-gray-300 pb-2">Rekod Pembayaran</h3>
+ <h3 className="text-sm font-bold text-[#000000] uppercase tracking-wider mb-4 border-b border-[#d1d5db] pb-2">Rekod Pembayaran</h3>
  {statementRecord.paymentHistory && statementRecord.paymentHistory.length > 0 ? (
- <div className="border border-gray-300  overflow-x-auto print:overflow-visible">
+ <div className="border border-[#d1d5db]  overflow-x-auto print:overflow-visible">
  <table className="w-full text-sm text-left min-w-[500px]">
- <thead className="bg-white border-b border-gray-300 ">
+ <thead className="bg-[#ffffff] border-b border-[#d1d5db] ">
  <tr>
- <th className="py-3 px-5 font-semibold text-black ">Tarikh</th>
- <th className="py-3 px-5 font-semibold text-black ">No. Rujukan</th>
- <th className="py-3 px-5 font-semibold text-black ">Kaedah</th>
- <th className="py-3 px-5 font-semibold text-black text-right">Fee (RM)</th>
- <th className="py-3 px-5 font-semibold text-black text-right">Mileage (RM)</th>
+ <th className="py-3 px-5 font-semibold text-[#000000] ">Tarikh</th>
+ <th className="py-3 px-5 font-semibold text-[#000000] ">No. Rujukan</th>
+ <th className="py-3 px-5 font-semibold text-[#000000] ">Kaedah</th>
+ <th className="py-3 px-5 font-semibold text-[#000000] text-right">Fee (RM)</th>
+ <th className="py-3 px-5 font-semibold text-[#000000] text-right">Mileage (RM)</th>
  </tr>
  </thead>
- <tbody className="divide-y divide-gray-300 ">
+ <tbody className="divide-y divide-[#d1d5db] ">
  {statementRecord.paymentHistory.map((payment) => (
- <tr key={payment.id} className="hover:bg-white transition-colors">
- <td className="py-3 px-5 text-black ">{formatDateDMY(payment.date)}</td>
- <td className="py-3 px-5 text-black font-mono text-xs">{payment.id}</td>
- <td className="py-3 px-5 text-black ">{payment.method}</td>
- <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">{formatRM(payment.amount || 0)}</td>
- <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">{formatRM(payment.mileageAmount || 0)}</td>
+ <tr key={payment.id} className="hover:bg-[#ffffff] transition-colors">
+ <td className="py-3 px-5 text-[#000000] ">{formatDateDMY(payment.date)}</td>
+ <td className="py-3 px-5 text-[#000000] font-mono text-xs">{payment.id}</td>
+ <td className="py-3 px-5 text-[#000000] ">{payment.method}</td>
+ <td className="py-3 px-5 text-right font-mono font-medium text-[#059669]">{formatRM(payment.amount || 0)}</td>
+ <td className="py-3 px-5 text-right font-mono font-medium text-[#059669]">{formatRM(payment.mileageAmount || 0)}</td>
  </tr>
  ))}
  </tbody>
  </table>
  </div>
  ) : (
- <div className="text-center p-8 border border-dashed border-gray-300  bg-white text-black text-sm">
+ <div className="text-center p-8 border border-dashed border-[#d1d5db]  bg-[#ffffff] text-[#000000] text-sm">
  Tiada rekod pembayaran didapati untuk akaun ini.
  </div>
  )}
  </div>
 
  {/* Footer */}
- <div className="pt-16 mt-16 text-xs text-center text-black border-t border-gray-300 ">
- <p className="font-medium text-black text-sm mb-2">Terima kasih atas urusan bersama kami.</p>
+ <div className="pt-16 mt-16 text-xs text-center text-[#000000] border-t border-[#d1d5db] ">
+ <p className="font-medium text-[#000000] text-sm mb-2">Terima kasih atas urusan bersama kami.</p>
                     <p>Penyata rasmi ini merupakan janaan komputer dan sah tanpa tandatangan fizikal.</p>
                     <p>Sila kemukakan sebarang pertanyaan mengenai penyata ini dalam tempoh 14 hari dari tarikh dikeluarkan.</p>
                   </div>
@@ -3889,18 +4071,18 @@ export default function App() {
                 {/* Printable Area Ends */}
               </div>
 
-              <div className="p-5 border-t border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 flex justify-end gap-3 print:hidden">
+              <div className="p-5 border-t border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 flex justify-end gap-3 print:hidden">
                 <button 
                   onClick={() => setStatementRecord(null)}
-                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800 text-[#52525b]  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                 >
                   Tutup
                 </button>
                 <button 
                   onClick={handlePrint}
-                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
+                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-950 hover:bg-[#fafafa] dark:hover:bg-zinc-800 text-[#3f3f46] dark:text-[#e4e4e7] font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
                 >
-                  <Printer size={16} className="text-zinc-500" />
+                  <Printer size={16} className="text-[#71717a]" />
                   Cetak
                 </button>
                 <button 
@@ -3929,29 +4111,29 @@ export default function App() {
       {/* Simple Statement Modal & Print Layout */}
       <AnimatePresence>
         {simpleStatementRecord && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:static print:bg-white print:p-0 print:block">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:static print:bg-[#ffffff] print:p-0 print:block">
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-3xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-3xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
             >
-              <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 print:hidden">
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-                  <Printer size={18} className="text-zinc-600 dark:text-zinc-400" />
+              <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 print:hidden">
+                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
+                  <Printer size={18} className="text-[#52525b] dark:text-[#a1a1aa]" />
                   Pratinjau Penyata Ringkas
                 </h3>
-                <button onClick={() => setSimpleStatementRecord(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setSimpleStatementRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
 
-              <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
+              <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-[#ffffff] print:p-0 print:overflow-visible print:block">
                 {/* Printable Area Starts */}
-                <div ref={simplePrintRef} className="w-full min-w-[700px] mx-auto font-sans text-black bg-white print:min-w-0 print:w-full print:p-0">
+                <div ref={simplePrintRef} className="w-full min-w-[700px] mx-auto font-sans text-[#000000] bg-[#ffffff] print:min-w-0 print:w-full print:p-0">
                   
                   {/* Header */}
-                  <div className="flex items-center pb-6 border-b-2 border-black mb-8 gap-6">
+                  <div className="flex items-center pb-6 border-b-2 border-[#000000] mb-8 gap-6">
                     <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-[75px] w-auto" alt="Logo" />
                     <div className="flex-1">
                       <h1 className="text-[18px] font-bold uppercase m-0 leading-tight">TETUAN HAIRI MUSTAFA & ASSOCIATES</h1>
@@ -3969,16 +4151,16 @@ export default function App() {
                   </div>
 
                   {/* Client Info */}
-                  <div className="flex justify-between items-start text-sm mb-10 bg-white p-6 border border-gray-300">
+                  <div className="flex justify-between items-start text-sm mb-10 bg-[#ffffff] p-6 border border-[#d1d5db]">
                     <div>
-                      <p className="text-xs font-bold text-black uppercase tracking-wider mb-2">Kepada</p>
-                      <p className="font-bold text-black text-lg mb-1">{simpleStatementRecord.nama}</p>
-                      <p className="text-black font-medium">Kategori Kes: {simpleStatementRecord.kes}</p>
+                      <p className="text-xs font-bold text-[#000000] uppercase tracking-wider mb-2">Kepada</p>
+                      <p className="font-bold text-[#000000] text-lg mb-1">{simpleStatementRecord.nama}</p>
+                      <p className="text-[#000000] font-medium">Kategori Kes: {simpleStatementRecord.kes}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs font-bold text-black uppercase tracking-wider mb-2">Baki Terkini</p>
-                      <p className="text-3xl font-bold font-mono text-black">{formatRM(simpleStatementRecord.bakiFeeTerkini)}</p>
-                      <p className="text-black font-medium text-xs mt-1">
+                      <p className="text-xs font-bold text-[#000000] uppercase tracking-wider mb-2">Baki Terkini</p>
+                      <p className="text-3xl font-bold font-mono text-[#000000]">{formatRM(simpleStatementRecord.bakiFeeTerkini)}</p>
+                      <p className="text-[#000000] font-medium text-xs mt-1">
                         Tarikh Terakhir Bayaran: {simpleStatementRecord.paymentHistory && simpleStatementRecord.paymentHistory.length > 0 
                           ? formatDateDMY([...simpleStatementRecord.paymentHistory].sort((a: any, b: any) => parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime())[0].date)
                           : '-'}
@@ -3988,31 +4170,31 @@ export default function App() {
 
                   {/* Payment History */}
                   <div>
-                    <h3 className="text-sm font-bold text-black uppercase tracking-wider mb-4 border-b border-gray-300 pb-2">Senarai Sejarah Bayaran</h3>
+                    <h3 className="text-sm font-bold text-[#000000] uppercase tracking-wider mb-4 border-b border-[#d1d5db] pb-2">Senarai Sejarah Bayaran</h3>
                     {simpleStatementRecord.paymentHistory && simpleStatementRecord.paymentHistory.length > 0 ? (
-                      <div className="border border-gray-300 overflow-x-auto print:overflow-visible">
+                      <div className="border border-[#d1d5db] overflow-x-auto print:overflow-visible">
                         <table className="w-full text-sm text-left min-w-[500px]">
-                          <thead className="bg-white border-b border-gray-300">
+                          <thead className="bg-[#ffffff] border-b border-[#d1d5db]">
                             <tr>
-                              <th className="py-3 px-5 font-semibold text-black">Tarikh</th>
-                              <th className="py-3 px-5 font-semibold text-black">No. Rujukan</th>
-                              <th className="py-3 px-5 font-semibold text-black">Kaedah</th>
-                              <th className="py-3 px-5 font-semibold text-black text-right">Fee (RM)</th>
-                              <th className="py-3 px-5 font-semibold text-black text-right">Mileage (RM)</th>
+                              <th className="py-3 px-5 font-semibold text-[#000000]">Tarikh</th>
+                              <th className="py-3 px-5 font-semibold text-[#000000]">No. Rujukan</th>
+                              <th className="py-3 px-5 font-semibold text-[#000000]">Kaedah</th>
+                              <th className="py-3 px-5 font-semibold text-[#000000] text-right">Fee (RM)</th>
+                              <th className="py-3 px-5 font-semibold text-[#000000] text-right">Mileage (RM)</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-gray-300">
+                          <tbody className="divide-y divide-[#d1d5db]">
                             {[...simpleStatementRecord.paymentHistory]
                               .sort((a: any, b: any) => parseDateObj(a.date).getTime() - parseDateObj(b.date).getTime())
                               .map((payment) => (
-                              <tr key={payment.id} className="hover:bg-white transition-colors">
-                                <td className="py-3 px-5 text-black">{formatDateDMY(payment.date)}</td>
-                                <td className="py-3 px-5 text-black font-mono text-xs">{payment.id}</td>
-                                <td className="py-3 px-5 text-black">{payment.method}</td>
-                                <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">
+                              <tr key={payment.id} className="hover:bg-[#ffffff] transition-colors">
+                                <td className="py-3 px-5 text-[#000000]">{formatDateDMY(payment.date)}</td>
+                                <td className="py-3 px-5 text-[#000000] font-mono text-xs">{payment.id}</td>
+                                <td className="py-3 px-5 text-[#000000]">{payment.method}</td>
+                                <td className="py-3 px-5 text-right font-mono font-medium text-[#059669]">
                                   {formatRM(payment.amount || 0)}
                                 </td>
-                                <td className="py-3 px-5 text-right font-mono font-medium text-amber-600">
+                                <td className="py-3 px-5 text-right font-mono font-medium text-[#d97706]">
                                   {formatRM(payment.mileageAmount || 0)}
                                 </td>
                               </tr>
@@ -4021,7 +4203,7 @@ export default function App() {
                         </table>
                       </div>
                     ) : (
-                      <div className="p-8 text-center text-gray-500 border border-gray-300 bg-gray-50">
+                      <div className="p-8 text-center text-gray-500 border border-[#d1d5db] bg-[#f9fafb]">
                         Tiada rekod bayaran buat masa ini.
                       </div>
                     )}
@@ -4031,18 +4213,18 @@ export default function App() {
                 {/* Printable Area Ends */}
               </div>
 
-              <div className="p-5 border-t border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 flex justify-end gap-3 print:hidden">
+              <div className="p-5 border-t border-[#f4f4f5] /50 bg-[#fafafa]/50 /50 flex justify-end gap-3 print:hidden">
                 <button 
                   onClick={() => setSimpleStatementRecord(null)}
-                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-zinc-100/50 :bg-zinc-800 text-[#52525b]  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                 >
                   Tutup
                 </button>
                 <button 
                   onClick={handlePrint}
-                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
+                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg bg-[#ffffff]  hover:bg-[#fafafa] :bg-zinc-800 text-[#3f3f46]  font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
                 >
-                  <Printer size={16} className="text-zinc-500" />
+                  <Printer size={16} className="text-[#71717a]" />
                   Cetak
                 </button>
                 <button 
@@ -4070,36 +4252,36 @@ export default function App() {
 
       <AnimatePresence>
         {receiptData && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:static print:bg-white print:p-0 print:block">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:static print:bg-[#ffffff] print:p-0 print:block">
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden print:shadow-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden print:shadow-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
             >
-              <div className="p-5 border-b border-zinc-100 dark:border-zinc-800/50 flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-900/50 print:hidden">
+              <div className="p-5 border-b border-[#f4f4f5] /50 flex justify-between items-center bg-[#fafafa]/50 dark:bg-zinc-900/50 print:hidden">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8  bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center">
                     <Printer size={16} className="text-blue-500" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">Cetak Resit</h3>
-                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono tracking-wider">REF: {receiptData.payment.id}</p>
+                    <h3 className="font-semibold text-[#18181b] ">Cetak Resit</h3>
+                    <p className="text-[11px] text-[#71717a] dark:text-[#a1a1aa] font-mono tracking-wider">REF: {receiptData.payment.id}</p>
                   </div>
                 </div>
                 <button 
                   onClick={() => setReceiptData(null)}
-                  className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer"
+                  className="p-1.5 text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer"
                 >
                   <X size={18} />
                 </button>
               </div>
  
- <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
+ <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-[#ffffff] print:p-0 print:overflow-visible print:block">
  {/* Printable Area Starts */}
-                <div ref={receiptPrintRef} className="w-[794px] h-[1122px] mx-auto font-sans text-black bg-white flex flex-col p-10 shrink-0 shadow-xl print:shadow-none print:p-0 relative">
+                <div ref={receiptPrintRef} className="w-[794px] h-[1122px] mx-auto font-sans text-[#000000] bg-[#ffffff] flex flex-col p-10 shrink-0 shadow-xl print:shadow-none print:p-0 relative">
                   {/* Header */}
-                  <div className="flex items-center pb-6 border-b-2 border-black mb-8 gap-6">
+                  <div className="flex items-center pb-6 border-b-2 border-[#000000] mb-8 gap-6">
                     <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-[75px] w-auto" alt="Logo" />
                     <div className="flex-1">
                       <h1 className="text-[18px] font-bold uppercase m-0 leading-tight">TETUAN HAIRI MUSTAFA & ASSOCIATES</h1>
@@ -4118,50 +4300,50 @@ export default function App() {
 
                   <div className="flex justify-between items-start mb-8 text-sm">
                     <div>
-                      <p className="font-bold uppercase tracking-wider text-black mb-1">Diterima Daripada:</p>
-                      <p className="font-bold text-[16px] text-black uppercase mb-1">{receiptData.record.nama}</p>
-                      <p className="text-black font-medium">Kategori Kes: {receiptData.record.kes}</p>
+                      <p className="font-bold uppercase tracking-wider text-[#000000] mb-1">Diterima Daripada:</p>
+                      <p className="font-bold text-[16px] text-[#000000] uppercase mb-1">{receiptData.record.nama}</p>
+                      <p className="text-[#000000] font-medium">Kategori Kes: {receiptData.record.kes}</p>
                     </div>
                   </div>
 
-                  <div className="border-t-[3px] border-b-[3px] border-gray-300 mb-8">
+                  <div className="border-t-[3px] border-b-[3px] border-[#d1d5db] mb-8">
  <table className="w-full text-sm">
  <thead>
- <tr className="border-b-2 border-gray-300 ">
+ <tr className="border-b-2 border-[#d1d5db] ">
  <th className="py-3 px-4 font-bold text-left uppercase">Item / Perkara</th>
- <th className="py-3 px-4 font-bold text-right uppercase w-[200px] border-l-2 border-gray-300 ">Jumlah (RM)</th>
+ <th className="py-3 px-4 font-bold text-right uppercase w-[200px] border-l-2 border-[#d1d5db] ">Jumlah (RM)</th>
  </tr>
  </thead>
  <tbody>
  {(receiptData.payment.amount > 0 || (receiptData.payment.amount === 0 && !receiptData.payment.mileageAmount)) && (
  <tr>
- <td className="py-4 px-4 font-medium text-black uppercase">FEE {formatDateDMY(receiptData.payment.date)}</td>
- <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-gray-300 ">{receiptData.payment.amount.toFixed(2)}</td>
+ <td className="py-4 px-4 font-medium text-[#000000] uppercase">FEE {formatDateDMY(receiptData.payment.date)}</td>
+ <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-[#d1d5db] ">{receiptData.payment.amount.toFixed(2)}</td>
  </tr>
  )}
  {!!receiptData.payment.mileageAmount && receiptData.payment.mileageAmount > 0 && (
  <tr>
- <td className="py-4 px-4 font-medium text-black uppercase">MILEAGE {formatDateDMY(receiptData.payment.date)}</td>
- <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-gray-300 ">{receiptData.payment.mileageAmount.toFixed(2)}</td>
+ <td className="py-4 px-4 font-medium text-[#000000] uppercase">MILEAGE {formatDateDMY(receiptData.payment.date)}</td>
+ <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-[#d1d5db] ">{receiptData.payment.mileageAmount.toFixed(2)}</td>
  </tr>
  )}
  {(receiptData.payment.amount > 0 && !!receiptData.payment.mileageAmount && receiptData.payment.mileageAmount > 0) && (
- <tr className="border-t-2 border-gray-300 bg-white ">
- <td className="py-4 px-4 font-bold text-black text-right uppercase">JUMLAH KESELURUHAN (RM)</td>
- <td className="py-4 px-4 font-mono font-bold text-right border-l-2 border-gray-300 ">{(receiptData.payment.amount + receiptData.payment.mileageAmount).toFixed(2)}</td>
+ <tr className="border-t-2 border-[#d1d5db] bg-[#ffffff] ">
+ <td className="py-4 px-4 font-bold text-[#000000] text-right uppercase">JUMLAH KESELURUHAN (RM)</td>
+ <td className="py-4 px-4 font-mono font-bold text-right border-l-2 border-[#d1d5db] ">{(receiptData.payment.amount + receiptData.payment.mileageAmount).toFixed(2)}</td>
  </tr>
  )}
  </tbody>
  </table>
  </div>
 
- <div className="flex justify-between items-start border-b border-gray-300 pb-12 mb-12">
- <div className="text-sm font-bold text-black uppercase flex flex-col gap-2 text-left">
+ <div className="flex justify-between items-start border-b border-[#d1d5db] pb-12 mb-12">
+ <div className="text-sm font-bold text-[#000000] uppercase flex flex-col gap-2 text-left">
    <div>Butiran Kes: <span className="underline underline-offset-4">{receiptData.record.kes}</span></div>
    {receiptData.payment.nota && (
-     <div className="mt-2 normal-case font-normal text-zinc-600 text-[13px] text-left">
-       <span className="font-bold uppercase text-black text-[11px] block mb-0.5">Nota Bayaran:</span>
-       <span className="italic bg-zinc-50 border border-zinc-200 rounded px-2.5 py-1.5 inline-block text-zinc-700 font-mono">{receiptData.payment.nota}</span>
+     <div className="mt-2 normal-case font-normal text-[#52525b] text-[13px] text-left">
+       <span className="font-bold uppercase text-[#000000] text-[11px] block mb-0.5">Nota Bayaran:</span>
+       <span className="italic bg-[#fafafa] border border-[#e4e4e7] rounded px-2.5 py-1.5 inline-block text-[#3f3f46] font-mono">{receiptData.payment.nota}</span>
      </div>
    )}
  </div>
@@ -4183,15 +4365,15 @@ export default function App() {
  <div className="text-right space-y-4">
  {receiptData.payment.amount > 0 && (
  <>
- <div className="text-sm font-bold text-black flex justify-end gap-12">
+ <div className="text-sm font-bold text-[#000000] flex justify-end gap-12">
  <span>JUMLAH BAYARAN (FEE):</span>
  <span className="w-32">RM {receiptData.payment.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
  </div>
- <div className="text-sm font-bold text-black flex justify-end gap-12">
+ <div className="text-sm font-bold text-[#000000] flex justify-end gap-12">
  <span>BAKI TERDAHULU (FEE):</span>
  <span className="w-32">RM {bakiTerdahuluFee.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
  </div>
- <div className="text-sm font-bold text-black flex justify-end gap-12 pt-3 border-t border-gray-300 mb-4">
+ <div className="text-sm font-bold text-[#000000] flex justify-end gap-12 pt-3 border-t border-[#d1d5db] mb-4">
  <span>BAKI TERKINI (FEE):</span>
  <span className="w-32">RM {bakiTerkiniFee.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
@@ -4200,15 +4382,15 @@ export default function App() {
 
                                {hasMileageReceipt && (
                                    <>
-                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                                     <div className="text-sm font-bold text-[#27272a]  flex justify-end gap-12">
                                          <span>JUMLAH BAYARAN (MILEAGE):</span>
                                          <span className="w-32">RM {receiptData.payment.mileageAmount!.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
-                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                                     <div className="text-sm font-bold text-[#27272a]  flex justify-end gap-12">
                                          <span>BAKI TERDAHULU (MILEAGE):</span>
                                          <span className="w-32">RM {bakiTerdahuluMileage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
-                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12 pt-3 border-t border-zinc-900 dark:border-zinc-100">
+                                     <div className="text-sm font-bold text-[#27272a]  flex justify-end gap-12 pt-3 border-t border-[#18181b] ">
                                          <span>BAKI TERKINI (MILEAGE):</span>
                                          <span className="w-32">RM {bakiTerkiniMileage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
@@ -4222,30 +4404,30 @@ export default function App() {
                   <div className="flex justify-end pt-12">
                     <div className="text-center">
                       <img src="https://arleta.site/interactivelink/2510/cop-bulat.png" alt="Cop Rasmi" className="block mx-auto max-h-[85px] w-auto -mb-1" />
-                      <p className="font-bold text-sm text-zinc-900 dark:text-zinc-100 uppercase">Hairi Mustafa & Associates</p>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Peguam Syarie & Pesuruhjaya Sumpah</p>
+                      <p className="font-bold text-sm text-[#18181b]  uppercase">Hairi Mustafa & Associates</p>
+                      <p className="text-xs text-[#71717a] dark:text-[#a1a1aa] mt-1">Peguam Syarie & Pesuruhjaya Sumpah</p>
                     </div>
                   </div>
 
-                  <div className="mt-12 pt-6 border-t border-dashed border-zinc-300 dark:border-zinc-700 text-center text-[10px] text-zinc-400 dark:text-zinc-500 italic">
+                  <div className="mt-12 pt-6 border-t border-dashed border-[#d4d4d8]  text-center text-[10px] text-[#a1a1aa] dark:text-[#71717a] italic">
                     Resit ini dijana oleh komputer, terima kasih atas urusan anda. Ref: {receiptData.payment.id}
                   </div>
                 </div>
                 {/* Printable Area Ends */}
               </div>
 
-              <div className="p-5 border-t border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50 flex justify-end gap-3 print:hidden">
+              <div className="p-5 border-t border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 flex justify-end gap-3 print:hidden">
                 <button 
                   onClick={() => setReceiptData(null)}
-                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800 text-[#52525b]  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                 >
                   Tutup
                 </button>
                 <button 
                   onClick={handlePrint}
-                  className="px-5 py-2.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
+                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-950 hover:bg-[#fafafa] dark:hover:bg-zinc-800 text-[#3f3f46] dark:text-[#e4e4e7] font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
                 >
-                  <Printer size={16} className="text-zinc-500" />
+                  <Printer size={16} className="text-[#71717a]" />
                   Cetak
                 </button>
                 <button 
@@ -4277,14 +4459,14 @@ export default function App() {
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="fixed bottom-4 right-4 bg-white dark:bg-zinc-950 border border-blue-200 shadow-xl rounded-lg p-5 max-w-sm z-50 flex items-start gap-3"
+            className="fixed bottom-4 right-4 bg-[#ffffff] dark:bg-zinc-950 border border-blue-200 shadow-xl rounded-lg p-5 max-w-sm z-50 flex items-start gap-3"
           >
             <div className="bg-blue-50 text-blue-500 rounded-full p-2 shrink-0">
               <Download size={20} />
             </div>
             <div className="flex-1">
-              <h4 className="text-sm font-bold text-zinc-800 dark:text-zinc-200">Peringatan Penyimpanan (Backup)</h4>
-              <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 leading-relaxed">Tiada sebarang pengemaskinian rekod selama 7 hari. Anda disarankan untuk mengeksport rekod kes anda sebagai sandaran.</p>
+              <h4 className="text-sm font-bold text-[#27272a] dark:text-[#e4e4e7]">Peringatan Penyimpanan (Backup)</h4>
+              <p className="text-xs text-[#52525b] dark:text-[#a1a1aa] mt-1 leading-relaxed">Tiada sebarang pengemaskinian rekod selama 7 hari. Anda disarankan untuk mengeksport rekod kes anda sebagai sandaran.</p>
               <div className="mt-3 flex gap-2">
                 <button 
                   onClick={() => {
@@ -4297,7 +4479,7 @@ export default function App() {
                 </button>
                 <button 
                   onClick={() => setShowExportReminder(false)}
-                  className="text-xs border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                  className="text-xs border border-[#d4d4d8]  text-[#3f3f46]  px-4 py-2 rounded font-medium hover:bg-[#fafafa] dark:hover:bg-zinc-800 transition-colors"
                 >
                   Abaikan
                 </button>
@@ -4309,19 +4491,19 @@ export default function App() {
       {/* Hidden PDF renderer for Combined PDF generation */}
       {combinedPdfQueue && combinedPdfCurrentIndex < combinedPdfQueue.length && combinedPdfQueue[combinedPdfCurrentIndex] && (
         <div className="fixed top-0 left-0 -z-50 opacity-0 pointer-events-none overflow-hidden w-[800px]">
-          <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
-            <div ref={hiddenCombinedPdfPrintRef} className="w-full min-w-[700px] mx-auto font-sans text-black bg-white print:min-w-0 print:w-full print:p-0 p-8 sm:p-12 relative overflow-hidden h-[1122px] flex flex-col justify-between">
+          <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-[#ffffff] print:p-0 print:overflow-visible print:block">
+            <div ref={hiddenCombinedPdfPrintRef} className="w-full min-w-[700px] mx-auto font-sans text-[#000000] bg-[#ffffff] print:min-w-0 print:w-full print:p-0 p-8 sm:p-12 relative overflow-hidden h-[1122px] flex flex-col justify-between">
               
               <div>
-                  <div className="flex items-center pb-6 border-b border-gray-300 mb-8 gap-6">
+                  <div className="flex items-center pb-6 border-b border-[#d1d5db] mb-8 gap-6">
                     <div className="w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-2xl overflow-hidden border border-gray-200">
                       <img src="/logo.png" alt="Hairi Mustafa & Co Logo" className="w-full h-full object-cover" />
                     </div>
                     <div className="flex-1">
-                      <h1 className="text-[1.35rem] sm:text-2xl font-black text-black tracking-tight leading-tight uppercase">Tetuan Hairi Mustafa & Co</h1>
-                      <div className="flex flex-col gap-0.5 mt-2 text-xs sm:text-[13px] font-medium text-black uppercase tracking-wide">
+                      <h1 className="text-[1.35rem] sm:text-2xl font-black text-[#000000] tracking-tight leading-tight uppercase">Tetuan Hairi Mustafa & Co</h1>
+                      <div className="flex flex-col gap-0.5 mt-2 text-xs sm:text-[13px] font-medium text-[#000000] uppercase tracking-wide">
                         <p className="m-0">PEGUAM SYARIE & PERUNDING CARA ISLAM</p>
-                        <p className="m-0 text-black font-semibold">NO. 19-1 (TINGKAT 1), JALAN SAUJANA INDAH 4, TAMAN SAUJANA INDAH, 75450 BUKIT KATIL, MELAKA</p>
+                        <p className="m-0 text-[#000000] font-semibold">NO. 19-1 (TINGKAT 1), JALAN SAUJANA INDAH 4, TAMAN SAUJANA INDAH, 75450 BUKIT KATIL, MELAKA</p>
                         <p className="m-0">TEL: 010-2434143 / 011-56531310 | EMAIL: tetuanhairi@gmail.com</p>
                       </div>
                     </div>
@@ -4330,8 +4512,8 @@ export default function App() {
                   <div className="flex justify-between items-start mb-8 text-sm">
                     <div>
                       <p className="text-[13px] font-mono mt-1">Ref: {combinedPdfQueue[combinedPdfCurrentIndex].id}</p>
-                      <p className="font-bold text-black text-lg mb-1">{combinedPdfQueue[combinedPdfCurrentIndex].nama}</p>
-                      <p className="text-black font-medium">Kategori Kes: {combinedPdfQueue[combinedPdfCurrentIndex].kes}</p>
+                      <p className="font-bold text-[#000000] text-lg mb-1">{combinedPdfQueue[combinedPdfCurrentIndex].nama}</p>
+                      <p className="text-[#000000] font-medium">Kategori Kes: {combinedPdfQueue[combinedPdfCurrentIndex].kes}</p>
                     </div>
                     <div className="text-right">
                       <h2 className="text-2xl font-bold tracking-tight uppercase mb-1">Penyata Ringkas</h2>
@@ -4340,14 +4522,14 @@ export default function App() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-6 mb-8">
-                    <div className="bg-gray-100 p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col">
-                      <span className="text-black font-semibold uppercase tracking-wider text-xs mb-2">Baki Fee Semasa</span>
-                      <p className="text-3xl font-bold font-mono text-black">{formatRM(combinedPdfQueue[combinedPdfCurrentIndex].bakiFeeTerkini)}</p>
+                    <div className="bg-[#f3f4f6] p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col">
+                      <span className="text-[#000000] font-semibold uppercase tracking-wider text-xs mb-2">Baki Fee Semasa</span>
+                      <p className="text-3xl font-bold font-mono text-[#000000]">{formatRM(combinedPdfQueue[combinedPdfCurrentIndex].bakiFeeTerkini)}</p>
                     </div>
-                    <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 flex flex-col justify-between">
+                    <div className="bg-[#f9fafb] p-6 rounded-xl border border-gray-200 flex flex-col justify-between">
                       <div>
-                        <span className="text-black font-medium text-sm mb-1 block">Bayaran Terakhir: <span className="font-bold">{formatRM(combinedPdfQueue[combinedPdfCurrentIndex].bayaranTerakhir)}</span></span>
-                        <span className="text-black text-xs block">
+                        <span className="text-[#000000] font-medium text-sm mb-1 block">Bayaran Terakhir: <span className="font-bold">{formatRM(combinedPdfQueue[combinedPdfCurrentIndex].bayaranTerakhir)}</span></span>
+                        <span className="text-[#000000] text-xs block">
                           Tarikh Terakhir Bayaran: {combinedPdfQueue[combinedPdfCurrentIndex].paymentHistory && combinedPdfQueue[combinedPdfCurrentIndex].paymentHistory.length > 0 
                           ? formatDateDMY([...combinedPdfQueue[combinedPdfCurrentIndex].paymentHistory].sort((a: any, b: any) => parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime())[0].date)
                           : '-'}
@@ -4356,34 +4538,34 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="border-t-[3px] border-b-[3px] border-gray-300 mb-8 overflow-hidden">
+                  <div className="border-t-[3px] border-b-[3px] border-[#d1d5db] mb-8 overflow-hidden">
                     <table className="w-full text-sm text-left">
-                      <thead className="bg-white border-b border-gray-300">
+                      <thead className="bg-[#ffffff] border-b border-[#d1d5db]">
                         <tr>
-                          <th className="py-3 px-5 font-semibold text-black uppercase tracking-wider text-xs">Perkara</th>
-                          <th className="py-3 px-5 font-semibold text-black text-right uppercase tracking-wider text-xs">Jumlah</th>
+                          <th className="py-3 px-5 font-semibold text-[#000000] uppercase tracking-wider text-xs">Perkara</th>
+                          <th className="py-3 px-5 font-semibold text-[#000000] text-right uppercase tracking-wider text-xs">Jumlah</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-300 bg-white">
-                        <tr className="hover:bg-white transition-colors">
-                          <td className="py-4 px-5 text-black font-medium">Jumlah Bayaran Penuh (Fee)</td>
-                          <td className="py-4 px-5 text-right font-mono font-bold text-black">{formatRM(combinedPdfQueue[combinedPdfCurrentIndex].totalFee)}</td>
+                      <tbody className="divide-y divide-[#d1d5db] bg-[#ffffff]">
+                        <tr className="hover:bg-[#ffffff] transition-colors">
+                          <td className="py-4 px-5 text-[#000000] font-medium">Jumlah Bayaran Penuh (Fee)</td>
+                          <td className="py-4 px-5 text-right font-mono font-bold text-[#000000]">{formatRM(combinedPdfQueue[combinedPdfCurrentIndex].totalFee)}</td>
                         </tr>
-                        <tr className="hover:bg-white transition-colors bg-gray-50 border-t border-gray-300">
-                          <td className="py-4 px-5 text-black font-medium">Jumlah Bayaran Terkumpul (Fee)</td>
-                          <td className="py-4 px-5 text-right font-mono font-medium text-emerald-600">
+                        <tr className="hover:bg-[#ffffff] transition-colors bg-[#f9fafb] border-t border-[#d1d5db]">
+                          <td className="py-4 px-5 text-[#000000] font-medium">Jumlah Bayaran Terkumpul (Fee)</td>
+                          <td className="py-4 px-5 text-right font-mono font-medium text-[#059669]">
                             -{formatRM((combinedPdfQueue[combinedPdfCurrentIndex].paymentHistory || []).reduce((acc, curr) => acc + (curr.amount || 0), 0))}
                           </td>
                         </tr>
                         {combinedPdfQueue[combinedPdfCurrentIndex].bakiMileage !== undefined && combinedPdfQueue[combinedPdfCurrentIndex].bakiMileage > 0 && (
-                          <tr className="hover:bg-white transition-colors border-t border-gray-300">
-                            <td className="py-4 px-5 text-black font-medium">Baki Terkini (Mileage)</td>
-                            <td className="py-4 px-5 text-right font-mono text-amber-600 font-medium">
+                          <tr className="hover:bg-[#ffffff] transition-colors border-t border-[#d1d5db]">
+                            <td className="py-4 px-5 text-[#000000] font-medium">Baki Terkini (Mileage)</td>
+                            <td className="py-4 px-5 text-right font-mono text-[#d97706] font-medium">
                               {formatRM(combinedPdfQueue[combinedPdfCurrentIndex].bakiMileage || 0)}
                             </td>
                           </tr>
                         )}
-                        <tr className="bg-gray-200 text-black border-t-2 border-gray-300">
+                        <tr className="bg-[#e5e7eb] text-[#000000] border-t-2 border-[#d1d5db]">
                           <td className="py-4 px-5 font-bold text-sm tracking-wide">BAKI TERKINI (FEE)</td>
                           <td className="py-4 px-5 text-right font-mono font-bold text-lg">{formatRM(combinedPdfQueue[combinedPdfCurrentIndex].bakiFeeTerkini)}</td>
                         </tr>
@@ -4394,16 +4576,16 @@ export default function App() {
               </div>
 
               <div>
-                  <div className="flex justify-between items-start border-t border-gray-300 pt-6">
-                    <div className="text-sm font-bold text-black uppercase flex flex-col gap-2 text-left w-2/3">
+                  <div className="flex justify-between items-start border-t border-[#d1d5db] pt-6">
+                    <div className="text-sm font-bold text-[#000000] uppercase flex flex-col gap-2 text-left w-2/3">
                       <div>Terma & Syarat:</div>
-                      <p className="normal-case font-normal text-zinc-600 text-[11px] leading-relaxed text-left text-justify">
+                      <p className="normal-case font-normal text-[#52525b] text-[11px] leading-relaxed text-left text-justify">
                         Penyata ringkas ini dikeluarkan sebagai rujukan status akaun pelanggan. Sila pastikan semua baki tertunggak (sekiranya ada) dijelaskan mengikut jadual yang telah dipersetujui. Untuk sebarang pertanyaan atau percanggahan maklumat, sila hubungi pihak kami dengan segera.
                       </p>
                     </div>
                   </div>
 
-                  <div className="mt-8 pt-4 border-t border-dashed border-zinc-300 dark:border-zinc-700 text-center text-[10px] text-zinc-400 dark:text-zinc-500 italic">
+                  <div className="mt-8 pt-4 border-t border-dashed border-[#d4d4d8]  text-center text-[10px] text-[#a1a1aa]  italic">
                     Penyata ini dijana oleh komputer, tiada tandatangan diperlukan.
                   </div>
               </div>
@@ -4419,10 +4601,10 @@ export default function App() {
         const currentRenderData = quickPrintData || (zipQueue && currentRenderData);
         return currentRenderData && (
         <div className="fixed top-0 left-0 -z-50 opacity-0 pointer-events-none overflow-hidden w-[800px]">
-          <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-white print:p-0 print:overflow-visible print:block">
-            <div ref={hiddenReceiptPrintRef} className="w-[794px] h-[1122px] mx-auto font-sans text-black bg-white flex flex-col p-10 shrink-0 relative">
+          <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-[#ffffff] print:p-0 print:overflow-visible print:block">
+            <div ref={hiddenReceiptPrintRef} className="w-[794px] h-[1122px] mx-auto font-sans text-[#000000] bg-[#ffffff] flex flex-col p-10 shrink-0 relative">
                   {/* Header */}
-                  <div className="flex items-center pb-6 border-b-2 border-black mb-8 gap-6">
+                  <div className="flex items-center pb-6 border-b-2 border-[#000000] mb-8 gap-6">
                     <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-[75px] w-auto" alt="Logo" />
                     <div className="flex-1">
                       <h1 className="text-[18px] font-bold uppercase m-0 leading-tight">TETUAN HAIRI MUSTAFA & ASSOCIATES</h1>
@@ -4441,50 +4623,50 @@ export default function App() {
 
                   <div className="flex justify-between items-start mb-8 text-sm">
                     <div>
-                      <p className="font-bold uppercase tracking-wider text-black mb-1">Diterima Daripada:</p>
-                      <p className="font-bold text-[16px] text-black uppercase mb-1">{currentRenderData.record.nama}</p>
-                      <p className="text-black font-medium">Kategori Kes: {currentRenderData.record.kes}</p>
+                      <p className="font-bold uppercase tracking-wider text-[#000000] mb-1">Diterima Daripada:</p>
+                      <p className="font-bold text-[16px] text-[#000000] uppercase mb-1">{currentRenderData.record.nama}</p>
+                      <p className="text-[#000000] font-medium">Kategori Kes: {currentRenderData.record.kes}</p>
                     </div>
                   </div>
 
-                  <div className="border-t-[3px] border-b-[3px] border-gray-300 mb-8">
+                  <div className="border-t-[3px] border-b-[3px] border-[#d1d5db] mb-8">
  <table className="w-full text-sm">
  <thead>
- <tr className="border-b-2 border-gray-300 ">
+ <tr className="border-b-2 border-[#d1d5db] ">
  <th className="py-3 px-4 font-bold text-left uppercase">Item / Perkara</th>
- <th className="py-3 px-4 font-bold text-right uppercase w-[200px] border-l-2 border-gray-300 ">Jumlah (RM)</th>
+ <th className="py-3 px-4 font-bold text-right uppercase w-[200px] border-l-2 border-[#d1d5db] ">Jumlah (RM)</th>
  </tr>
  </thead>
  <tbody>
  {(currentRenderData.payment.amount > 0 || (currentRenderData.payment.amount === 0 && !currentRenderData.payment.mileageAmount)) && (
  <tr>
- <td className="py-4 px-4 font-medium text-black uppercase">FEE {formatDateDMY(currentRenderData.payment.date)}</td>
- <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-gray-300 ">{currentRenderData.payment.amount.toFixed(2)}</td>
+ <td className="py-4 px-4 font-medium text-[#000000] uppercase">FEE {formatDateDMY(currentRenderData.payment.date)}</td>
+ <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-[#d1d5db] ">{currentRenderData.payment.amount.toFixed(2)}</td>
  </tr>
  )}
  {!!currentRenderData.payment.mileageAmount && currentRenderData.payment.mileageAmount > 0 && (
  <tr>
- <td className="py-4 px-4 font-medium text-black uppercase">MILEAGE {formatDateDMY(currentRenderData.payment.date)}</td>
- <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-gray-300 ">{currentRenderData.payment.mileageAmount.toFixed(2)}</td>
+ <td className="py-4 px-4 font-medium text-[#000000] uppercase">MILEAGE {formatDateDMY(currentRenderData.payment.date)}</td>
+ <td className="py-4 px-4 font-mono font-medium text-right border-l-2 border-[#d1d5db] ">{currentRenderData.payment.mileageAmount.toFixed(2)}</td>
  </tr>
  )}
  {(currentRenderData.payment.amount > 0 && !!currentRenderData.payment.mileageAmount && currentRenderData.payment.mileageAmount > 0) && (
- <tr className="border-t-2 border-gray-300 bg-white ">
- <td className="py-4 px-4 font-bold text-black text-right uppercase">JUMLAH KESELURUHAN (RM)</td>
- <td className="py-4 px-4 font-mono font-bold text-right border-l-2 border-gray-300 ">{(currentRenderData.payment.amount + currentRenderData.payment.mileageAmount).toFixed(2)}</td>
+ <tr className="border-t-2 border-[#d1d5db] bg-[#ffffff] ">
+ <td className="py-4 px-4 font-bold text-[#000000] text-right uppercase">JUMLAH KESELURUHAN (RM)</td>
+ <td className="py-4 px-4 font-mono font-bold text-right border-l-2 border-[#d1d5db] ">{(currentRenderData.payment.amount + currentRenderData.payment.mileageAmount).toFixed(2)}</td>
  </tr>
  )}
  </tbody>
  </table>
  </div>
 
- <div className="flex justify-between items-start border-b border-gray-300 pb-12 mb-12">
- <div className="text-sm font-bold text-black uppercase flex flex-col gap-2 text-left">
+ <div className="flex justify-between items-start border-b border-[#d1d5db] pb-12 mb-12">
+ <div className="text-sm font-bold text-[#000000] uppercase flex flex-col gap-2 text-left">
    <div>Butiran Kes: <span className="underline underline-offset-4">{currentRenderData.record.kes}</span></div>
    {currentRenderData.payment.nota && (
-     <div className="mt-2 normal-case font-normal text-zinc-600 text-[13px] text-left">
-       <span className="font-bold uppercase text-black text-[11px] block mb-0.5">Nota Bayaran:</span>
-       <span className="italic bg-zinc-50 border border-zinc-200 rounded px-2.5 py-1.5 inline-block text-zinc-700 font-mono">{currentRenderData.payment.nota}</span>
+     <div className="mt-2 normal-case font-normal text-[#52525b] text-[13px] text-left">
+       <span className="font-bold uppercase text-[#000000] text-[11px] block mb-0.5">Nota Bayaran:</span>
+       <span className="italic bg-[#fafafa] border border-[#e4e4e7] rounded px-2.5 py-1.5 inline-block text-[#3f3f46] font-mono">{currentRenderData.payment.nota}</span>
      </div>
    )}
  </div>
@@ -4506,15 +4688,15 @@ export default function App() {
  <div className="text-right space-y-4">
  {currentRenderData.payment.amount > 0 && (
  <>
- <div className="text-sm font-bold text-black flex justify-end gap-12">
+ <div className="text-sm font-bold text-[#000000] flex justify-end gap-12">
  <span>JUMLAH BAYARAN (FEE):</span>
  <span className="w-32">RM {currentRenderData.payment.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
  </div>
- <div className="text-sm font-bold text-black flex justify-end gap-12">
+ <div className="text-sm font-bold text-[#000000] flex justify-end gap-12">
  <span>BAKI TERDAHULU (FEE):</span>
  <span className="w-32">RM {bakiTerdahuluFee.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
  </div>
- <div className="text-sm font-bold text-black flex justify-end gap-12 pt-3 border-t border-gray-300 mb-4">
+ <div className="text-sm font-bold text-[#000000] flex justify-end gap-12 pt-3 border-t border-[#d1d5db] mb-4">
  <span>BAKI TERKINI (FEE):</span>
  <span className="w-32">RM {bakiTerkiniFee.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
@@ -4523,15 +4705,15 @@ export default function App() {
 
                                {hasMileageReceipt && (
                                    <>
-                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                                     <div className="text-sm font-bold text-[#27272a]  flex justify-end gap-12">
                                          <span>JUMLAH BAYARAN (MILEAGE):</span>
                                          <span className="w-32">RM {currentRenderData.payment.mileageAmount!.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
-                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12">
+                                     <div className="text-sm font-bold text-[#27272a]  flex justify-end gap-12">
                                          <span>BAKI TERDAHULU (MILEAGE):</span>
                                          <span className="w-32">RM {bakiTerdahuluMileage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
-                                     <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex justify-end gap-12 pt-3 border-t border-zinc-900 dark:border-zinc-100">
+                                     <div className="text-sm font-bold text-[#27272a]  flex justify-end gap-12 pt-3 border-t border-[#18181b] ">
                                          <span>BAKI TERKINI (MILEAGE):</span>
                                          <span className="w-32">RM {bakiTerkiniMileage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
@@ -4545,12 +4727,12 @@ export default function App() {
                   <div className="flex justify-end pt-12">
                     <div className="text-center">
                       <img src="https://arleta.site/interactivelink/2510/cop-bulat.png" alt="Cop Rasmi" className="block mx-auto max-h-[85px] w-auto -mb-1" />
-                      <p className="font-bold text-sm text-zinc-900 dark:text-zinc-100 uppercase">Hairi Mustafa & Associates</p>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Peguam Syarie & Pesuruhjaya Sumpah</p>
+                      <p className="font-bold text-sm text-[#18181b]  uppercase">Hairi Mustafa & Associates</p>
+                      <p className="text-xs text-[#71717a] dark:text-[#a1a1aa] mt-1">Peguam Syarie & Pesuruhjaya Sumpah</p>
                     </div>
                   </div>
 
-                  <div className="mt-12 pt-6 border-t border-dashed border-zinc-300 dark:border-zinc-700 text-center text-[10px] text-zinc-400 dark:text-zinc-500 italic">
+                  <div className="mt-12 pt-6 border-t border-dashed border-[#d4d4d8]  text-center text-[10px] text-[#a1a1aa] dark:text-[#71717a] italic">
                     Resit ini dijana oleh komputer, terima kasih atas urusan anda. Ref: {currentRenderData.payment.id}
                   </div>
                 </div>
@@ -4567,14 +4749,14 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
             >
-              <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/50">
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-                  <Users size={18} className="text-zinc-600 dark:text-zinc-400" />
+              <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50">
+                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
+                  <Users size={18} className="text-[#52525b] dark:text-[#a1a1aa]" />
                   Profil Pelanggan: {clientProfileName}
                 </h3>
-                <button onClick={() => setClientProfileName(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setClientProfileName(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -4594,23 +4776,23 @@ export default function App() {
                           <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">{clientCases.length} Kes</p>
                         </div>
                         <div className="p-4 bg-amber-50 dark:bg-amber-500/10 rounded-xl border border-amber-100 dark:border-amber-900/30">
-                          <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase mb-1">Jumlah Tunggakan (Baki)</p>
+                          <p className="text-xs font-semibold text-[#d97706] dark:text-amber-400 uppercase mb-1">Jumlah Tunggakan (Baki)</p>
                           <p className="text-2xl font-bold font-mono text-amber-700 dark:text-amber-300">{formatRM(totalClientBaki)}</p>
                         </div>
                       </div>
                       
-                      <form onSubmit={(e) => handleUpdateClientProfile(e, clientProfileName)} className="space-y-4 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 bg-zinc-50/30 dark:bg-zinc-900/30">
+                      <form onSubmit={(e) => handleUpdateClientProfile(e, clientProfileName)} className="space-y-4 border border-[#e4e4e7]  rounded-xl p-5 bg-[#fafafa]/30 dark:bg-zinc-900/30">
                         <h4 className="font-semibold text-sm mb-3">Maklumat Perhubungan</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-1 uppercase">No. Telefon</label>
-                            <input name="telefon" type="text" defaultValue={firstCase.telefon || ''} className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="01X-XXXXXXX" />
+                            <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-1 uppercase">No. Telefon</label>
+                            <input name="telefon" type="text" defaultValue={firstCase.telefon || ''} className="w-full px-3 py-2 text-sm border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="01X-XXXXXXX" />
                           </div>
                           
                         </div>
                         <div>
-                          <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-1 uppercase">Alamat</label>
-                          <textarea name="alamat" defaultValue={firstCase.alamat || ''} rows={2} className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Alamat penuh..." />
+                          <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-1 uppercase">Alamat</label>
+                          <textarea name="alamat" defaultValue={firstCase.alamat || ''} rows={2} className="w-full px-3 py-2 text-sm border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Alamat penuh..." />
                         </div>
                         <div className="flex justify-end pt-2">
                           <button type="submit" className="px-4 py-2 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">Simpan Maklumat</button>
@@ -4619,16 +4801,16 @@ export default function App() {
                       
                       <div>
                         <h4 className="font-semibold text-sm mb-3">Senarai Kes</h4>
-                        <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden divide-y divide-zinc-200 dark:divide-zinc-800">
+                        <div className="border border-[#e4e4e7]  rounded-xl overflow-hidden divide-y divide-zinc-200 dark:divide-zinc-800">
                           {clientCases.map(c => (
-                            <div key={c.id} className="p-3 sm:p-4 bg-white dark:bg-zinc-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div key={c.id} className="p-3 sm:p-4 bg-[#ffffff] dark:bg-zinc-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                               <div>
                                 <p className="font-semibold text-sm">{c.kes}</p>
-                                <p className="text-xs text-zinc-500 dark:text-zinc-400">Ruj: {c.id} &bull; Tarikh: {formatDateDMY(c.tarikh)}</p>
+                                <p className="text-xs text-[#71717a] dark:text-[#a1a1aa]">Ruj: {c.id} &bull; Tarikh: {formatDateDMY(c.tarikh)}</p>
                               </div>
                               <div className="text-right shrink-0">
                                 <p className="font-mono text-sm font-semibold">{formatRM(c.bakiFeeTerkini)}</p>
-                                <p className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase">Baki Fee</p>
+                                <p className="text-[10px] text-[#71717a] dark:text-[#a1a1aa] uppercase">Baki Fee</p>
                               </div>
                             </div>
                           ))}
