@@ -4,50 +4,21 @@ service cloud.firestore {
     match /{document=**} {
       allow read, write: if false;
     }
-
-    function isSignedIn() { return request.auth != null; }
-    function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
     
-    function isValidId(id) { 
-        return id is string && id.size() <= 128 && !id.matches('.*[/].*'); 
+    function isSignedIn() {
+      return request.auth != null;
     }
-
-    function isValidCaseRecord(data) {
-        return data.keys().hasAll(["id", "nama", "kes", "totalFee", "bayaranTerakhir", "tarikh", "bakiSebelum", "bakiFeeTerkini", "bakiMileage", "userId"]) &&
-               data.id is string && data.id.size() <= 128 &&
-               data.nama is string && data.nama.size() <= 500 &&
-               data.kes is string && data.kes.size() <= 500 &&
-               data.totalFee is number &&
-               data.bayaranTerakhir is number &&
-               data.tarikh is string && data.tarikh.size() <= 100 &&
-               data.bakiSebelum is number &&
-               data.bakiFeeTerkini is number &&
-               data.bakiMileage is number &&
-               data.userId == request.auth.uid &&
-               (!("nota" in data) || (data.nota is string && data.nota.size() <= 2000)) &&
-               (!("telefon" in data) || (data.telefon is string && data.telefon.size() <= 100)) &&
-               (!("emel" in data) || (data.emel is string && data.emel.size() <= 500)) &&
-               (!("alamat" in data) || (data.alamat is string && data.alamat.size() <= 1000)) &&
-               (!("paymentHistory" in data) || (data.paymentHistory is list && data.paymentHistory.size() <= 1000));
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
     }
 
     match /users/{userId}/records/{recordId} {
-      allow read: if isSignedIn() && request.auth.uid == userId;
-      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(recordId) && isValidCaseRecord(incoming()) && incoming().keys().size() <= 15;
-      allow update: if isSignedIn() && request.auth.uid == userId && isValidCaseRecord(incoming()) && incoming().userId == existing().userId && incoming().id == existing().id &&
-                    (incoming().diff(existing()).affectedKeys().hasOnly([
-                        "id", "nama", "telefon", "emel", "alamat", "kes", "totalFee", "bayaranTerakhir", "tarikh", "bakiSebelum", "bakiFeeTerkini", "bakiMileage", "nota", "paymentHistory", "userId"
-                    ]));
-      allow delete: if isSignedIn() && request.auth.uid == userId;
+      allow read, write: if isOwner(userId);
     }
+
     match /users/{userId}/backups/{backupId} {
-      allow read: if isSignedIn() && request.auth.uid == userId;
-      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(backupId) && incoming().data is string && incoming().createdAt is number && incoming().keys().size() <= 2;
-      allow delete: if isSignedIn() && request.auth.uid == userId;
-    }
-    match /users/{userId}/receipts/{receiptId} {
-      allow read, write: if isSignedIn() && request.auth.uid == userId;
+      allow read, write: if isOwner(userId);
     }
   }
 }
