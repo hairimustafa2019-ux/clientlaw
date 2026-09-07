@@ -95,7 +95,7 @@ const formatDateISO = (dateStr: string) => {
 };
 
 
-class ErrorBoundary extends React.Component<any, any> {
+class ErrorBoundary extends React.Component<{children: React.ReactNode}, any> {
   constructor(props: any) {
     super(props);
     // @ts-ignore
@@ -2731,9 +2731,19 @@ function AppContent() {
               <div className="overflow-auto flex-1 bg-[#fafafa]/50 md:bg-[#ffffff] dark:bg-zinc-950/50 md:dark:bg-zinc-950 p-3 sm:p-4 md:p-0">
                 {/* Mobile View: List */}
                 <div className="md:hidden bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7]  rounded-xl shadow-sm overflow-hidden mb-4 divide-y divide-zinc-200 dark:divide-zinc-800">
+                  <AnimatePresence mode="popLayout">
                   {filteredRecords.length > 0 ? (
                     filteredRecords.map((record) => (
-                      <div key={record.id} className="p-3 sm:p-4 hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 cursor-pointer transition-colors relative" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
+                      <motion.div 
+                        layout
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        transition={{ duration: 0.2, layout: { type: "spring", bounce: 0.2, duration: 0.4 } }}
+                        key={record.id} 
+                        className="p-3 sm:p-4 hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 cursor-pointer transition-colors relative" 
+                        onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
+                      >
                         <div className="flex items-start gap-3">
                           <div className="pt-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
                              <input
@@ -2826,13 +2836,19 @@ function AppContent() {
                             </motion.div>
                           )}
                         </AnimatePresence>
-                      </div>
+                      </motion.div>
                     ))
                   ) : (
-                    <div className="text-center py-10 bg-[#ffffff] dark:bg-zinc-900 shadow-sm text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] font-medium">
+                    <motion.div 
+                      initial={{ opacity: 0 }} 
+                      animate={{ opacity: 1 }} 
+                      exit={{ opacity: 0 }}
+                      className="text-center py-10 bg-[#ffffff] dark:bg-zinc-900 shadow-sm text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] font-medium"
+                    >
                       Tiada rekod dijumpai.
-                    </div>
+                    </motion.div>
                   )}
+                  </AnimatePresence>
                 </div>
                 {/* Desktop View: Table */}
                 <table className="hidden md:table w-full text-left border-collapse whitespace-nowrap">
@@ -2915,8 +2931,7 @@ function AppContent() {
                       <th className="px-3 sm:px-4 py-3 text-center">Tindakan</th>
                     </tr>
                   </thead>
-                  <tbody className="text-[13px]">
-                    <AnimatePresence>
+                  <AnimatePresence mode="popLayout">
                       {filteredRecords.length > 0 ? (
                         filteredRecords.map((record, index) => {
                           const now = new Date().getTime();
@@ -2930,13 +2945,16 @@ function AppContent() {
                           const isOverdue = record.bakiFeeTerkini > 0 && (now - lastDate) >= overdueMs;
                           
                           return (
-                          <React.Fragment key={record.id}>
-                            <motion.tr 
-                              layout="position"
-                              initial={{ opacity: 0, y: 5 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, scale: 0.95 }}
-                              transition={{ duration: 0.2 }}
+                          <motion.tbody 
+                            key={record.id} 
+                            className="text-[13px]"
+                            layout
+                            initial={{ opacity: 0, y: 5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            transition={{ duration: 0.2, layout: { type: "spring", bounce: 0.2, duration: 0.4 } }}
+                          >
+                            <tr 
                               onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
                               className={`border-b border-[#f4f4f5] /50 hover:bg-[#fafafa] dark:hover:bg-zinc-900 cursor-pointer transition-colors ${isOverdue ? 'bg-red-50/30 dark:bg-red-900/10 border-l-2 border-l-red-500' : (record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-[#fafafa]/50 dark:bg-zinc-900/30' : '')} ${record.bakiFeeTerkini > 2000 && !isOverdue ? 'bg-amber-50/10 dark:bg-amber-900/10' : ''} ${expandedRowId === record.id ? 'bg-zinc-100/50 darkdark:bg-zinc-800/30' : ''}`}
                             >
@@ -3076,7 +3094,7 @@ function AppContent() {
                                 </button>
                               </div>
                             </td>
-                          </motion.tr>
+                          </tr>
                           <AnimatePresence>
                             {expandedRowId === record.id && (
                               <motion.tr 
@@ -3098,22 +3116,24 @@ function AppContent() {
                               </motion.tr>
                             )}
                           </AnimatePresence>
-                        </React.Fragment>
+                        </motion.tbody>
                       );
                       })
                     ) : (
-                      <motion.tr 
+                      <motion.tbody 
                         initial={{ opacity: 0 }} 
                         animate={{ opacity: 1 }} 
                         exit={{ opacity: 0 }}
+                        className="text-[13px]"
                       >
-                        <td colSpan={10} className="px-4 py-8 text-center text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] font-medium">
-                          Tiada rekod dijumpai.
-                        </td>
-                      </motion.tr>
+                        <tr>
+                          <td colSpan={10} className="px-4 py-8 text-center text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] font-medium">
+                            Tiada rekod dijumpai.
+                          </td>
+                        </tr>
+                      </motion.tbody>
                     )}
-                    </AnimatePresence>
-                  </tbody>
+                  </AnimatePresence>
                 </table>
               </div>
               <div className="p-4 bg-[#ffffff] dark:bg-zinc-950 border-t border-[#e4e4e7]  flex justify-between items-center text-xs text-[#71717a] dark:text-[#a1a1aa]">

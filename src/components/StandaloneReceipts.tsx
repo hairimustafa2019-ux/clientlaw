@@ -192,7 +192,7 @@ export default function StandaloneReceipts({
     }
     
     let d = new Date(form.tarikh);
-    const tarikhDisplay = `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
+    const tarikhDisplay = `${d.getDate().toString().padStart(2, "0")}/${(d.getMonth() + 1).toString().padStart(2, "0")}/${d.getFullYear()}`;
     
     if (user) {
       const rId = editingId || doc(collection(db, `users/${user.uid}/receipts`)).id;
@@ -461,7 +461,7 @@ export default function StandaloneReceipts({
                   let paparanItem = (data.items && data.items.length > 0) ? data.items.map(i => i.perkara).join(', ') : ((data as any).item || "-");
                   return (
                     <tr key={index} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                      <td className="p-3">{data.tarikhDisplay || data.tarikh}</td>
+                      <td className="p-3">{data.tarikhDisplay || `${new Date(data.tarikh).getDate().toString().padStart(2, "0")}/${(new Date(data.tarikh).getMonth()+1).toString().padStart(2, "0")}/${new Date(data.tarikh).getFullYear()}`}</td>
                       <td className="p-3 font-medium uppercase">{data.nama}</td>
                       <td className="p-3 text-xs text-zinc-600 dark:text-zinc-400">{paparanItem}</td>
                       <td className="p-3">{data.jumlah.toFixed(2)}</td>
@@ -520,7 +520,7 @@ export default function StandaloneReceipts({
                       <span className="whitespace-pre-line uppercase">{form.alamat || '-'}</span>
                     </div>
                     <div className="text-right">
-                      <strong>TARIKH:</strong> <span>{form.tarikhDisplay || `${new Date(form.tarikh).getDate()}.${new Date(form.tarikh).getMonth()+1}.${new Date(form.tarikh).getFullYear()}`}</span>
+                      <strong>TARIKH:</strong> <span>{form.tarikhDisplay || `${new Date(form.tarikh).getDate().toString().padStart(2, "0")}/${(new Date(form.tarikh).getMonth()+1).toString().padStart(2, "0")}/${new Date(form.tarikh).getFullYear()}`}</span>
                     </div>
                   </div>
 
