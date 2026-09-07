@@ -1,12 +1,11 @@
 {
-  "projectId": "modified-camera-fsjh2",
-  "appId": "1:1021929114676:web:aebb27f12636340386ce61",
-  "apiKey": "AIzaSyDzwgnXriymoYRiGyBuV00VeY3rOXad_D8",
-  "authDomain": "modified-camera-fsjh2.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-lawyerhmmy-bf19ffd9-d6e9-4754-a7cf-2021051521a4",
-  "storageBucket": "modified-camera-fsjh2.firebasestorage.app",
-  "messagingSenderId": "1021929114676",
+  "projectId": "gen-lang-client-0523852599",
+  "appId": "1:342381457896:web:01f4f6c5951df7a8ffb45d",
+  "apiKey": "AIzaSyDTzelJxzBRJb1n3mcXRjHV4IWWxDL1uGQ",
+  "authDomain": "gen-lang-client-0523852599.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0523852599.firebasestorage.app",
+  "messagingSenderId": "342381457896",
   "measurementId": "",
-  "oAuthClientId": "1021929114676-m4979c36jo0lu3c56uc4rbek7nfjo6i1.apps.googleusercontent.com",
+  "oAuthClientId": "342381457896-ivdj5888njf5qs883ickoh0b0riqtoa8.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

@@ -495,6 +495,7 @@ function AppContent() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstallable, setIsInstallable] = useState(false);
   const [isBackingUp, setIsBackingUp] = useState(false);
+  const [isSyncingSheets, setIsSyncingSheets] = useState(false);
   const [showExportReminder, setShowExportReminder] = useState(false);
   const isInitialRecordsRender = useRef(true);
 
@@ -566,6 +567,91 @@ function AppContent() {
       }
       setRecords([]);
       alert("Semua data telah berjaya dipadam (diformat).");
+    }
+  };
+
+  
+  const handleSyncGoogleSheets = async () => {
+    setIsSyncingSheets(true);
+    try {
+        let token = cachedAccessToken;
+        if (!token) {
+            const provider = new GoogleAuthProvider();
+            provider.addScope('https://www.googleapis.com/auth/drive.file');
+            provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+            const result = await signInWithPopup(auth, provider);
+            const credential = GoogleAuthProvider.credentialFromResult(result);
+            token = credential?.accessToken || null;
+            if (token) {
+                setCachedAccessToken(token);
+            } else {
+                throw new Error("Failed to get Google access token");
+            }
+        }
+        
+        // 1. Create a new Spreadsheet
+        const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                properties: {
+                    title: `Data Kes HMA - ${new Date().toLocaleString()}`
+                }
+            })
+        });
+        
+        if (!createRes.ok) {
+            if (createRes.status === 401 || createRes.status === 403) {
+                 setCachedAccessToken(null); // Invalid token, force re-auth next time
+                 throw new Error("Sesi keizinan tamat. Sila klik butang sekali lagi untuk log masuk semula.");
+            }
+            throw new Error('Gagal mencipta lembaran Google Sheet');
+        }
+        
+        const spreadsheet = await createRes.json();
+        const spreadsheetId = spreadsheet.spreadsheetId;
+        
+        // 2. Prepare data
+        const headers = ['ID Rekod', 'Nama Pelanggan', 'Telefon', 'Alamat', 'Kategori Kes', 'Total Fee (RM)', 'Baki Fee Terkini (RM)', 'Baki Mileage (RM)', 'Tarikh', 'Nota'];
+        const rows = filteredRecords.map(r => [
+            r.id,
+            r.nama,
+            r.telefon || '',
+            r.alamat || '',
+            r.kes,
+            r.totalFee.toString(),
+            r.bakiFeeTerkini.toString(),
+            (r.bakiMileage || 0).toString(),
+            r.tarikh,
+            r.nota || ''
+        ]);
+        
+        // 3. Update spreadsheet
+        const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:J${rows.length + 1}?valueInputOption=USER_ENTERED`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                values: [headers, ...rows]
+            })
+        });
+        
+        if (!updateRes.ok) {
+            throw new Error('Gagal mengemas kini data ke Google Sheet');
+        }
+        
+        window.open(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`, '_blank');
+        
+    } catch (e: any) {
+        console.error(e);
+        alert('Ralat menyegerak ke Google Sheets: ' + e.message);
+    } finally {
+        setIsSyncingSheets(false);
     }
   };
 
@@ -1600,33 +1686,33 @@ function AppContent() {
 <div className="p-4 sm:p-6 m-2 sm:m-4 bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7]  rounded-xl shadow-sm">
   <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8">
     <div>
-      <h4 className="text-sm font-semibold text-[#18181b]  mb-4 flex items-center gap-2">
+      <h4 className="text-sm font-semibold text-[#18181b] dark:text-white  mb-4 flex items-center gap-2">
         <FileText size={16} className="text-blue-500"/> Maklumat Kes
       </h4>
       <div className="space-y-3 text-sm">
-        <p className="flex justify-between items-center"><span className="text-[#71717a]">ID Rekod</span> <span className="font-mono text-[#18181b]  bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded">{record.id}</span></p>
-        <p className="flex justify-between items-center"><span className="text-[#71717a]">Kategori</span> <span className="font-medium text-[#18181b] ">{record.kes}</span></p>
-        <p className="flex justify-between items-center"><span className="text-[#71717a]">Dikemaskini</span> <span className="text-[#18181b] ">{formatDateDMY(record.tarikh)}</span></p>
+        <p className="flex justify-between items-center"><span className="text-[#71717a] dark:text-[#a1a1aa]">ID Rekod</span> <span className="font-mono text-[#18181b] dark:text-white  bg-zinc-100 darkdark:bg-zinc-800 px-2 py-0.5 rounded">{record.id}</span></p>
+        <p className="flex justify-between items-center"><span className="text-[#71717a] dark:text-[#a1a1aa]">Kategori</span> <span className="font-medium text-[#18181b] dark:text-white ">{record.kes}</span></p>
+        <p className="flex justify-between items-center"><span className="text-[#71717a] dark:text-[#a1a1aa]">Dikemaskini</span> <span className="text-[#18181b] dark:text-white ">{formatDateDMY(record.tarikh)}</span></p>
         {record.nota && (
           <div className="pt-2 mt-2 border-t border-[#f4f4f5] ">
-            <p className="text-[#71717a] mb-1">Nota / Ringkasan</p>
-            <p className="text-[#18181b]  whitespace-pre-line">{record.nota}</p>
+            <p className="text-[#71717a] dark:text-[#a1a1aa] mb-1">Nota / Ringkasan</p>
+            <p className="text-[#18181b] dark:text-white  whitespace-pre-line">{record.nota}</p>
           </div>
         )}
       </div>
     </div>
     <div>
-      <h4 className="text-sm font-semibold text-[#18181b]  mb-4 flex items-center gap-2">
+      <h4 className="text-sm font-semibold text-[#18181b] dark:text-white  mb-4 flex items-center gap-2">
         <Wallet size={16} className="text-blue-500"/> Pecahan Kewangan
       </h4>
       <div className="space-y-3 text-sm">
-        <p className="flex justify-between items-center"><span className="text-[#71717a]">Jumlah Fee</span> <span className="font-mono text-[#18181b] ">{formatRM(record.totalFee)}</span></p>
-        <p className="flex justify-between items-center"><span className="text-[#71717a]">Baki Terdahulu</span> <span className="font-mono text-[#18181b] ">{formatRM(record.bakiSebelum)}</span></p>
-        <p className="flex justify-between items-center"><span className="text-[#71717a]">Bayaran Terakhir</span> <span className="font-mono font-medium text-[#059669] dark:text-emerald-500">{record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}</span></p>
+        <p className="flex justify-between items-center"><span className="text-[#71717a] dark:text-[#a1a1aa]">Jumlah Fee</span> <span className="font-mono text-[#18181b] dark:text-white ">{formatRM(record.totalFee)}</span></p>
+        <p className="flex justify-between items-center"><span className="text-[#71717a] dark:text-[#a1a1aa]">Baki Terdahulu</span> <span className="font-mono text-[#18181b] dark:text-white ">{formatRM(record.bakiSebelum)}</span></p>
+        <p className="flex justify-between items-center"><span className="text-[#71717a] dark:text-[#a1a1aa]">Bayaran Terakhir</span> <span className="font-mono font-medium text-[#059669] dark:text-emerald-500">{record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}</span></p>
         <div className="flex justify-between items-center">
-          <span className="text-[#71717a]">Baki Terkini</span>
+          <span className="text-[#71717a] dark:text-[#a1a1aa]">Baki Terkini</span>
           <div className="flex items-center gap-1.5">
-            <span className={`font-mono font-bold ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-[#18181b] '}`}>
+            <span className={`font-mono font-bold ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-[#18181b] dark:text-white '}`}>
               {formatRM(record.bakiFeeTerkini)}
             </span>
             {record.bakiFeeTerkini > 0 && (
@@ -1641,7 +1727,7 @@ function AppContent() {
           </div>
         </div>
         <div className="flex justify-between items-center pt-2 mt-2 border-t border-[#f4f4f5] ">
-          <span className="text-[#71717a]">Baki Mileage</span>
+          <span className="text-[#71717a] dark:text-[#a1a1aa]">Baki Mileage</span>
           <div className="flex items-center gap-1.5">
             <span className="font-mono font-medium text-[#d97706] dark:text-amber-500">
               {formatRM(record.bakiMileage)}
@@ -1659,13 +1745,13 @@ function AppContent() {
     </div>
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h4 className="text-sm font-semibold text-[#18181b]  flex items-center gap-2">
+        <h4 className="text-sm font-semibold text-[#18181b] dark:text-white  flex items-center gap-2">
           <History size={16} className="text-blue-500"/> Rekod Bayaran
         </h4>
         <div className="flex items-center gap-2">
           <button 
             onClick={() => setStatementRecord(record)}
-            className="text-xs bg-zinc-100 hover:bg-zinc-200 text-[#3f3f46] dark:bg-zinc-800 dark:hover:bg-zinc-700  px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-[#e4e4e7] "
+            className="text-xs bg-zinc-100 hover:bg-zinc-200 text-[#3f3f46] dark:text-zinc-200 darkdark:bg-zinc-800 dark:hover:bg-zinc-700  px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-[#e4e4e7] "
             title="Cetak Penyata Akaun Penuh"
           >
             <Printer size={12} />
@@ -1673,7 +1759,7 @@ function AppContent() {
           </button>
           <button 
             onClick={() => setSimpleStatementRecord(record)}
-            className="text-xs bg-zinc-100 hover:bg-zinc-200 text-[#3f3f46] dark:bg-zinc-800 dark:hover:bg-zinc-700  px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-[#e4e4e7] "
+            className="text-xs bg-zinc-100 hover:bg-zinc-200 text-[#3f3f46] dark:text-zinc-200 darkdark:bg-zinc-800 dark:hover:bg-zinc-700  px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-[#e4e4e7] "
             title="Cetak Penyata Ringkas"
           >
             <Printer size={12} />
@@ -1706,7 +1792,7 @@ function AppContent() {
               <tr>
                 <th className="px-4 py-3 border-r border-[#f4f4f5] /50">ID</th>
                 <th 
-                  className="px-4 py-3 border-r border-[#f4f4f5] /50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group"
+                  className="px-4 py-3 border-r border-[#f4f4f5] /50 cursor-pointer hover:bg-zinc-100 dark:hoverdark:bg-zinc-800 transition-colors group"
                   onClick={() => {
                     if (paymentSortColumn === 'date') {
                       setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1726,7 +1812,7 @@ function AppContent() {
                 <th className="px-4 py-3 border-r border-[#f4f4f5] /50">Kaedah</th>
                 <th className="px-4 py-3 border-r border-[#f4f4f5] /50">Nota</th>
                 <th 
-                  className="px-4 py-3 border-r border-[#f4f4f5] /50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group text-right"
+                  className="px-4 py-3 border-r border-[#f4f4f5] /50 cursor-pointer hover:bg-zinc-100 dark:hoverdark:bg-zinc-800 transition-colors group text-right"
                   onClick={() => {
                     if (paymentSortColumn === 'amount') {
                       setPaymentSortDirection(paymentSortDirection === 'asc' ? 'desc' : 'asc');
@@ -1755,12 +1841,12 @@ function AppContent() {
                 else if (paymentSortColumn === 'amount') comparison = (a.amount || 0) - (b.amount || 0);
                 return paymentSortDirection === 'asc' ? comparison : -comparison;
               }).map((payment: any) => (
-                <tr key={payment.id} className="border-b border-[#f4f4f5] /50 last:border-0 hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
-                  <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-[#71717a] font-mono text-xs">{payment.id}</td>
-                  <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-[#3f3f46]  font-mono text-[11px]">{formatDateDMY(payment.date)}</td>
-                  <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-[#3f3f46]  text-xs">{payment.method}</td>
+                <tr key={payment.id} className="border-b border-[#f4f4f5] /50 last:border-0 hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
+                  <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-[#71717a] dark:text-[#a1a1aa] font-mono text-xs">{payment.id}</td>
+                  <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-[#3f3f46] dark:text-zinc-200  font-mono text-[11px]">{formatDateDMY(payment.date)}</td>
+                  <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-[#3f3f46] dark:text-zinc-200  text-xs">{payment.method}</td>
                   <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-[#52525b] dark:text-[#a1a1aa] text-xs max-w-[160px] truncate" title={payment.nota || ''}>
-                    {payment.nota || <span className="text-[#a1a1aa] dark:text-[#52525b] italic">-</span>}
+                    {payment.nota || <span className="text-[#a1a1aa] dark:text-[#52525b] dark:text-zinc-300 italic">-</span>}
                   </td>
                   <td className="px-4 py-2 border-r border-[#f4f4f5] /50 text-right text-[#059669] dark:text-emerald-500 font-medium font-mono text-sm">
                     {payment.amount ? '+' + formatRM(payment.amount) : '-'}
@@ -1810,7 +1896,7 @@ function AppContent() {
                           }
                         }
                       }}
-                      className="text-[#a1a1aa] dark:text-[#71717a] hover:text-red-600 p-1 rounded transition-colors"
+                      className="text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] hover:text-red-600 p-1 rounded transition-colors"
                     >
                       <Trash2 size={12} />
                     </button>
@@ -1859,7 +1945,7 @@ function AppContent() {
           <div className="w-full space-y-4">
             <button
               onClick={handleLogin}
-              className="w-full flex items-center justify-center gap-3 px-4 py-3 border border-[#e4e4e7]  rounded-xl bg-[#ffffff] dark:bg-zinc-950 hover:bg-[#fafafa] dark:hover:bg-zinc-900 text-[#3f3f46]  font-medium transition-all shadow-sm cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+              className="w-full flex items-center justify-center gap-3 px-4 py-3 border border-[#e4e4e7]  rounded-xl bg-[#ffffff] dark:bg-zinc-950 hover:bg-[#fafafa] dark:hover:bg-zinc-900 text-[#3f3f46] dark:text-zinc-200  font-medium transition-all shadow-sm cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" width="24" height="24">
                 <g transform="matrix(1, 0, 0, 1, 0, 0)">
@@ -1874,10 +1960,10 @@ function AppContent() {
           </div>
 
           <div className="mt-8 text-center">
-            <p className="text-[10px] text-[#a1a1aa] dark:text-[#71717a] font-medium">
+            <p className="text-[10px] text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] font-medium">
               Sila log masuk untuk mengakses data dan resit syarikat.
             </p>
-            <p className="text-[10px] text-[#a1a1aa] dark:text-[#71717a] mt-2">
+            <p className="text-[10px] text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] mt-2">
               Hak Cipta Terpelihara &copy; {new Date().getFullYear()} Hairi Mustafa Associates
             </p>
           </div>
@@ -1887,7 +1973,7 @@ function AppContent() {
   }
 
   return (
-    <div className="flex h-screen w-full bg-[#fafafa] dark:bg-black font-sans overflow-hidden text-[#18181b] ">
+    <div className="flex h-screen w-full bg-[#fafafa] dark:bg-black font-sans overflow-hidden text-[#18181b] dark:text-white ">
       
       {/* Sidebar for Desktop */}
 
@@ -1905,36 +1991,36 @@ function AppContent() {
               <span className="font-bold text-[#52525b] dark:text-[#a1a1aa]">HM</span>
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-semibold truncate text-[#18181b] ">Hairi Mustafa</p>
+              <p className="text-sm font-semibold truncate text-[#18181b] dark:text-white ">Hairi Mustafa</p>
               <p className="text-xs text-[#71717a] dark:text-[#a1a1aa] truncate">Peguam Syarie</p>
             </div>
           </div>
-          <div className="text-[10px] uppercase tracking-[0.2em] text-[#a1a1aa] dark:text-[#71717a] mt-4 font-medium">Pengurusan Kes</div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] mt-4 font-medium">Pengurusan Kes</div>
         </div>
         <nav className="flex-1 px-4 space-y-1">
           <button 
             onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
-            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'dashboard' ? 'bg-zinc-100 dark:bg-zinc-900 text-[#18181b] dark:text-white' : 'text-[#71717a] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white hover:bg-[#fafafa] dark:hover:bg-zinc-900/50'}`}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'dashboard' ? 'bg-zinc-100 dark:bg-zinc-900 text-[#18181b] dark:text-white' : 'text-[#71717a] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-white hover:bg-[#fafafa] dark:hover:bg-zinc-900/50'}`}
           >
             Papan Pemuka
           </button>
           <button 
             onClick={() => { setActiveTab('records'); setIsMobileMenuOpen(false); }}
-            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'records' ? 'bg-zinc-100 dark:bg-zinc-900 text-[#18181b] dark:text-white' : 'text-[#71717a] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white hover:bg-[#fafafa] dark:hover:bg-zinc-900/50'}`}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'records' ? 'bg-zinc-100 dark:bg-zinc-900 text-[#18181b] dark:text-white' : 'text-[#71717a] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-white hover:bg-[#fafafa] dark:hover:bg-zinc-900/50'}`}
           >
             Rekod Pelanggan
           </button>
 
           <button 
             onClick={() => { { setActiveTab('standalone'); setIsMobileMenuOpen(false); }; setStandaloneInitialRecord(null); }}
-            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'standalone' ? 'bg-zinc-100 dark:bg-zinc-900 text-[#18181b] dark:text-white' : 'text-[#71717a] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white hover:bg-[#fafafa] dark:hover:bg-zinc-900/50'}`}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'standalone' ? 'bg-zinc-100 dark:bg-zinc-900 text-[#18181b] dark:text-white' : 'text-[#71717a] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-white hover:bg-[#fafafa] dark:hover:bg-zinc-900/50'}`}
           >
             Paparan Resit
           </button>
           
           <button 
             onClick={() => { setActiveTab('settings'); setIsMobileMenuOpen(false); }}
-            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'settings' ? 'bg-zinc-100 dark:bg-zinc-900 text-[#18181b] dark:text-white' : 'text-[#71717a] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white hover:bg-[#fafafa] dark:hover:bg-zinc-900/50'}`}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'settings' ? 'bg-zinc-100 dark:bg-zinc-900 text-[#18181b] dark:text-white' : 'text-[#71717a] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-white hover:bg-[#fafafa] dark:hover:bg-zinc-900/50'}`}
           >
             Tetapan
           </button>
@@ -1959,21 +2045,21 @@ function AppContent() {
               </div>
             )}
             <button onClick={() => setDarkMode(!darkMode)}
- className="hidden sm:flex p-2 text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white transition-colors" title={darkMode ? "Tukar ke Mod Siang" : "Tukar ke Mod Gelap"}>
+ className="hidden sm:flex p-2 text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-white transition-colors" title={darkMode ? "Tukar ke Mod Siang" : "Tukar ke Mod Gelap"}>
               {darkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
 
             {!user ? (
               <button 
                 onClick={handleLogin}
-                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-[#ffffff] dark:text-[#18181b] rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
+                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-[#ffffff] dark:text-[#18181b] dark:text-white rounded-lg hoverdark:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
                 <LogIn size={14} />
                 <span className="hidden sm:inline">Log Masuk</span>
               </button>
             ) : (
               <button 
                 onClick={handleLogout}
-                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
+                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hoverdark:bg-zinc-800 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
                 <LogOut size={14} />
                 <span className="hidden sm:inline">Log Keluar</span>
               </button>
@@ -1981,7 +2067,7 @@ function AppContent() {
             {isInstallable && (
               <button 
                 onClick={handleInstallApp}
-                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
+                className="hidden sm:flex p-2 sm:px-4 sm:py-2 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hoverdark:bg-zinc-800 font-medium cursor-pointer flex items-center gap-2 shrink-0 transition-all">
                 <Download size={14} />
                 <span className="hidden sm:inline">Pasang</span>
               </button>
@@ -2009,9 +2095,16 @@ function AppContent() {
             )}
             <button 
               onClick={handleExportDataLengkapExcel}
-              className="hidden lg:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg font-medium cursor-pointer shrink-0 transition-all">
+              className="hidden lg:flex p-2 sm:px-4 sm:py-2 items-center gap-2 text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg font-medium cursor-pointer shrink-0 transition-all">
               <Download size={14} />
               <span className="hidden sm:inline">Eksport Lengkap</span>
+            </button>
+            <button 
+              onClick={handleSyncGoogleSheets}
+              disabled={isSyncingSheets}
+              className="hidden lg:flex p-2 sm:px-4 sm:py-2 items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-lg font-medium cursor-pointer disabled:opacity-50 shrink-0 transition-all">
+              {isSyncingSheets ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
+              <span className="hidden sm:inline">Sync Sheets</span>
             </button>
             <input 
               type="file" 
@@ -2022,7 +2115,7 @@ function AppContent() {
             />
             <button 
               onClick={() => fileInputRef.current?.click()}
-              className="hidden lg:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
+              className="hidden lg:flex p-2 sm:px-4 sm:py-2 flex items-center gap-2 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hoverdark:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
               <Upload size={14} />
               <span className="hidden sm:inline">Import</span>
             </button>
@@ -2034,7 +2127,7 @@ function AppContent() {
             </button>
             <button 
               onClick={() => setIsNewRecordModalOpen(true)}
-              className="p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-[#ffffff] dark:text-[#18181b] rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center justify-center shrink-0 transition-all hover:-translate-y-0.5 hover:shadow-lg animate-subtle-pulse"
+              className="p-2 sm:px-4 sm:py-2 text-sm bg-zinc-900 text-white dark:bg-[#ffffff] dark:text-[#18181b] dark:text-white rounded-lg hoverdark:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer flex items-center justify-center shrink-0 transition-all hover:-translate-y-0.5 hover:shadow-lg animate-subtle-pulse"
             >
               <Plus size={16} className="sm:hidden" />
               <span className="hidden sm:inline">+ Rekod Baru</span>
@@ -2085,19 +2178,19 @@ function AppContent() {
               <div className="flex flex-col gap-6 pb-10 max-w-2xl">
                 <div className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-sm border border-[#f4f4f5]  overflow-hidden">
                   <div className="p-4 border-b border-[#f4f4f5] ">
-                    <h2 className="text-sm font-bold text-[#18181b] ">Tetapan & Tindakan</h2>
+                    <h2 className="text-sm font-bold text-[#18181b] dark:text-white ">Tetapan & Tindakan</h2>
                   </div>
                   <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                    <button onClick={() => setDarkMode(!darkMode)} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
+                    <button onClick={() => setDarkMode(!darkMode)} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
+                        <div className="p-2 bg-zinc-100 darkdark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
                           {darkMode ? <Sun size={18} /> : <Moon size={18} />}
                         </div>
                         <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">{darkMode ? "Mod Siang" : "Mod Gelap"}</span>
                       </div>
                       <ChevronRight size={18} className="text-[#a1a1aa]" />
                     </button>
-                    <button onClick={() => setAutoBackupEnabled(!autoBackupEnabled)} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
+                    <button onClick={() => setAutoBackupEnabled(!autoBackupEnabled)} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600 dark:text-blue-400">
                           <Cloud size={18} />
@@ -2109,9 +2202,9 @@ function AppContent() {
                       </div>
                     </button>
                     {!user ? (
-                      <button onClick={handleLogin} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
+                      <button onClick={handleLogin} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                         <div className="flex items-center gap-3">
-                          <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
+                          <div className="p-2 bg-zinc-100 darkdark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
                             <LogIn size={18} />
                           </div>
                           <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Log Masuk</span>
@@ -2119,7 +2212,7 @@ function AppContent() {
                         <ChevronRight size={18} className="text-[#a1a1aa]" />
                       </button>
                     ) : (
-                      <button onClick={handleLogout} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
+                      <button onClick={handleLogout} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                         <div className="flex items-center gap-3">
                           <div className="p-2 bg-red-50 dark:bg-red-500/10 rounded-lg text-red-600 dark:text-red-400">
                             <LogOut size={18} />
@@ -2129,9 +2222,9 @@ function AppContent() {
                       </button>
                     )}
                     {isInstallable && (
-                      <button onClick={handleInstallApp} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
+                      <button onClick={handleInstallApp} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                         <div className="flex items-center gap-3">
-                          <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
+                          <div className="p-2 bg-zinc-100 darkdark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
                             <Download size={18} />
                           </div>
                           <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Pasang Aplikasi</span>
@@ -2140,7 +2233,7 @@ function AppContent() {
                       </button>
                     )}
                     {user && (
-                      <button onClick={handleRefreshData} disabled={isRefreshing} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors disabled:opacity-50">
+                      <button onClick={handleRefreshData} disabled={isRefreshing} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors disabled:opacity-50">
                         <div className="flex items-center gap-3">
                           <div className="p-2 bg-emerald-50 dark:bg-emerald-500/10 rounded-lg text-[#059669] dark:text-emerald-400">
                             {isRefreshing ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
@@ -2151,7 +2244,7 @@ function AppContent() {
                       </button>
                     )}
                     {user && (
-                      <button onClick={handleBackupToCloud} disabled={isBackingUp} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors disabled:opacity-50">
+                      <button onClick={handleBackupToCloud} disabled={isBackingUp} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors disabled:opacity-50">
                         <div className="flex items-center gap-3">
                           <div className="p-2 bg-blue-50 dark:bg-blue-500/10 rounded-lg text-blue-600 dark:text-blue-400">
                             {isBackingUp ? <Loader2 size={18} className="animate-spin" /> : <CloudUpload size={18} />}
@@ -2161,16 +2254,16 @@ function AppContent() {
                         <ChevronRight size={18} className="text-[#a1a1aa]" />
                       </button>
                     )}
-                    <button onClick={handleExportData} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
+                    <button onClick={handleExportData} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
+                        <div className="p-2 bg-zinc-100 darkdark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
                           <Download size={18} />
                         </div>
                         <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Eksport Data CSV (Ringkas)</span>
                       </div>
                       <ChevronRight size={18} className="text-[#a1a1aa]" />
                     </button>
-                    <button onClick={handleExportDataLengkapExcel} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
+                    <button onClick={handleExportDataLengkapExcel} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-blue-50 dark:bg-blue-500/10 rounded-lg text-blue-600 dark:text-blue-400">
                           <Download size={18} />
@@ -2179,9 +2272,9 @@ function AppContent() {
                       </div>
                       <ChevronRight size={18} className="text-blue-400" />
                     </button>
-                    <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
+                    <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
+                        <div className="p-2 bg-zinc-100 darkdark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
                           <Upload size={18} />
                         </div>
                         <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Import Data CSV</span>
@@ -2202,18 +2295,18 @@ function AppContent() {
                 
                 <div className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-sm border border-[#f4f4f5]  overflow-hidden">
                   <div className="p-4 border-b border-[#f4f4f5] ">
-                    <h2 className="text-sm font-bold text-[#18181b] ">Tetapan Peringatan WhatsApp</h2>
+                    <h2 className="text-sm font-bold text-[#18181b] dark:text-white ">Tetapan Peringatan WhatsApp</h2>
                   </div>
                   <div className="p-4 flex flex-col gap-3">
                     <label className="text-xs font-semibold text-[#71717a] dark:text-[#a1a1aa] uppercase tracking-wider">Template Mesej</label>
                     <textarea
                       rows={4}
-                      className="w-full px-3 py-2 border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-[#18181b]  resize-y"
+                      className="w-full px-3 py-2 border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-[#18181b] dark:text-white  resize-y"
                       value={whatsappTemplate}
                       onChange={(e) => setWhatsappTemplate(e.target.value)}
                     />
                     <p className="text-[11px] text-[#71717a] dark:text-[#a1a1aa]">
-                      Gunakan tag: <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-[#3f3f46] ">{"{nama}"}</code>, <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-[#3f3f46] ">{"{kes}"}</code>, <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-[#3f3f46] ">{"{baki}"}</code>.
+                      Gunakan tag: <code className="bg-zinc-100 darkdark:bg-zinc-800 px-1 py-0.5 rounded text-[#3f3f46] dark:text-zinc-200 ">{"{nama}"}</code>, <code className="bg-zinc-100 darkdark:bg-zinc-800 px-1 py-0.5 rounded text-[#3f3f46] dark:text-zinc-200 ">{"{kes}"}</code>, <code className="bg-zinc-100 darkdark:bg-zinc-800 px-1 py-0.5 rounded text-[#3f3f46] dark:text-zinc-200 ">{"{baki}"}</code>.
                     </p>
                     <label className="flex items-center gap-2 mt-2 cursor-pointer">
                       <input 
@@ -2222,14 +2315,14 @@ function AppContent() {
                         onChange={(e) => setWhatsappIncludeLink(e.target.checked)}
                         className="rounded border-[#d4d4d8]  text-[#059669] focus:ring-emerald-500 dark:bg-zinc-900"
                       />
-                      <span className="text-sm text-[#3f3f46] ">Sertakan Pautan Penyata PDF (jika ada)</span>
+                      <span className="text-sm text-[#3f3f46] dark:text-zinc-200 ">Sertakan Pautan Penyata PDF (jika ada)</span>
                     </label>
                   </div>
                 </div>
 
                 <div className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-sm border border-[#f4f4f5]  overflow-hidden">
                   <div className="p-4 border-b border-[#f4f4f5] ">
-                    <h2 className="text-sm font-bold text-[#18181b] ">Tetapan Penjejak Tunggakan</h2>
+                    <h2 className="text-sm font-bold text-[#18181b] dark:text-white ">Tetapan Penjejak Tunggakan</h2>
                   </div>
                   <div className="p-4 flex flex-col gap-3">
                     <label className="text-xs font-semibold text-[#71717a] dark:text-[#a1a1aa] uppercase tracking-wider">Tempoh Tunggakan (Hari)</label>
@@ -2237,7 +2330,7 @@ function AppContent() {
                       type="number"
                       min="1"
                       max="365"
-                      className="w-full sm:w-32 px-3 py-2 border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all text-[#18181b] "
+                      className="w-full sm:w-32 px-3 py-2 border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all text-[#18181b] dark:text-white "
                       value={overdueDays}
                       onChange={(e) => setOverdueDays(parseInt(e.target.value) || 30)}
                     />
@@ -2317,7 +2410,7 @@ function AppContent() {
                        </div>
                      ))}
                      {filteredRecords.length === 0 && (
-                       <p className="text-sm text-[#71717a] text-center py-4">Tiada rekod buat masa ini.</p>
+                       <p className="text-sm text-[#71717a] dark:text-[#a1a1aa] text-center py-4">Tiada rekod buat masa ini.</p>
                      )}
                    </div>
                 </div>
@@ -2370,7 +2463,7 @@ function AppContent() {
                    <div className="grid grid-cols-2 gap-3 sm:gap-4 flex-1">
                      <button
                        onClick={() => setIsNewRecordModalOpen(true)}
-                       className="p-5 rounded-xl border border-[#f4f4f5]  bg-[#fafafa]/50 dark:bg-zinc-900/50 hover:bg-[#fafafa] dark:hover:bg-zinc-800 transition-all text-left flex flex-col gap-4 group cursor-pointer h-full hover:shadow-md hover:-translate-y-1 animate-subtle-pulse"
+                       className="p-5 rounded-xl border border-[#f4f4f5]  bg-[#fafafa]/50 dark:bg-zinc-900/50 hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800 transition-all text-left flex flex-col gap-4 group cursor-pointer h-full hover:shadow-md hover:-translate-y-1 animate-subtle-pulse"
                      >
                        <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-105 transition-transform">
                          <Plus size={20} />
@@ -2382,7 +2475,7 @@ function AppContent() {
                      </button>
                      <button
                        onClick={() => { { setActiveTab('standalone'); setIsMobileMenuOpen(false); }; setStandaloneInitialRecord(null); }}
-                       className="p-5 rounded-xl border border-[#f4f4f5]  bg-[#fafafa]/50 dark:bg-zinc-900/50 hover:bg-[#fafafa] dark:hover:bg-zinc-800 transition-colors text-left flex flex-col gap-4 group cursor-pointer h-full"
+                       className="p-5 rounded-xl border border-[#f4f4f5]  bg-[#fafafa]/50 dark:bg-zinc-900/50 hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800 transition-colors text-left flex flex-col gap-4 group cursor-pointer h-full"
                      >
                        <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 text-[#059669] dark:text-emerald-400 flex items-center justify-center group-hover:scale-105 transition-transform">
                          <CreditCard size={20} />
@@ -2453,7 +2546,7 @@ function AppContent() {
                            if (overdueRecords.length === 0) {
                              return (
                                <tr>
-                                 <td colSpan={5} className="px-4 py-8 text-center text-[#71717a]">Tiada tunggakan direkodkan.</td>
+                                 <td colSpan={5} className="px-4 py-8 text-center text-[#71717a] dark:text-[#a1a1aa]">Tiada tunggakan direkodkan.</td>
                                </tr>
                              );
                            }
@@ -2465,7 +2558,7 @@ function AppContent() {
                                lastPaymentDate = formatDateDMY(sortedHistory[0].date);
                              }
                              return (
-                               <tr key={r.id} className="hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 transition-colors">
+                               <tr key={r.id} className="hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                                  <td className="px-4 py-3 font-medium text-[#27272a] dark:text-[#e4e4e7]">
                                    <div className="flex items-center justify-between group">
                                      <span>{r.nama}</span>
@@ -2488,12 +2581,13 @@ function AppContent() {
                                         href={`https://wa.me/${r.telefon.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(whatsappTemplate.replace(/\{nama\}/g, r.nama || '').replace(/\{kes\}/g, r.kes || '').replace(/\{baki\}/g, formatRM(r.bakiFeeTerkini)) + (whatsappIncludeLink && r.statementUrl ? '\n\nPautan Penyata: ' + r.statementUrl : ''))}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="inline-flex items-center justify-center p-1.5 text-[#059669] bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors"
+                                        className="inline-flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-500/10 hover:bg-emerald-200 dark:hover:bg-emerald-500/20 rounded-lg transition-colors border border-emerald-200 dark:border-emerald-500/20 shadow-sm"
                                         title="Hantar Peringatan WhatsApp"
                                       >
                                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-message-circle"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+                                        WhatsApp
                                       </a>
-                                   ) : '-'}
+                                   ) : <span className="text-[10px] text-[#a1a1aa]">Tiada No. Tel</span>}
                                  </td>
                                </tr>
                              );
@@ -2569,7 +2663,7 @@ function AppContent() {
                       <Filter size={14} className="text-[#a1a1aa]" />
                     </div>
                     <select
-                      className="pl-9 pr-8 py-2 appearance-none text-sm border border-[#e4e4e7]  rounded-lg w-full sm:w-40 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium text-[#3f3f46]  transition-all cursor-pointer"
+                      className="pl-9 pr-8 py-2 appearance-none text-sm border border-[#e4e4e7]  rounded-lg w-full sm:w-40 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium text-[#3f3f46] dark:text-zinc-200  transition-all cursor-pointer"
                       value={filterKes}
                       onChange={(e) => setFilterKes(e.target.value)}
                     >
@@ -2586,7 +2680,7 @@ function AppContent() {
                       <ArrowUpDown size={14} className="text-[#a1a1aa]" />
                     </div>
                     <select
-                      className="pl-9 pr-8 py-2 appearance-none text-sm border border-[#e4e4e7]  rounded-lg w-full sm:w-44 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium text-[#3f3f46]  transition-all cursor-pointer"
+                      className="pl-9 pr-8 py-2 appearance-none text-sm border border-[#e4e4e7]  rounded-lg w-full sm:w-44 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium text-[#3f3f46] dark:text-zinc-200  transition-all cursor-pointer"
                       value={dateSortOrder || ''}
                       onChange={(e) => {
                         const val = e.target.value;
@@ -2607,7 +2701,7 @@ function AppContent() {
                   <div className="flex items-center gap-2 w-full sm:w-auto">
                     <input
                       type="date"
-                      className="px-3 py-2 text-sm border border-[#e4e4e7]  rounded-lg flex-1 sm:flex-none sm:w-36 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-[#3f3f46]  transition-all"
+                      className="px-3 py-2 text-sm border border-[#e4e4e7]  rounded-lg flex-1 sm:flex-none sm:w-36 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-[#3f3f46] dark:text-zinc-200  transition-all"
                       value={filterStartDate}
                       onChange={(e) => setFilterStartDate(e.target.value)}
                       title="Tarikh Mula"
@@ -2615,7 +2709,7 @@ function AppContent() {
                     <span className="text-[#a1a1aa] text-sm font-medium px-1">-</span>
                     <input
                       type="date"
-                      className="px-3 py-2 text-sm border border-[#e4e4e7]  rounded-lg flex-1 sm:flex-none sm:w-36 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-[#3f3f46]  transition-all"
+                      className="px-3 py-2 text-sm border border-[#e4e4e7]  rounded-lg flex-1 sm:flex-none sm:w-36 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-[#3f3f46] dark:text-zinc-200  transition-all"
                       value={filterEndDate}
                       onChange={(e) => setFilterEndDate(e.target.value)}
                       title="Tarikh Akhir"
@@ -2639,7 +2733,7 @@ function AppContent() {
                 <div className="md:hidden bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7]  rounded-xl shadow-sm overflow-hidden mb-4 divide-y divide-zinc-200 dark:divide-zinc-800">
                   {filteredRecords.length > 0 ? (
                     filteredRecords.map((record) => (
-                      <div key={record.id} className="p-3 sm:p-4 hover:bg-[#fafafa] dark:hover:bg-zinc-800/50 cursor-pointer transition-colors relative" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
+                      <div key={record.id} className="p-3 sm:p-4 hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 cursor-pointer transition-colors relative" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
                         <div className="flex items-start gap-3">
                           <div className="pt-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
                              <input
@@ -2657,7 +2751,7 @@ function AppContent() {
                           </div>
                           <div className="flex-1 min-w-0">
                              <div className="flex justify-between items-start gap-2">
-                               <h4 className="font-bold text-[#18181b]  text-[13px] sm:text-sm truncate leading-tight flex items-center gap-1">
+                               <h4 className="font-bold text-[#18181b] dark:text-white  text-[13px] sm:text-sm truncate leading-tight flex items-center gap-1">
   {record.nama}
   <button 
     onClick={(e) => { e.stopPropagation(); setClientProfileName(record.nama); }}
@@ -2715,10 +2809,10 @@ function AppContent() {
                                      <CheckCircle size={14} /> RM0
                                    </button>
                                  )}
-                                 <button onClick={(e) => { e.stopPropagation(); setEditingRecord(record); }} className="p-1.5 px-2 text-[#71717a] hover:text-[#3f3f46] bg-[#fafafa] hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-[#a1a1aa] transition-colors flex items-center justify-center">
+                                 <button onClick={(e) => { e.stopPropagation(); setEditingRecord(record); }} className="p-1.5 px-2 text-[#71717a] dark:text-[#a1a1aa] hover:text-[#3f3f46] dark:text-zinc-200 bg-[#fafafa] hover:bg-zinc-100 rounded-lg darkdark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-[#a1a1aa] transition-colors flex items-center justify-center">
                                    <Edit size={16} />
                                  </button>
-                                 <button onClick={(e) => { e.stopPropagation(); setStatementRecord(record); }} className="p-1.5 px-2 text-[#71717a] hover:text-[#3f3f46] bg-[#fafafa] hover:bg-zinc-100 rounded-lg dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-[#a1a1aa] transition-colors flex items-center justify-center">
+                                 <button onClick={(e) => { e.stopPropagation(); setStatementRecord(record); }} className="p-1.5 px-2 text-[#71717a] dark:text-[#a1a1aa] hover:text-[#3f3f46] dark:text-zinc-200 bg-[#fafafa] hover:bg-zinc-100 rounded-lg darkdark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-[#a1a1aa] transition-colors flex items-center justify-center">
                                    <Printer size={16} />
                                  </button>
                                  <button onClick={(e) => { e.stopPropagation(); setDeletingRecord(record); }} className="p-1.5 px-2 text-red-500 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded-lg dark:bg-red-500/10 dark:hover:bg-red-500/20 transition-colors flex items-center justify-center">
@@ -2735,7 +2829,7 @@ function AppContent() {
                       </div>
                     ))
                   ) : (
-                    <div className="text-center py-10 bg-[#ffffff] dark:bg-zinc-900 shadow-sm text-[#a1a1aa] dark:text-[#71717a] font-medium">
+                    <div className="text-center py-10 bg-[#ffffff] dark:bg-zinc-900 shadow-sm text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] font-medium">
                       Tiada rekod dijumpai.
                     </div>
                   )}
@@ -2762,7 +2856,7 @@ function AppContent() {
                         />
                       </th>
                       <th 
-                        className="px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  cursor-pointer select-none hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
+                        className="px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  cursor-pointer select-none hover:bg-zinc-100 dark:hoverdark:bg-zinc-800/80 transition-colors group"
                         onClick={() => {
                           if (nameSortOrder === 'asc') {
                             setNameSortOrder('desc');
@@ -2791,7 +2885,7 @@ function AppContent() {
                       <th className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  text-right">Total Fee</th>
                       <th className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  text-right">Bayaran Terakhir</th>
                       <th 
-                        className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  text-center cursor-pointer select-none hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors group"
+                        className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5]  text-center cursor-pointer select-none hover:bg-zinc-100 dark:hoverdark:bg-zinc-800/80 transition-colors group"
                         onClick={() => {
                           if (dateSortOrder === 'desc') {
                             setDateSortOrder('asc');
@@ -2844,7 +2938,7 @@ function AppContent() {
                               exit={{ opacity: 0, scale: 0.95 }}
                               transition={{ duration: 0.2 }}
                               onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}
-                              className={`border-b border-[#f4f4f5] /50 hover:bg-[#fafafa] dark:hover:bg-zinc-900 cursor-pointer transition-colors ${isOverdue ? 'bg-red-50/30 dark:bg-red-900/10 border-l-2 border-l-red-500' : (record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-[#fafafa]/50 dark:bg-zinc-900/30' : '')} ${record.bakiFeeTerkini > 2000 && !isOverdue ? 'bg-amber-50/10 dark:bg-amber-900/10' : ''} ${expandedRowId === record.id ? 'bg-zinc-100/50 dark:bg-zinc-800/30' : ''}`}
+                              className={`border-b border-[#f4f4f5] /50 hover:bg-[#fafafa] dark:hover:bg-zinc-900 cursor-pointer transition-colors ${isOverdue ? 'bg-red-50/30 dark:bg-red-900/10 border-l-2 border-l-red-500' : (record.bakiFeeTerkini > 0 && index % 2 === 0 ? 'bg-[#fafafa]/50 dark:bg-zinc-900/30' : '')} ${record.bakiFeeTerkini > 2000 && !isOverdue ? 'bg-amber-50/10 dark:bg-amber-900/10' : ''} ${expandedRowId === record.id ? 'bg-zinc-100/50 darkdark:bg-zinc-800/30' : ''}`}
                             >
                             <td className="px-3 sm:px-4 py-3 border-r border-[#f4f4f5] /50">
                               <div className="flex items-center justify-center gap-2 font-mono text-[#a1a1aa]">
@@ -2862,7 +2956,7 @@ function AppContent() {
                                   }}
                                 />
                                 <span className="cursor-pointer" onClick={() => setExpandedRowId(expandedRowId === record.id ? null : record.id)}>
-                                  {expandedRowId === record.id ? <ChevronDown size={14} className="text-[#52525b] dark:text-[#a1a1aa]" /> : <ChevronRight size={14} className="text-[#a1a1aa] dark:text-[#52525b]" />}
+                                  {expandedRowId === record.id ? <ChevronDown size={14} className="text-[#52525b] dark:text-[#a1a1aa]" /> : <ChevronRight size={14} className="text-[#a1a1aa] dark:text-[#52525b] dark:text-zinc-300" />}
                                 </span>
                                 <span className="hidden sm:inline text-xs">{index + 1}</span>
                               </div>
@@ -2871,7 +2965,7 @@ function AppContent() {
   <div className="flex items-center justify-between group">
     <span>
       {index > 0 && filteredRecords[index - 1].nama === record.nama ? (
-        <span className="text-zinc-300 dark:text-[#3f3f46] font-normal select-none" title={record.nama}>"</span>
+        <span className="text-zinc-300 dark:text-[#3f3f46] dark:text-zinc-200 font-normal select-none" title={record.nama}>"</span>
       ) : (
         record.nama
       )}
@@ -2901,14 +2995,14 @@ function AppContent() {
                                     e.currentTarget.blur();
                                   }
                                 }}
-                                className="w-full min-w-[150px] bg-transparent border border-transparent hover:border-[#d4d4d8] dark:hover:border-zinc-700 focus:border-blue-500 dark:focus:border-blue-500 focus:bg-[#ffffff] dark:focus:bg-zinc-800 rounded px-2 py-1.5 text-[12px] text-[#3f3f46]  transition-colors placeholder:text-[#a1a1aa] dark:placeholder:text-[#52525b] outline-none"
+                                className="w-full min-w-[150px] bg-transparent border border-transparent hover:border-[#d4d4d8] dark:hover:border-zinc-700 focus:border-blue-500 dark:focus:border-blue-500 focus:bg-[#ffffff] dark:focusdark:bg-zinc-800 rounded px-2 py-1.5 text-[12px] text-[#3f3f46] dark:text-zinc-200  transition-colors placeholder:text-[#a1a1aa] dark:placeholder:text-[#52525b] dark:text-zinc-300 outline-none"
                               />
                             </td>
                             <td className=" px-3 sm:px-4 py-3 font-mono text-[#52525b] dark:text-[#a1a1aa] border-r border-[#f4f4f5] /50 text-right">{formatRM(record.totalFee)}</td>
                             <td className=" px-3 sm:px-4 py-3 font-mono border-r border-[#f4f4f5] /50 text-[#059669] dark:text-emerald-500 text-right bg-emerald-50/50 dark:bg-emerald-900/10">
                               {record.bayaranTerakhir > 0 ? '+' : ''}{formatRM(record.bayaranTerakhir)}
                             </td>
-                            <td className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5] /50 text-center text-[#71717a] font-mono text-[11px]">{formatDateDMY(record.tarikh)}</td>
+                            <td className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5] /50 text-center text-[#71717a] dark:text-[#a1a1aa] font-mono text-[11px]">{formatDateDMY(record.tarikh)}</td>
                             <td className=" px-3 sm:px-4 py-3 font-mono border-r border-[#f4f4f5] /50 text-right text-[#a1a1aa]">{formatRM(record.bakiSebelum)}</td>
                             <td className="px-3 sm:px-4 py-3 border-r border-[#f4f4f5] /50">
                               <div className="flex items-center justify-end gap-2 font-mono font-bold">
@@ -2960,7 +3054,7 @@ function AppContent() {
 
                                 <button 
                                   onClick={() => setEditingRecord(record)}
-                                  className="text-[#52525b]  hover:text-blue-600 dark:hover:text-blue-400 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 p-1.5 rounded-lg transition-colors"
+                                  className="text-[#52525b] dark:text-zinc-300  hover:text-blue-600 dark:hover:text-blue-400 bg-zinc-100 hover:bg-zinc-200 darkdark:bg-zinc-800 dark:hover:bg-zinc-700 p-1.5 rounded-lg transition-colors"
                                   title="Kemaskini Maklumat"
                                 >
                                   <Edit size={14} />
@@ -2975,7 +3069,7 @@ function AppContent() {
 
                                 <button 
                                   onClick={() => setDeletingRecord(record)}
-                                  className="text-[#a1a1aa] dark:text-[#71717a] hover:text-red-600 dark:hover:text-red-400 transition-colors bg-zinc-100 dark:bg-zinc-800 p-1.5 rounded-lg"
+                                  className="text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] hover:text-red-600 dark:hover:text-red-400 transition-colors bg-zinc-100 darkdark:bg-zinc-800 p-1.5 rounded-lg"
                                   title="Padam Pelanggan"
                                 >
                                   <Trash2 size={14} />
@@ -3013,7 +3107,7 @@ function AppContent() {
                         animate={{ opacity: 1 }} 
                         exit={{ opacity: 0 }}
                       >
-                        <td colSpan={10} className="px-4 py-8 text-center text-[#a1a1aa] dark:text-[#71717a] font-medium">
+                        <td colSpan={10} className="px-4 py-8 text-center text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] font-medium">
                           Tiada rekod dijumpai.
                         </td>
                       </motion.tr>
@@ -3023,11 +3117,11 @@ function AppContent() {
                 </table>
               </div>
               <div className="p-4 bg-[#ffffff] dark:bg-zinc-950 border-t border-[#e4e4e7]  flex justify-between items-center text-xs text-[#71717a] dark:text-[#a1a1aa]">
-                <div>Menunjukkan <span className="font-medium text-[#18181b] ">{filteredRecords.length}</span> daripada <span className="font-medium text-[#18181b] ">{records.length}</span> rekod</div>
+                <div>Menunjukkan <span className="font-medium text-[#18181b] dark:text-white ">{filteredRecords.length}</span> daripada <span className="font-medium text-[#18181b] dark:text-white ">{records.length}</span> rekod</div>
                 <div className="flex gap-2 hidden sm:flex">
-                  <button className="px-3 py-1.5 border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-900 hover:bg-[#fafafa] dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors" disabled>Kembali</button>
-                  <button className="px-3 py-1.5 border-none rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-[#18181b] font-medium shadow-sm">1</button>
-                  <button className="px-3 py-1.5 border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-900 hover:bg-[#fafafa] dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors" disabled>Seterusnya</button>
+                  <button className="px-3 py-1.5 border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-900 hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800 disabled:opacity-50 transition-colors" disabled>Kembali</button>
+                  <button className="px-3 py-1.5 border-none rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-[#18181b] dark:text-white font-medium shadow-sm">1</button>
+                  <button className="px-3 py-1.5 border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-900 hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800 disabled:opacity-50 transition-colors" disabled>Seterusnya</button>
                 </div>
               </div>
             </div>
@@ -3100,7 +3194,7 @@ function AppContent() {
                   <Users size={18} className="text-blue-500" />
                   Pilih Kontak
                 </h3>
-                <button onClick={() => setIsContactPickerOpen(false)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setIsContactPickerOpen(false)} className="text-[#a1a1aa] hover:text-[#52525b] dark:text-zinc-300 dark:hover:text-zinc-300 p-1.5 rounded-md hover:bg-zinc-100 dark:hoverdark:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -3110,7 +3204,7 @@ function AppContent() {
                   <input
                     type="text"
                     placeholder="Cari kontak..."
-                    className="w-full pl-9 pr-3 py-2 bg-zinc-100 dark:bg-zinc-800 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500/20 text-[#18181b] dark:text-white"
+                    className="w-full pl-9 pr-3 py-2 bg-zinc-100 darkdark:bg-zinc-800 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500/20 text-[#18181b] dark:text-white"
                     value={contactSearchQuery}
                     onChange={(e) => setContactSearchQuery(e.target.value)}
                   />
@@ -3128,7 +3222,7 @@ function AppContent() {
                   <button
                     key={contact.resourceName || idx}
                     onClick={() => handleSelectContact(contact)}
-                    className="w-full flex items-center justify-between p-3 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors group"
+                    className="w-full flex items-center justify-between p-3 text-left hover:bg-zinc-100 dark:hoverdark:bg-zinc-800 rounded-lg transition-colors group"
                   >
                     <div>
                       <div className="font-medium text-sm text-[#18181b] dark:text-white">
@@ -3158,11 +3252,11 @@ function AppContent() {
               className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden"
             >
               <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 shrink-0">
-                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
+                <h3 className="font-semibold text-[#18181b] dark:text-white  flex items-center gap-2">
                   <Edit size={18} className="text-amber-500" />
                   Edit Rekod Pelanggan
                 </h3>
-                <button onClick={() => setEditingRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setEditingRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:text-zinc-300 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hoverdark:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -3189,7 +3283,7 @@ function AppContent() {
                     <input
                       type="text"
                       required
-                      className={`px-3 py-2 w-full border ${editingRecord.nama && records.some(r => r.id !== editingRecord.id && r.nama.toLowerCase().trim() === editingRecord.nama.toLowerCase().trim()) ? 'border-amber-400 focus:ring-amber-500/20 focus:border-amber-500' : 'border-[#e4e4e7]  focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b] `}
+                      className={`px-3 py-2 w-full border ${editingRecord.nama && records.some(r => r.id !== editingRecord.id && r.nama.toLowerCase().trim() === editingRecord.nama.toLowerCase().trim()) ? 'border-amber-400 focus:ring-amber-500/20 focus:border-amber-500' : 'border-[#e4e4e7]  focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b] dark:text-white `}
                       value={editingRecord.nama || ''}
                       onChange={(e) => setEditingRecord({ ...editingRecord, nama: e.target.value })}
                       autoFocus
@@ -3207,7 +3301,7 @@ function AppContent() {
                       <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">No. Telefon</label>
                       <input
                         type="text"
-                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white "
                         placeholder="Contoh: 0123456789"
                         value={editingRecord.telefon || ''}
                         onChange={(e) => setEditingRecord({ ...editingRecord, telefon: e.target.value })}
@@ -3220,7 +3314,7 @@ function AppContent() {
                     <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">Alamat</label>
                     <textarea
                       rows={2}
-                      className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
+                      className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white "
                       placeholder="Alamat penuh..."
                       value={editingRecord.alamat || ''}
                       onChange={(e) => setEditingRecord({ ...editingRecord, alamat: e.target.value })}
@@ -3235,7 +3329,7 @@ function AppContent() {
                       <input
                         type="text"
                         required
-                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] "
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] dark:text-white "
                         value={editingRecord.kes}
                         onChange={(e) => setEditingRecord({ ...editingRecord, kes: e.target.value })}
                       />
@@ -3274,7 +3368,7 @@ function AppContent() {
                       <input
                         type="date"
                         required
-                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] "
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] dark:text-white "
                         value={formatDateISO(editingRecord.tarikh)}
                         onChange={(e) => setEditingRecord({ ...editingRecord, tarikh: formatDateDMY(e.target.value) })}
                       />
@@ -3291,7 +3385,7 @@ function AppContent() {
                         step="0.01"
                         min="0"
                         required
-                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg font-mono text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg font-mono text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white "
                         value={editingRecord.totalFee}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value) || 0;
@@ -3303,7 +3397,7 @@ function AppContent() {
                           })
                         }}
                       />
-                      <p className="text-[10px] text-[#a1a1aa] dark:text-[#71717a] mt-1.5">Baki fee akan dikira semula secara automatik</p>
+                      <p className="text-[10px] text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] mt-1.5">Baki fee akan dikira semula secara automatik</p>
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
@@ -3313,7 +3407,7 @@ function AppContent() {
                         <button 
                           type="button" 
                           onClick={() => setEditingRecord({...editingRecord, bakiMileage: Math.max(0, (editingRecord.bakiMileage || 0) - 50)})}
-                          className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg font-bold text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
+                          className="px-3 py-2 bg-zinc-100 darkdark:bg-zinc-800 rounded-lg font-bold text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
                           title="Tolak RM50"
                         >
                           -50
@@ -3321,20 +3415,20 @@ function AppContent() {
                         <input
                           type="number"
                           step="0.01"
-                          className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg font-mono text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b]  text-center"
+                          className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg font-mono text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white  text-center"
                           value={editingRecord.bakiMileage}
                           onChange={(e) => setEditingRecord({ ...editingRecord, bakiMileage: parseFloat(e.target.value) || 0 })}
                         />
                         <button 
                           type="button" 
                           onClick={() => setEditingRecord({...editingRecord, bakiMileage: (editingRecord.bakiMileage || 0) + 50})}
-                          className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg font-bold text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
+                          className="px-3 py-2 bg-zinc-100 darkdark:bg-zinc-800 rounded-lg font-bold text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
                           title="Tambah RM50"
                         >
                           +50
                         </button>
                       </div>
-                      <p className="text-[10px] text-[#71717a] mt-1.5">Gunakan butang untuk tambah/tolak, atau taip jumlah terus.</p>
+                      <p className="text-[10px] text-[#71717a] dark:text-[#a1a1aa] mt-1.5">Gunakan butang untuk tambah/tolak, atau taip jumlah terus.</p>
                     </div>
                   </div>
 
@@ -3343,7 +3437,7 @@ function AppContent() {
                       Nota / Ringkasan Kes
                     </label>
                     <textarea
-                      className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b]  resize-y min-h-[80px]"
+                      className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] dark:text-white  resize-y min-h-[80px]"
                       placeholder="Masukkan nota tambahan (pilihan)"
                       value={editingRecord.nota || ''}
                       onChange={(e) => setEditingRecord({ ...editingRecord, nota: e.target.value })}
@@ -3354,7 +3448,7 @@ function AppContent() {
                     <button 
                       type="button"
                       onClick={() => setEditingRecord(null)}
-                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
+                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hoverdark:bg-zinc-800/50"
                     >
                       Batal
                     </button>
@@ -3386,14 +3480,14 @@ function AppContent() {
                 <div className="w-16 h-16 rounded-full bg-red-50 dark:bg-red-500/10 flex items-center justify-center mx-auto mb-6">
                   <AlertTriangle size={28} className="text-red-500 dark:text-red-400" />
                 </div>
-                <h3 className="font-semibold text-[#18181b]  text-lg mb-3">Padam Rekod Terpilih</h3>
+                <h3 className="font-semibold text-[#18181b] dark:text-white  text-lg mb-3">Padam Rekod Terpilih</h3>
                 <p className="text-[#71717a] dark:text-[#a1a1aa] text-sm mb-8 leading-relaxed">
-                  Adakah anda pasti untuk memadam <strong className="text-[#18181b] ">{selectedRecords.length}</strong> rekod yang terpilih? Tindakan ini tidak boleh dikembalikan.
+                  Adakah anda pasti untuk memadam <strong className="text-[#18181b] dark:text-white ">{selectedRecords.length}</strong> rekod yang terpilih? Tindakan ini tidak boleh dikembalikan.
                 </p>
                 <div className="flex justify-center gap-3">
                   <button 
                     onClick={() => setIsDeletingSelected(false)}
-                    className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-[#fafafa] dark:hover:bg-zinc-800 text-[#52525b]  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
+                    className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800 text-[#52525b] dark:text-zinc-300  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
                   >
                     Batal
                   </button>
@@ -3424,14 +3518,14 @@ function AppContent() {
                 <div className="w-16 h-16 rounded-full bg-red-50 dark:bg-red-500/10 flex items-center justify-center mx-auto mb-6">
                   <AlertTriangle size={28} className="text-red-500 dark:text-red-400" />
                 </div>
-                <h3 className="font-semibold text-[#18181b]  text-lg mb-3">Padam Rekod Kes</h3>
+                <h3 className="font-semibold text-[#18181b] dark:text-white  text-lg mb-3">Padam Rekod Kes</h3>
                 <p className="text-[#71717a] dark:text-[#a1a1aa] text-sm mb-8 leading-relaxed">
-                  Adakah anda pasti untuk memadam rekod kes <strong className="text-[#18181b] ">{deletingRecord.nama}</strong>? Tindakan ini tidak boleh dikembalikan.
+                  Adakah anda pasti untuk memadam rekod kes <strong className="text-[#18181b] dark:text-white ">{deletingRecord.nama}</strong>? Tindakan ini tidak boleh dikembalikan.
                 </p>
                 <div className="flex justify-center gap-3">
                   <button 
                     onClick={() => setDeletingRecord(null)}
-                    className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-[#fafafa] dark:hover:bg-zinc-800 text-[#52525b]  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
+                    className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800 text-[#52525b] dark:text-zinc-300  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
                   >
                     Batal
                   </button>
@@ -3462,14 +3556,14 @@ function AppContent() {
                 <div className="w-14 h-14 rounded-full bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center mx-auto mb-4 border border-emerald-100 dark:border-emerald-900/30">
                   <CheckCircle size={30} className="text-[#059669] dark:text-emerald-400" />
                 </div>
-                <h3 className="font-semibold text-[#18181b]  text-lg mb-2">Pengesahan Set Baki Fee RM0</h3>
+                <h3 className="font-semibold text-[#18181b] dark:text-white  text-lg mb-2">Pengesahan Set Baki Fee RM0</h3>
                 <p className="text-[#52525b] dark:text-[#a1a1aa] text-sm mb-6 leading-relaxed">
-                  Adakah anda pasti untuk menetapkan baki fee bagi pelanggan <strong className="text-[#18181b] ">{settlingRecord.nama}</strong> ({settlingRecord.kes}) daripada <span className="font-mono font-bold text-[#d97706] dark:text-amber-400">{formatRM(settlingRecord.bakiFeeTerkini)}</span> terus kepada <span className="font-mono font-bold text-[#059669] dark:text-emerald-400">RM0.00</span>?
+                  Adakah anda pasti untuk menetapkan baki fee bagi pelanggan <strong className="text-[#18181b] dark:text-white ">{settlingRecord.nama}</strong> ({settlingRecord.kes}) daripada <span className="font-mono font-bold text-[#d97706] dark:text-amber-400">{formatRM(settlingRecord.bakiFeeTerkini)}</span> terus kepada <span className="font-mono font-bold text-[#059669] dark:text-emerald-400">RM0.00</span>?
                 </p>
                 <div className="flex justify-center gap-3">
                   <button 
                     onClick={() => setSettlingRecord(null)}
-                    className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-[#fafafa] dark:hover:bg-zinc-800 text-[#52525b]  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
+                    className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800 text-[#52525b] dark:text-zinc-300  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex-1"
                   >
                     Batal
                   </button>
@@ -3498,11 +3592,11 @@ function AppContent() {
               className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden"
             >
               <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 shrink-0">
-                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
+                <h3 className="font-semibold text-[#18181b] dark:text-white  flex items-center gap-2">
                   <Users size={18} className="text-blue-500" />
                   Rekod Pelanggan Baru
                 </h3>
-                <button onClick={() => setIsNewRecordModalOpen(false)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setIsNewRecordModalOpen(false)} className="text-[#a1a1aa] hover:text-[#52525b] dark:text-zinc-300 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hoverdark:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -3529,7 +3623,7 @@ function AppContent() {
                     <input
                       type="text"
                       required
-                      className={`px-3 py-2 w-full border ${newRecordData.nama && records.some(r => r.nama.toLowerCase().trim() === newRecordData.nama.toLowerCase().trim()) ? 'border-amber-400 focus:ring-amber-500/20 focus:border-amber-500' : 'border-[#e4e4e7]  focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b] `}
+                      className={`px-3 py-2 w-full border ${newRecordData.nama && records.some(r => r.nama.toLowerCase().trim() === newRecordData.nama.toLowerCase().trim()) ? 'border-amber-400 focus:ring-amber-500/20 focus:border-amber-500' : 'border-[#e4e4e7]  focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b] dark:text-white `}
                       placeholder="Contoh: Ali bin Abu"
                       value={newRecordData.nama || ''}
                       onChange={(e) => setNewRecordData({ ...newRecordData, nama: e.target.value })}
@@ -3548,7 +3642,7 @@ function AppContent() {
                       <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">No. Telefon</label>
                       <input
                         type="text"
-                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white "
                         placeholder="Contoh: 0123456789"
                         value={newRecordData.telefon || ''}
                         onChange={(e) => setNewRecordData({ ...newRecordData, telefon: e.target.value })}
@@ -3561,7 +3655,7 @@ function AppContent() {
                     <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">Alamat</label>
                     <textarea
                       rows={2}
-                      className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
+                      className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white "
                       placeholder="Alamat penuh..."
                       value={newRecordData.alamat || ''}
                       onChange={(e) => setNewRecordData({ ...newRecordData, alamat: e.target.value })}
@@ -3576,7 +3670,7 @@ function AppContent() {
                       <input
                         type="text"
                         required
-                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] "
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] dark:text-white "
                         placeholder="Contoh: Saman Sivil"
                         value={newRecordData.kes}
                         onChange={(e) => setNewRecordData({ ...newRecordData, kes: e.target.value })}
@@ -3589,7 +3683,7 @@ function AppContent() {
                       <input
                         type="date"
                         required
-                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] "
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] dark:text-white "
                         value={newRecordData.tarikh}
                         onChange={(e) => setNewRecordData({ ...newRecordData, tarikh: e.target.value })}
                       />
@@ -3606,7 +3700,7 @@ function AppContent() {
                         step="0.01"
                         min="0"
                         required
-                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg font-mono text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg font-mono text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white "
                         placeholder="0.00"
                         value={newRecordData.totalFee}
                         onChange={(e) => setNewRecordData({ ...newRecordData, totalFee: e.target.value })}
@@ -3620,7 +3714,7 @@ function AppContent() {
                         type="number"
                         step="0.01"
                         min="0"
-                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg font-mono text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] "
+                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg font-mono text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white "
                         placeholder="0.00"
                         value={newRecordData.bakiMileage}
                         onChange={(e) => setNewRecordData({ ...newRecordData, bakiMileage: e.target.value })}
@@ -3633,7 +3727,7 @@ function AppContent() {
                       Nota / Ringkasan Kes
                     </label>
                     <textarea
-                      className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b]  resize-y min-h-[60px]"
+                      className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] dark:text-white  resize-y min-h-[60px]"
                       placeholder="Masukkan nota tambahan (pilihan)"
                       value={newRecordData.nota || ''}
                       onChange={(e) => setNewRecordData({ ...newRecordData, nota: e.target.value })}
@@ -3644,7 +3738,7 @@ function AppContent() {
                     <button 
                       type="button"
                       onClick={() => setIsNewRecordModalOpen(false)}
-                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
+                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hoverdark:bg-zinc-800/50"
                     >
                       Batal
                     </button>
@@ -3673,11 +3767,11 @@ function AppContent() {
               className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-sm flex flex-col overflow-hidden"
             >
               <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 shrink-0">
-                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
+                <h3 className="font-semibold text-[#18181b] dark:text-white  flex items-center gap-2">
                   <Car size={18} className="text-teal-500" />
                   Pelarasan Mileage
                 </h3>
-                <button onClick={() => setMileageAdjustmentRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setMileageAdjustmentRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:text-zinc-300 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hoverdark:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -3694,14 +3788,14 @@ function AppContent() {
                     <button 
                       type="button" 
                       onClick={() => setMileageAdjustmentType('tambah')}
-                      className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${mileageAdjustmentType === 'tambah' ? 'bg-teal-500 text-white shadow-sm' : 'bg-[#fafafa] dark:bg-zinc-900 text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                      className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${mileageAdjustmentType === 'tambah' ? 'bg-teal-500 text-white shadow-sm' : 'bg-[#fafafa] dark:bg-zinc-900 text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-100 dark:hoverdark:bg-zinc-800'}`}
                     >
                       Tambah (+)
                     </button>
                     <button 
                       type="button" 
                       onClick={() => setMileageAdjustmentType('tolak')}
-                      className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer border-l border-[#e4e4e7]  ${mileageAdjustmentType === 'tolak' ? 'bg-teal-500 text-white border-transparent shadow-sm' : 'bg-[#fafafa] dark:bg-zinc-900 text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                      className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer border-l border-[#e4e4e7]  ${mileageAdjustmentType === 'tolak' ? 'bg-teal-500 text-white border-transparent shadow-sm' : 'bg-[#fafafa] dark:bg-zinc-900 text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-100 dark:hoverdark:bg-zinc-800'}`}
                     >
                       Tolak (-)
                     </button>
@@ -3720,7 +3814,7 @@ function AppContent() {
                         step="0.01"
                         min="0.01"
                         required
-                        className="pl-10 pr-4 py-2.5 w-full border border-[#e4e4e7]  focus:ring-teal-500/20 focus:border-teal-500 rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b]  bg-[#ffffff] dark:bg-zinc-950"
+                        className="pl-10 pr-4 py-2.5 w-full border border-[#e4e4e7]  focus:ring-teal-500/20 focus:border-teal-500 rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b] dark:text-white  bg-[#ffffff] dark:bg-zinc-950"
                         placeholder="0.00"
                         value={mileageAdjustmentAmount}
                         onChange={(e) => setMileageAdjustmentAmount(e.target.value)}
@@ -3733,7 +3827,7 @@ function AppContent() {
                     <button 
                       type="button"
                       onClick={() => setMileageAdjustmentRecord(null)}
-                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
+                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hoverdark:bg-zinc-800/50"
                     >
                       Batal
                     </button>
@@ -3760,11 +3854,11 @@ function AppContent() {
               className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden"
             >
               <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 shrink-0">
-                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
+                <h3 className="font-semibold text-[#18181b] dark:text-white  flex items-center gap-2">
                   <CreditCard size={18} className="text-blue-500" />
                   Kemaskini Bayaran
                 </h3>
-                <button onClick={() => setPaymentRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setPaymentRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:text-zinc-300 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hoverdark:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -3812,7 +3906,7 @@ function AppContent() {
                         step="0.01"
                         min="0"
                         max={paymentRecord.bakiFeeTerkini}
-                        className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-[#e4e4e7]  focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b]  bg-[#ffffff] dark:bg-zinc-950`}
+                        className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-[#e4e4e7]  focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b] dark:text-white  bg-[#ffffff] dark:bg-zinc-950`}
                         placeholder="0.00"
                         value={paymentAmount}
                         onChange={(e) => {
@@ -3858,7 +3952,7 @@ function AppContent() {
                           step="0.01"
                           min="0"
                           max={paymentRecord.bakiMileage}
-                          className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-[#e4e4e7]  focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b]  bg-[#ffffff] dark:bg-zinc-950`}
+                          className={`pl-10 pr-4 py-2.5 w-full border ${paymentError ? 'border-red-500 focus:ring-red-500/20 focus:border-red-500' : 'border-[#e4e4e7]  focus:ring-blue-500/20 focus:border-blue-500'} rounded-lg font-mono text-lg focus:outline-none focus:ring-2 transition-all font-medium text-[#18181b] dark:text-white  bg-[#ffffff] dark:bg-zinc-950`}
                           placeholder="0.00"
                           value={paymentMileageAmount}
                           onChange={(e) => {
@@ -3888,7 +3982,7 @@ function AppContent() {
                     <input
                       type="date"
                       required
-                      className="pl-3 pr-4 py-2.5 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] "
+                      className="pl-3 pr-4 py-2.5 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] dark:text-white "
                       value={paymentDate}
                       onChange={(e) => setPaymentDate(e.target.value)}
                     />
@@ -3900,7 +3994,7 @@ function AppContent() {
                     <div className="relative">
                       <select
                         required
-                        className="pl-3 pr-8 py-2.5 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b]  appearance-none"
+                        className="pl-3 pr-8 py-2.5 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] dark:text-white  appearance-none"
                         value={paymentMethod}
                         onChange={(e) => setPaymentMethod(e.target.value)}
                       >
@@ -3919,7 +4013,7 @@ function AppContent() {
                     </label>
                     <input
                       type="text"
-                      className="pl-3 pr-4 py-2.5 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] "
+                      className="pl-3 pr-4 py-2.5 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-[#18181b] dark:text-white "
                       placeholder="Contoh: Bayaran pendahuluan, ansuran ke-2, dll."
                       value={paymentNote}
                       onChange={(e) => setPaymentNote(e.target.value)}
@@ -3929,7 +4023,7 @@ function AppContent() {
                     <button 
                       type="button" 
                       onClick={() => setPaymentRecord(null)}
-                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
+                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-zinc-100 font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer rounded-lg hover:bg-zinc-100/50 dark:hoverdark:bg-zinc-800/50"
                     >
                       Batal
                     </button>
@@ -3959,11 +4053,11 @@ function AppContent() {
               className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-3xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
             >
               <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 print:hidden">
-                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
+                <h3 className="font-semibold text-[#18181b] dark:text-white  flex items-center gap-2">
                   <FileText size={18} className="text-[#52525b] dark:text-[#a1a1aa]" />
                   Pratinjau: {invoiceType === 'INVOIS' ? 'Invois (Bil Tuntutan)' : 'Sebut Harga'}
                 </h3>
-                <button onClick={() => setInvoiceRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setInvoiceRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:text-zinc-300 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hoverdark:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -3972,13 +4066,13 @@ function AppContent() {
                 <div className="flex gap-2 w-full sm:w-auto">
                   <button
                     onClick={() => setInvoiceType('INVOIS')}
-                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-colors ${invoiceType === 'INVOIS' ? 'bg-blue-600 text-white shadow-sm' : 'bg-zinc-100 text-[#3f3f46] hover:bg-zinc-200 dark:bg-zinc-800  dark:hover:bg-zinc-700'}`}
+                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-colors ${invoiceType === 'INVOIS' ? 'bg-blue-600 text-white shadow-sm' : 'bg-zinc-100 text-[#3f3f46] dark:text-zinc-200 hover:bg-zinc-200 darkdark:bg-zinc-800  dark:hover:bg-zinc-700'}`}
                   >
                     Invois
                   </button>
                   <button
                     onClick={() => setInvoiceType('SEBUT HARGA')}
-                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-colors ${invoiceType === 'SEBUT HARGA' ? 'bg-blue-600 text-white shadow-sm' : 'bg-zinc-100 text-[#3f3f46] hover:bg-zinc-200 dark:bg-zinc-800  dark:hover:bg-zinc-700'}`}
+                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-colors ${invoiceType === 'SEBUT HARGA' ? 'bg-blue-600 text-white shadow-sm' : 'bg-zinc-100 text-[#3f3f46] dark:text-zinc-200 hover:bg-zinc-200 darkdark:bg-zinc-800  dark:hover:bg-zinc-700'}`}
                   >
                     Sebut Harga
                   </button>
@@ -4080,11 +4174,11 @@ function AppContent() {
                       <div className="flex justify-end pt-12">
                         <div className="text-center">
                           <div className="h-[85px]"></div>
-                          <p className="font-bold text-sm text-[#18181b] uppercase">Hairi Mustafa & Associates</p>
-                          <p className="text-xs text-[#71717a] mt-1">Peguam Syarie & Pesuruhjaya Sumpah</p>
+                          <p className="font-bold text-sm text-[#18181b] dark:text-white uppercase">Hairi Mustafa & Associates</p>
+                          <p className="text-xs text-[#71717a] dark:text-[#a1a1aa] mt-1">Peguam Syarie & Pesuruhjaya Sumpah</p>
                         </div>
                       </div>
-                      <div className="mt-12 pt-6 border-t border-dashed border-[#d4d4d8] text-center text-[10px] text-[#71717a] italic">
+                      <div className="mt-12 pt-6 border-t border-dashed border-[#d4d4d8] text-center text-[10px] text-[#71717a] dark:text-[#a1a1aa] italic">
                         Dokumen ini dijana oleh komputer. Tandatangan tidak diperlukan.
                       </div>
                     </div>
@@ -4107,11 +4201,11 @@ function AppContent() {
               className="bg-[#ffffff]  rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-3xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
             >
               <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 /50 print:hidden">
-                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
-                  <Printer size={18} className="text-[#52525b] " />
+                <h3 className="font-semibold text-[#18181b] dark:text-white  flex items-center gap-2">
+                  <Printer size={18} className="text-[#52525b] dark:text-zinc-300 " />
                   Pratinjau Penyata Penuh
                 </h3>
-                <button onClick={() => setStatementRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] :text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 :bg-zinc-800">
+                <button onClick={() => setStatementRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -4265,15 +4359,15 @@ function AppContent() {
               <div className="p-5 border-t border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 flex justify-end gap-3 print:hidden">
                 <button 
                   onClick={() => setStatementRecord(null)}
-                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800 text-[#52525b]  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-zinc-100/50 dark:hoverdark:bg-zinc-800 text-[#52525b] dark:text-zinc-300  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                 >
                   Tutup
                 </button>
                 <button 
                   onClick={handlePrint}
-                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-950 hover:bg-[#fafafa] dark:hover:bg-zinc-800 text-[#3f3f46] dark:text-[#e4e4e7] font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
+                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-950 hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800 text-[#3f3f46] dark:text-[#e4e4e7] font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
                 >
-                  <Printer size={16} className="text-[#71717a]" />
+                  <Printer size={16} className="text-[#71717a] dark:text-[#a1a1aa]" />
                   Cetak
                 </button>
                 <button 
@@ -4310,11 +4404,11 @@ function AppContent() {
               className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-3xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
             >
               <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 print:hidden">
-                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
+                <h3 className="font-semibold text-[#18181b] dark:text-white  flex items-center gap-2">
                   <Printer size={18} className="text-[#52525b] dark:text-[#a1a1aa]" />
                   Pratinjau Penyata Ringkas
                 </h3>
-                <button onClick={() => setSimpleStatementRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setSimpleStatementRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:text-zinc-300 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hoverdark:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
@@ -4407,15 +4501,15 @@ function AppContent() {
               <div className="p-5 border-t border-[#f4f4f5] /50 bg-[#fafafa]/50 /50 flex justify-end gap-3 print:hidden">
                 <button 
                   onClick={() => setSimpleStatementRecord(null)}
-                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-zinc-100/50 :bg-zinc-800 text-[#52525b]  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-zinc-100/50 dark:bg-zinc-800 text-[#52525b] dark:text-zinc-300  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                 >
                   Tutup
                 </button>
                 <button 
                   onClick={handlePrint}
-                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg bg-[#ffffff]  hover:bg-[#fafafa] :bg-zinc-800 text-[#3f3f46]  font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
+                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg bg-[#ffffff]  hover:bg-[#fafafa] dark:bg-zinc-800 text-[#3f3f46] dark:text-zinc-200  font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
                 >
-                  <Printer size={16} className="text-[#71717a]" />
+                  <Printer size={16} className="text-[#71717a] dark:text-[#a1a1aa]" />
                   Cetak
                 </button>
                 <button 
@@ -4456,13 +4550,13 @@ function AppContent() {
                     <Printer size={16} className="text-blue-500" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-[#18181b] ">Cetak Resit</h3>
+                    <h3 className="font-semibold text-[#18181b] dark:text-white ">Cetak Resit</h3>
                     <p className="text-[11px] text-[#71717a] dark:text-[#a1a1aa] font-mono tracking-wider">REF: {receiptData.payment.id}</p>
                   </div>
                 </div>
                 <button 
                   onClick={() => setReceiptData(null)}
-                  className="p-1.5 text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer"
+                  className="p-1.5 text-[#a1a1aa] hover:text-[#52525b] dark:text-zinc-300 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hoverdark:bg-zinc-800 rounded-md transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer"
                 >
                   <X size={18} />
                 </button>
@@ -4532,9 +4626,9 @@ function AppContent() {
  <div className="text-sm font-bold text-[#000000] uppercase flex flex-col gap-2 text-left">
    <div>Butiran Kes: <span className="underline underline-offset-4">{receiptData.record.kes}</span></div>
    {receiptData.payment.nota && (
-     <div className="mt-2 normal-case font-normal text-[#52525b] text-[13px] text-left">
+     <div className="mt-2 normal-case font-normal text-[#52525b] dark:text-zinc-300 text-[13px] text-left">
        <span className="font-bold uppercase text-[#000000] text-[11px] block mb-0.5">Nota Bayaran:</span>
-       <span className="italic bg-[#fafafa] border border-[#e4e4e7] rounded px-2.5 py-1.5 inline-block text-[#3f3f46] font-mono">{receiptData.payment.nota}</span>
+       <span className="italic bg-[#fafafa] border border-[#e4e4e7] rounded px-2.5 py-1.5 inline-block text-[#3f3f46] dark:text-zinc-200 font-mono">{receiptData.payment.nota}</span>
      </div>
    )}
  </div>
@@ -4573,15 +4667,15 @@ function AppContent() {
 
                                {hasMileageReceipt && (
                                    <>
-                                     <div className="text-sm font-bold text-[#27272a]  flex justify-end gap-12">
+                                     <div className="text-sm font-bold text-[#27272a] dark:text-zinc-100  flex justify-end gap-12">
                                          <span>JUMLAH BAYARAN (MILEAGE):</span>
                                          <span className="w-32">RM {receiptData.payment.mileageAmount!.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
-                                     <div className="text-sm font-bold text-[#27272a]  flex justify-end gap-12">
+                                     <div className="text-sm font-bold text-[#27272a] dark:text-zinc-100  flex justify-end gap-12">
                                          <span>BAKI TERDAHULU (MILEAGE):</span>
                                          <span className="w-32">RM {bakiTerdahuluMileage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
-                                     <div className="text-sm font-bold text-[#27272a]  flex justify-end gap-12 pt-3 border-t border-[#18181b] ">
+                                     <div className="text-sm font-bold text-[#27272a] dark:text-zinc-100  flex justify-end gap-12 pt-3 border-t border-[#18181b] ">
                                          <span>BAKI TERKINI (MILEAGE):</span>
                                          <span className="w-32">RM {bakiTerkiniMileage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
@@ -4595,12 +4689,12 @@ function AppContent() {
                   <div className="flex justify-end pt-12">
                     <div className="text-center">
                       <img src="https://arleta.site/interactivelink/2510/cop-bulat.png" alt="Cop Rasmi" className="block mx-auto max-h-[85px] w-auto -mb-1" />
-                      <p className="font-bold text-sm text-[#18181b]  uppercase">Hairi Mustafa & Associates</p>
+                      <p className="font-bold text-sm text-[#18181b] dark:text-white  uppercase">Hairi Mustafa & Associates</p>
                       <p className="text-xs text-[#71717a] dark:text-[#a1a1aa] mt-1">Peguam Syarie & Pesuruhjaya Sumpah</p>
                     </div>
                   </div>
 
-                  <div className="mt-12 pt-6 border-t border-dashed border-[#d4d4d8]  text-center text-[10px] text-[#a1a1aa] dark:text-[#71717a] italic">
+                  <div className="mt-12 pt-6 border-t border-dashed border-[#d4d4d8]  text-center text-[10px] text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] italic">
                     Resit ini dijana oleh komputer, terima kasih atas urusan anda. Ref: {receiptData.payment.id}
                   </div>
                 </div>
@@ -4610,15 +4704,15 @@ function AppContent() {
               <div className="p-5 border-t border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50 flex justify-end gap-3 print:hidden">
                 <button 
                   onClick={() => setReceiptData(null)}
-                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-zinc-100/50 dark:hover:bg-zinc-800 text-[#52525b]  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg hover:bg-zinc-100/50 dark:hoverdark:bg-zinc-800 text-[#52525b] dark:text-zinc-300  font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                 >
                   Tutup
                 </button>
                 <button 
                   onClick={handlePrint}
-                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-950 hover:bg-[#fafafa] dark:hover:bg-zinc-800 text-[#3f3f46] dark:text-[#e4e4e7] font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
+                  className="px-5 py-2.5 text-sm border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-950 hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800 text-[#3f3f46] dark:text-[#e4e4e7] font-medium flex items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm"
                 >
-                  <Printer size={16} className="text-[#71717a]" />
+                  <Printer size={16} className="text-[#71717a] dark:text-[#a1a1aa]" />
                   Cetak
                 </button>
                 <button 
@@ -4670,7 +4764,7 @@ function AppContent() {
                 </button>
                 <button 
                   onClick={() => setShowExportReminder(false)}
-                  className="text-xs border border-[#d4d4d8]  text-[#3f3f46]  px-4 py-2 rounded font-medium hover:bg-[#fafafa] dark:hover:bg-zinc-800 transition-colors"
+                  className="text-xs border border-[#d4d4d8]  text-[#3f3f46] dark:text-zinc-200  px-4 py-2 rounded font-medium hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800 transition-colors"
                 >
                   Abaikan
                 </button>
@@ -4770,7 +4864,7 @@ function AppContent() {
                   <div className="flex justify-between items-start border-t border-[#d1d5db] pt-6">
                     <div className="text-sm font-bold text-[#000000] uppercase flex flex-col gap-2 text-left w-2/3">
                       <div>Terma & Syarat:</div>
-                      <p className="normal-case font-normal text-[#52525b] text-[11px] leading-relaxed text-left text-justify">
+                      <p className="normal-case font-normal text-[#52525b] dark:text-zinc-300 text-[11px] leading-relaxed text-left text-justify">
                         Penyata ringkas ini dikeluarkan sebagai rujukan status akaun pelanggan. Sila pastikan semua baki tertunggak (sekiranya ada) dijelaskan mengikut jadual yang telah dipersetujui. Untuk sebarang pertanyaan atau percanggahan maklumat, sila hubungi pihak kami dengan segera.
                       </p>
                     </div>
@@ -4855,9 +4949,9 @@ function AppContent() {
  <div className="text-sm font-bold text-[#000000] uppercase flex flex-col gap-2 text-left">
    <div>Butiran Kes: <span className="underline underline-offset-4">{currentRenderData.record.kes}</span></div>
    {currentRenderData.payment.nota && (
-     <div className="mt-2 normal-case font-normal text-[#52525b] text-[13px] text-left">
+     <div className="mt-2 normal-case font-normal text-[#52525b] dark:text-zinc-300 text-[13px] text-left">
        <span className="font-bold uppercase text-[#000000] text-[11px] block mb-0.5">Nota Bayaran:</span>
-       <span className="italic bg-[#fafafa] border border-[#e4e4e7] rounded px-2.5 py-1.5 inline-block text-[#3f3f46] font-mono">{currentRenderData.payment.nota}</span>
+       <span className="italic bg-[#fafafa] border border-[#e4e4e7] rounded px-2.5 py-1.5 inline-block text-[#3f3f46] dark:text-zinc-200 font-mono">{currentRenderData.payment.nota}</span>
      </div>
    )}
  </div>
@@ -4896,15 +4990,15 @@ function AppContent() {
 
                                {hasMileageReceipt && (
                                    <>
-                                     <div className="text-sm font-bold text-[#27272a]  flex justify-end gap-12">
+                                     <div className="text-sm font-bold text-[#27272a] dark:text-zinc-100  flex justify-end gap-12">
                                          <span>JUMLAH BAYARAN (MILEAGE):</span>
                                          <span className="w-32">RM {currentRenderData.payment.mileageAmount!.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
-                                     <div className="text-sm font-bold text-[#27272a]  flex justify-end gap-12">
+                                     <div className="text-sm font-bold text-[#27272a] dark:text-zinc-100  flex justify-end gap-12">
                                          <span>BAKI TERDAHULU (MILEAGE):</span>
                                          <span className="w-32">RM {bakiTerdahuluMileage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
-                                     <div className="text-sm font-bold text-[#27272a]  flex justify-end gap-12 pt-3 border-t border-[#18181b] ">
+                                     <div className="text-sm font-bold text-[#27272a] dark:text-zinc-100  flex justify-end gap-12 pt-3 border-t border-[#18181b] ">
                                          <span>BAKI TERKINI (MILEAGE):</span>
                                          <span className="w-32">RM {bakiTerkiniMileage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                      </div>
@@ -4918,12 +5012,12 @@ function AppContent() {
                   <div className="flex justify-end pt-12">
                     <div className="text-center">
                       <img src="https://arleta.site/interactivelink/2510/cop-bulat.png" alt="Cop Rasmi" className="block mx-auto max-h-[85px] w-auto -mb-1" />
-                      <p className="font-bold text-sm text-[#18181b]  uppercase">Hairi Mustafa & Associates</p>
+                      <p className="font-bold text-sm text-[#18181b] dark:text-white  uppercase">Hairi Mustafa & Associates</p>
                       <p className="text-xs text-[#71717a] dark:text-[#a1a1aa] mt-1">Peguam Syarie & Pesuruhjaya Sumpah</p>
                     </div>
                   </div>
 
-                  <div className="mt-12 pt-6 border-t border-dashed border-[#d4d4d8]  text-center text-[10px] text-[#a1a1aa] dark:text-[#71717a] italic">
+                  <div className="mt-12 pt-6 border-t border-dashed border-[#d4d4d8]  text-center text-[10px] text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] italic">
                     Resit ini dijana oleh komputer, terima kasih atas urusan anda. Ref: {currentRenderData.payment.id}
                   </div>
                 </div>
@@ -4943,11 +5037,11 @@ function AppContent() {
               className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
             >
               <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] /50 bg-[#fafafa]/50 dark:bg-zinc-900/50">
-                <h3 className="font-semibold text-[#18181b]  flex items-center gap-2">
+                <h3 className="font-semibold text-[#18181b] dark:text-white  flex items-center gap-2">
                   <Users size={18} className="text-[#52525b] dark:text-[#a1a1aa]" />
                   Profil Pelanggan: {clientProfileName}
                 </h3>
-                <button onClick={() => setClientProfileName(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <button onClick={() => setClientProfileName(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:text-zinc-300 dark:hover:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hoverdark:bg-zinc-800">
                   <X size={18} />
                 </button>
               </div>
