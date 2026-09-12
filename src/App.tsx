@@ -763,7 +763,7 @@ function AppContent() {
             r.totalFee.toString(),
             r.bakiFeeTerkini.toString(),
             (r.bakiMileage || 0).toString(),
-            r.tarikh,
+            formatDateDMY(r.tarikh),
             r.nota || ''
         ]);
         
@@ -798,7 +798,7 @@ function AppContent() {
     const csvContent = [
       headers.join(','),
       ...filteredRecords.map(r => 
-        [`"${r.nama}"`, `"${r.telefon || ''}"`, `"${r.emel || ''}"`, `"${(r.alamat || '').replace(/"/g, '""')}"`, `"${r.kes}"`, r.totalFee, r.bayaranTerakhir, r.tarikh, r.bakiSebelum, r.bakiFeeTerkini, r.bakiMileage].join(',')
+        [`"${r.nama}"`, `"${r.telefon || ''}"`, `"${r.emel || ''}"`, `"${(r.alamat || '').replace(/"/g, '""')}"`, `"${r.kes}"`, r.totalFee, r.bayaranTerakhir, formatDateDMY(r.tarikh), r.bakiSebelum, r.bakiFeeTerkini, r.bakiMileage].join(',')
       )
     ].join('\n');
 
@@ -823,7 +823,7 @@ function AppContent() {
       'Kategori Kes': r.kes,
       'Total Fee': r.totalFee,
       'Bayaran Terakhir': r.bayaranTerakhir,
-      'Tarikh Akhir': r.tarikh,
+      'Tarikh Akhir': formatDateDMY(r.tarikh),
       'Baki Sebelum': r.bakiSebelum,
       'Baki Fee Terkini': r.bakiFeeTerkini,
       'Baki Mileage': r.bakiMileage || 0,
@@ -840,7 +840,7 @@ function AppContent() {
             'ID Rekod': r.id,
             'Nama Pelanggan': r.nama,
             'No. Resit / ID Bayaran': p.id,
-            'Tarikh Bayaran': p.date,
+            'Tarikh Bayaran': formatDateDMY(p.date),
             'Bayaran Fee (RM)': p.amount || 0,
             'Bayaran Mileage (RM)': p.mileageAmount || 0,
             'Kaedah Bayaran': p.method,
@@ -1518,7 +1518,7 @@ function AppContent() {
         
         return [
           i + 1,
-          `"${r.tarikh || ''}"`,
+          `"${formatDateDMY(r.tarikh)}"`,
           `"${r.nama || ''}"`,
           `"${r.telefon || ''}"`,
           `"${(r.alamat || '').replace(/"/g, '""')}"`,
@@ -1853,7 +1853,6 @@ function AppContent() {
             <span className={`font-mono font-bold ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-[#18181b] dark:text-white '}`}>
               {formatRM(record.bakiFeeTerkini)}
             </span>
-            {record.bakiFeeTerkini > 0 && (
               <button 
                 onClick={() => setPaymentRecord(record)}
                 className="text-[11px] text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium underline flex items-center cursor-pointer"
@@ -1861,7 +1860,6 @@ function AppContent() {
               >
                 (Bayar)
               </button>
-            )}
           </div>
         </div>
         <div className="flex justify-between items-center pt-2 mt-2 border-t border-[#f4f4f5] ">
@@ -1911,7 +1909,6 @@ function AppContent() {
             <FileText size={12} />
             <span>Invois</span>
           </button>
-          {record.bakiFeeTerkini > 0 && (
             <button 
               onClick={() => setPaymentRecord(record)}
               className="text-xs bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 px-2.5 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1 shadow-sm hover:shadow-md hover:-translate-y-0.5 animate-subtle-pulse"
@@ -1920,7 +1917,6 @@ function AppContent() {
               <Plus size={12} />
               <span>+ Bayaran</span>
             </button>
-          )}
         </div>
       </div>
       {record.paymentHistory && record.paymentHistory.length > 0 ? (
@@ -2145,7 +2141,7 @@ function AppContent() {
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold truncate text-[#18181b] dark:text-white ">Hairi Mustafa</p>
-              <p className="text-xs text-[#71717a] dark:text-[#a1a1aa] truncate">Peguam Syarie</p>
+              <p className="text-xs text-zinc-600 dark:text-zinc-300 truncate">Peguam Syarie</p>
             </div>
           </div>
           <div className="text-[10px] uppercase tracking-[0.2em] text-[#a1a1aa] dark:text-[#71717a] dark:text-[#a1a1aa] mt-4 font-medium">Pengurusan Kes</div>
@@ -2313,32 +2309,6 @@ function AppContent() {
                 transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
-                <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
-                  <div className="flex flex-col gap-1 border-l-2 border-[#e4e4e7]  pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-[#71717a] dark:text-[#a1a1aa]">Jumlah Kes</div>
-                    <div className="text-3xl font-light tracking-tight text-[#27272a] dark:text-[#e4e4e7]">{stats.totalKes}</div>
-                  </div>
-                  
-                  <div className="flex flex-col gap-1 border-l-2 border-[#e4e4e7]  pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-[#71717a] dark:text-[#a1a1aa]">Total Fee</div>
-                    <div className="text-3xl font-light tracking-tight text-[#27272a] dark:text-[#e4e4e7]">{formatRM(stats.totalFee)}</div>
-                  </div>
-
-                  <div className="flex flex-col gap-1 border-l-2 border-amber-500 dark:border-amber-500 pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-amber-500 dark:text-amber-400">Baki Fee Terkini</div>
-                    <div className="text-3xl font-light tracking-tight text-[#d97706] dark:text-amber-500">{formatRM(stats.totalBakiTerkini)}</div>
-                  </div>
-
-                  <div className="flex flex-col gap-1 border-l-2 border-[#e4e4e7]  pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-[#71717a] dark:text-[#a1a1aa]">Baki Mileage</div>
-                    <div className="text-3xl font-light tracking-tight text-[#27272a] dark:text-[#e4e4e7]">{formatRM(stats.totalMileage)}</div>
-                  </div>
-
-                  <div className="flex flex-col gap-1 border-l-2 border-red-500 dark:border-red-500 pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-red-500 dark:text-red-400">Tunggakan ({stats.totalOverdueCases} Kes)</div>
-                    <div className="text-3xl font-light tracking-tight text-red-600 dark:text-red-500">{formatRM(stats.totalOverdueAmount)}</div>
-                  </div>
-                </div>
                 <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
               <div className="flex flex-col gap-6 pb-10 max-w-2xl">
                 <div className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-sm border border-[#f4f4f5]  overflow-hidden">
@@ -2519,30 +2489,58 @@ function AppContent() {
                 transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
-                <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
-                  <div className="flex flex-col gap-1 border-l-2 border-[#e4e4e7]  pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-[#71717a] dark:text-[#a1a1aa]">Jumlah Kes</div>
-                    <div className="text-3xl font-light tracking-tight text-[#27272a] dark:text-[#e4e4e7]">{stats.totalKes}</div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-5 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
+                  <div className="flex flex-col gap-2 p-4 bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7] dark:border-zinc-800 rounded-xl shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center shrink-0">
+                        <FileText size={14} className="text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <div className="text-[10px] font-bold tracking-widest uppercase text-zinc-600 dark:text-zinc-300 truncate">Jumlah Kes</div>
+                    </div>
+                    <div className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">{stats.totalKes}</div>
                   </div>
                   
-                  <div className="flex flex-col gap-1 border-l-2 border-[#e4e4e7]  pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-[#71717a] dark:text-[#a1a1aa]">Total Fee</div>
-                    <div className="text-3xl font-light tracking-tight text-[#27272a] dark:text-[#e4e4e7]">{formatRM(stats.totalFee)}</div>
+                  <div className="flex flex-col gap-2 p-4 bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7] dark:border-zinc-800 rounded-xl shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center shrink-0">
+                        <Wallet size={14} className="text-emerald-600 dark:text-emerald-400" />
+                      </div>
+                      <div className="text-[10px] font-bold tracking-widest uppercase text-zinc-600 dark:text-zinc-300 truncate">Total Fee</div>
+                    </div>
+                    <div className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">{formatRM(stats.totalFee)}</div>
                   </div>
 
-                  <div className="flex flex-col gap-1 border-l-2 border-amber-500 dark:border-amber-500 pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-amber-500 dark:text-amber-400">Baki Fee Terkini</div>
-                    <div className="text-3xl font-light tracking-tight text-[#d97706] dark:text-amber-500">{formatRM(stats.totalBakiTerkini)}</div>
+                  <div className="flex flex-col gap-2 p-4 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-[#ffffff] dark:bg-zinc-900 flex items-center justify-center shrink-0 shadow-sm">
+                        <CreditCard size={14} className="text-amber-600 dark:text-amber-400" />
+                      </div>
+                      <div className="text-[10px] font-bold tracking-widest uppercase text-amber-800 dark:text-amber-300 truncate">Baki Fee Terkini</div>
+                    </div>
+                    <div className="text-2xl sm:text-3xl font-bold tracking-tight text-amber-800 dark:text-amber-300 mt-1">{formatRM(stats.totalBakiTerkini)}</div>
                   </div>
 
-                  <div className="flex flex-col gap-1 border-l-2 border-[#e4e4e7]  pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-[#71717a] dark:text-[#a1a1aa]">Baki Mileage</div>
-                    <div className="text-3xl font-light tracking-tight text-[#27272a] dark:text-[#e4e4e7]">{formatRM(stats.totalMileage)}</div>
+                  <div className="flex flex-col gap-2 p-4 bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7] dark:border-zinc-800 rounded-xl shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-teal-50 dark:bg-teal-500/10 flex items-center justify-center shrink-0">
+                        <Car size={14} className="text-teal-600 dark:text-teal-400" />
+                      </div>
+                      <div className="text-[10px] font-bold tracking-widest uppercase text-zinc-600 dark:text-zinc-300 truncate">Baki Mileage</div>
+                    </div>
+                    <div className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">{formatRM(stats.totalMileage)}</div>
                   </div>
 
-                  <div className="flex flex-col gap-1 border-l-2 border-red-500 dark:border-red-500 pl-4">
-                    <div className="text-[10px] font-medium tracking-widest uppercase text-red-500 dark:text-red-400">Tunggakan ({stats.totalOverdueCases} Kes)</div>
-                    <div className="text-3xl font-light tracking-tight text-red-600 dark:text-red-500">{formatRM(stats.totalOverdueAmount)}</div>
+                  <div className="flex flex-col gap-2 p-4 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl shadow-sm hover:shadow-md transition-shadow lg:col-span-1 md:col-span-3 sm:col-span-2 col-span-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-[#ffffff] dark:bg-zinc-900 flex items-center justify-center shrink-0 shadow-sm">
+                          <AlertTriangle size={14} className="text-red-600 dark:text-red-400" />
+                        </div>
+                        <div className="text-[10px] font-bold tracking-widest uppercase text-red-800 dark:text-red-300 truncate">Tunggakan</div>
+                      </div>
+                      <div className="text-[10px] font-bold bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400 px-2 py-0.5 rounded-full">{stats.totalOverdueCases} Kes</div>
+                    </div>
+                    <div className="text-2xl sm:text-3xl font-bold tracking-tight text-red-800 dark:text-red-300 mt-1">{formatRM(stats.totalOverdueAmount)}</div>
                   </div>
                 </div>
                 <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
@@ -2936,9 +2934,18 @@ function AppContent() {
     <Users size={14} />
   </button>
 </h4>
-                               <span className={`font-bold text-[13px] sm:text-sm shrink-0 leading-tight ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-[#27272a] dark:text-[#e4e4e7]'}`}>
-                                 {formatRM(record.bakiFeeTerkini)}
-                               </span>
+                               <div className="flex items-center gap-1.5 shrink-0">
+                                 <span className={`font-bold text-[13px] sm:text-sm leading-tight ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-[#27272a] dark:text-[#e4e4e7]'}`}>
+                                   {formatRM(record.bakiFeeTerkini)}
+                                 </span>
+                                 <button 
+                                   onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }}
+                                   className="text-[10px] bg-blue-100 hover:bg-blue-200 text-blue-700 dark:bg-blue-500/20 dark:hover:bg-blue-500/30 dark:text-blue-400 px-1.5 py-0.5 rounded font-bold uppercase cursor-pointer flex items-center font-sans shadow-sm transition-colors"
+                                   title="Tambah Bayaran"
+                                 >
+                                   Bayar
+                                 </button>
+                               </div>
                              </div>
                              
                              <div className="flex justify-between items-center mt-1">
@@ -3197,6 +3204,13 @@ function AppContent() {
                                 <span className={record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-[#27272a] dark:text-[#e4e4e7]'}>
                                   {formatRM(record.bakiFeeTerkini)}
                                 </span>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }}
+                                  className="ml-1 text-[10px] bg-blue-100 hover:bg-blue-200 text-blue-700 dark:bg-blue-500/20 dark:hover:bg-blue-500/30 dark:text-blue-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide cursor-pointer flex items-center shrink-0 font-sans transition-colors"
+                                  title="Tambah Bayaran"
+                                >
+                                  Bayar
+                                </button>
                               </div>
                             </td>
                             <td className=" px-3 sm:px-4 py-3 font-mono border-r border-[#f4f4f5] /50 text-right text-[#d97706] dark:text-amber-500">
@@ -3213,7 +3227,6 @@ function AppContent() {
                                   <span>± Mileage</span>
                                 </button>
 
-                                {record.bakiFeeTerkini > 0 && (
                                   <button 
                                     onClick={() => setPaymentRecord(record)}
                                     className="text-blue-700 dark:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 px-2 py-1.5 rounded-lg text-xs font-medium transition-all border border-blue-200 dark:border-blue-800/50 flex items-center gap-1 shrink-0 shadow-sm cursor-pointer hover:shadow-md hover:-translate-y-0.5 animate-subtle-pulse"
@@ -3222,7 +3235,6 @@ function AppContent() {
                                     <Plus size={13} className="text-blue-600 dark:text-blue-400" />
                                     <span>+ Bayaran</span>
                                   </button>
-                                )}
 
                                 {record.bakiFeeTerkini > 0 && (
                                   <button 
