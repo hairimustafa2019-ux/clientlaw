@@ -121,7 +121,7 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, any> {
         </div>
       );
     }
-    return this.props.children as React.ReactNode;
+    return (this as any).props.children as React.ReactNode;
   }
 }
 
@@ -241,6 +241,12 @@ function AppContent() {
   const [paymentNote, setPaymentNote] = useState<string>('');
   
   const [editingRecord, setEditingRecord] = useState<CaseRecord | null>(null);
+  const [editingPaymentDetails, setEditingPaymentDetails] = useState<{record: CaseRecord, payment: any} | null>(null);
+  const [editingPaymentAmount, setEditingPaymentAmount] = useState<string>('');
+  const [editingPaymentMileage, setEditingPaymentMileage] = useState<string>('');
+  const [editingPaymentDate, setEditingPaymentDate] = useState<string>('');
+  const [editingPaymentMethod, setEditingPaymentMethod] = useState<string>('Cash');
+  const [editingPaymentNote, setEditingPaymentNote] = useState<string>('');
   const [mileageAdjustmentRecord, setMileageAdjustmentRecord] = useState<CaseRecord | null>(null);
   const [mileageAdjustmentAmount, setMileageAdjustmentAmount] = useState<string>('');
   const [mileageAdjustmentType, setMileageAdjustmentType] = useState<'tambah' | 'tolak'>('tambah');
@@ -431,6 +437,25 @@ function AppContent() {
       snapshot.forEach(doc => {
         fetchedRecords.push(doc.data() as CaseRecord);
       });
+      
+      if (fetchedRecords.length === 0) {
+        const saved = localStorage.getItem('localOfflineRecords');
+        if (saved) {
+           try {
+              const localRecs = JSON.parse(saved);
+              if (localRecs && localRecs.length > 0) {
+                 const batch = writeBatch(db);
+                 localRecs.forEach((r) => {
+                    const rRef = doc(db, targetPath, r.id);
+                    batch.set(rRef, { ...r, userId: user.uid });
+                 });
+                 await batch.commit();
+                 return; // will re-trigger
+              }
+           } catch(e) {}
+        }
+      }
+
       skipNextBackupRef.current = true;
       setRecords(fetchedRecords);
     }, (error) => {
@@ -571,6 +596,119 @@ function AppContent() {
   };
 
   
+  const handleExportDBToDrive = async () => {
+    if (!user) {
+      alert("Sila log masuk untuk mengeksport pangkalan data.");
+      return;
+    }
+    
+    const folderName = window.prompt("Sila masukkan nama folder di Google Drive (atau biarkan lalai):", "HMA_Database_Backup");
+    if (folderName === null) return; // cancelled
+    
+    try {
+      let token = cachedAccessToken;
+      if (!token) {
+        const provider = new GoogleAuthProvider();
+        provider.addScope('https://www.googleapis.com/auth/drive.file');
+        provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+        const result = await signInWithPopup(auth, provider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        token = credential?.accessToken || null;
+        if (token) {
+          setCachedAccessToken(token);
+        } else {
+          throw new Error("Failed to get Google access token");
+        }
+      }
+      
+      // Fetch entire database
+      const [recordsSnap, receiptsSnap] = await Promise.all([
+         getDocs(collection(db, `users/${user.uid}/records`)),
+         getDocs(collection(db, `users/${user.uid}/receipts`))
+      ]);
+      
+      const dbExport = {
+        exportedAt: new Date().toISOString(),
+        userId: user.uid,
+        records: recordsSnap.docs.map(d => d.data()),
+        receipts: receiptsSnap.docs.map(d => d.data())
+      };
+      
+      const jsonContent = JSON.stringify(dbExport, null, 2);
+      const fileName = `HMA_DB_Export_${new Date().toISOString().slice(0,10)}.json`;
+      const metadata: any = {
+        name: fileName,
+        mimeType: 'application/json'
+      };
+
+      // Find or Create Folder
+      let folderId = null;
+      if (folderName.trim()) {
+        const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.folder' and name='${folderName.trim()}' and trashed=false`, {
+           headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (searchRes.ok) {
+           const searchData = await searchRes.json();
+           if (searchData.files && searchData.files.length > 0) {
+              folderId = searchData.files[0].id;
+           }
+        }
+        
+        if (!folderId) {
+           const createFolderRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: folderName.trim(), mimeType: 'application/vnd.google-apps.folder' })
+           });
+           if (createFolderRes.ok) {
+              const folderData = await createFolderRes.json();
+              folderId = folderData.id;
+           }
+        }
+      }
+      
+      if (folderId) {
+         metadata.parents = [folderId];
+      }
+
+      // Upload file using multipart upload
+      const boundary = '-------314159265358979323846';
+      const delimiter = "\r\n--" + boundary + "\r\n";
+      const close_delim = "\r\n--" + boundary + "--";
+
+      const multipartRequestBody =
+          delimiter +
+          'Content-Type: application/json\r\n\r\n' +
+          JSON.stringify(metadata) +
+          delimiter +
+          'Content-Type: application/json\r\n\r\n' +
+          jsonContent +
+          close_delim;
+
+      const uploadRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`
+        },
+        body: multipartRequestBody
+      });
+
+      if (!uploadRes.ok) {
+          if (uploadRes.status === 401 || uploadRes.status === 403) {
+             setCachedAccessToken(null);
+             throw new Error("Sesi keizinan tamat. Sila log masuk semula.");
+          }
+          throw new Error('Gagal memuat naik fail ke Google Drive');
+      }
+
+      alert(`Pangkalan data berjaya dieksport ke Google Drive!`);
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Gagal mengeksport pangkalan data.");
+    }
+  };
+
   const handleSyncGoogleSheets = async () => {
     setIsSyncingSheets(true);
     try {
@@ -1875,6 +2013,21 @@ function AppContent() {
                       {quickPrintId === payment.id ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
                     </button>
                     <button 
+                      title="Kemaskini Bayaran"
+                      onClick={() => {
+                        setEditingPaymentDetails({record, payment});
+                        setEditingPaymentAmount((payment.amount || 0).toString());
+                        setEditingPaymentMileage((payment.mileageAmount || 0).toString());
+                        setEditingPaymentDate(formatDateISO(payment.date));
+                        setEditingPaymentMethod(payment.method || 'Cash');
+                        setEditingPaymentNote(payment.nota || '');
+                      }}
+                      className="p-1 text-amber-500 hover:text-amber-700 transition-colors rounded hover:bg-amber-50"
+                    >
+                      <Edit size={14} />
+                    </button>
+                    <button 
+                      title="Padam Bayaran"
                       onClick={async () => {
                         if (window.confirm('Padam rekod bayaran ini?')) {
                           const newHistory = record.paymentHistory.filter((p: any) => p.id !== payment.id);
@@ -2099,12 +2252,24 @@ function AppContent() {
               <Download size={14} />
               <span className="hidden sm:inline">Eksport Lengkap</span>
             </button>
+            <button
+              onClick={handleExportDBToDrive}
+              className="hidden lg:flex p-2 sm:px-4 sm:py-2 items-center gap-2 text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/20 rounded-lg font-medium cursor-pointer shrink-0 transition-all">
+              <Cloud size={14} />
+              <span className="hidden sm:inline">Eksport Drive (JSON)</span>
+            </button>
             <button 
               onClick={handleSyncGoogleSheets}
               disabled={isSyncingSheets}
               className="hidden lg:flex p-2 sm:px-4 sm:py-2 items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-lg font-medium cursor-pointer disabled:opacity-50 shrink-0 transition-all">
               {isSyncingSheets ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
               <span className="hidden sm:inline">Sync Sheets</span>
+            </button>
+            <button 
+              onClick={handleDownloadTemplate}
+              className="hidden lg:flex p-2 sm:px-4 sm:py-2 items-center gap-2 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
+              <Download size={14} />
+              <span className="hidden sm:inline">Templat CSV</span>
             </button>
             <input 
               type="file" 
@@ -2142,10 +2307,10 @@ function AppContent() {
             {activeTab === 'settings' && (
               <motion.div
                 key="settings"
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.3, ease: "easeOut" }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
                 <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
@@ -2348,10 +2513,10 @@ function AppContent() {
             {activeTab === 'dashboard' && (
               <motion.div
                 key="dashboard"
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.3, ease: "easeOut" }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
                 <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-6 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
@@ -2605,10 +2770,10 @@ function AppContent() {
             {activeTab === 'records' && (
               <motion.div
                 key="records"
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.3, ease: "easeOut" }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
                 <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 pt-4 sm:pt-6 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
@@ -3152,10 +3317,10 @@ function AppContent() {
             {activeTab === 'standalone' && (
               <motion.div
                 key="standalone"
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.3, ease: "easeOut" }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 className="flex-1 flex flex-col min-h-0 overflow-hidden"
               >
                 <StandaloneReceipts initialData={standaloneInitialRecord} user={user} db={db} caseRecords={records} />
@@ -4062,12 +4227,186 @@ function AppContent() {
         )}
       </AnimatePresence>
 
+
+      {/* Edit Payment Modal */}
+      <AnimatePresence>
+        {editingPaymentDetails && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-[#18181b]/20 dark:bg-[#000000]/60 backdrop-blur-sm"
+              onClick={() => setEditingPaymentDetails(null)}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-[#ffffff] dark:bg-[#18181b] rounded-2xl shadow-xl w-full max-w-md relative z-10 overflow-hidden flex flex-col max-h-[90vh] border border-[#e4e4e7] dark:border-zinc-800"
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-[#f4f4f5] dark:border-zinc-800/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg">
+                    <Edit size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-[#18181b] dark:text-white">Kemaskini Bayaran</h2>
+                    <p className="text-xs text-[#71717a] dark:text-[#a1a1aa] font-medium">{editingPaymentDetails.record.nama}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setEditingPaymentDetails(null)}
+                  className="p-2 text-[#a1a1aa] hover:text-[#18181b] dark:hover:text-white transition-colors rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="overflow-y-auto p-6 flex-1 custom-scrollbar">
+                <form 
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    
+                    const newAmount = parseFloat(editingPaymentAmount) || 0;
+                    const newMileage = parseFloat(editingPaymentMileage) || 0;
+                    
+                    const record = editingPaymentDetails.record;
+                    const oldPayment = editingPaymentDetails.payment;
+                    
+                    const oldAmount = oldPayment.amount || 0;
+                    const oldMileage = oldPayment.mileageAmount || 0;
+                    
+                    // Revert old payment, then apply new payment
+                    const tempFeeBalance = record.bakiFeeTerkini + oldAmount;
+                    const tempMileageBalance = (record.bakiMileage || 0) + oldMileage;
+                    
+                    if (newAmount > tempFeeBalance) {
+                       alert("Jumlah bayaran Fee melebihi baki terkini.");
+                       return;
+                    }
+                    if (newMileage > tempMileageBalance) {
+                       alert("Jumlah bayaran Mileage melebihi baki terkini.");
+                       return;
+                    }
+                    
+                    const updatedPayment = {
+                      ...oldPayment,
+                      amount: newAmount,
+                      mileageAmount: newMileage,
+                      date: formatDateDMY(editingPaymentDate),
+                      method: editingPaymentMethod,
+                      nota: editingPaymentNote
+                    };
+                    
+                    const newHistory = record.paymentHistory.map((p: any) => p.id === oldPayment.id ? updatedPayment : p);
+                    
+                    const updatedRecord = {
+                      ...record,
+                      paymentHistory: newHistory,
+                      bakiFeeTerkini: tempFeeBalance - newAmount,
+                      bakiMileage: tempMileageBalance - newMileage,
+                      bayaranTerakhir: newHistory.length > 0 ? newHistory[0].amount : 0
+                    };
+                    
+                    setRecords((prev: any) => prev.map((r: any) => r.id === record.id ? updatedRecord : r));
+                    
+                    if (user) {
+                      try {
+                        await setDoc(doc(db, 'users', user.uid, 'records', record.id), updatedRecord);
+                      } catch(err) {
+                        console.error("Gagal update bayaran:", err);
+                      }
+                    }
+                    
+                    setEditingPaymentDetails(null);
+                  }}
+                  className="space-y-4"
+                >
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
+                      Jumlah Bayaran (Fee) - RM
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="pl-3 pr-4 py-2.5 w-full border border-[#e4e4e7] dark:border-zinc-800 rounded-lg font-mono focus:ring-amber-500/20 focus:border-amber-500 text-lg bg-[#ffffff] dark:bg-zinc-950 text-[#18181b] dark:text-white"
+                      value={editingPaymentAmount}
+                      onChange={(e) => setEditingPaymentAmount(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">
+                      Jumlah Bayaran (Mileage) - RM
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="pl-3 pr-4 py-2.5 w-full border border-[#e4e4e7] dark:border-zinc-800 rounded-lg font-mono focus:ring-amber-500/20 focus:border-amber-500 text-lg bg-[#ffffff] dark:bg-zinc-950 text-[#18181b] dark:text-white"
+                      value={editingPaymentMileage}
+                      onChange={(e) => setEditingPaymentMileage(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">Tarikh</label>
+                    <input
+                      type="date"
+                      required
+                      className="pl-3 pr-4 py-2.5 w-full border border-[#e4e4e7] dark:border-zinc-800 rounded-lg bg-[#ffffff] dark:bg-zinc-950 text-[#18181b] dark:text-white focus:ring-amber-500/20 focus:border-amber-500"
+                      value={editingPaymentDate}
+                      onChange={(e) => setEditingPaymentDate(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">Kaedah</label>
+                    <select
+                      required
+                      className="pl-3 pr-4 py-2.5 w-full border border-[#e4e4e7] dark:border-zinc-800 rounded-lg bg-[#ffffff] dark:bg-zinc-950 text-[#18181b] dark:text-white focus:ring-amber-500/20 focus:border-amber-500"
+                      value={editingPaymentMethod}
+                      onChange={(e) => setEditingPaymentMethod(e.target.value)}
+                    >
+                      <option value="Cash">Cash</option>
+                      <option value="Transfer">Transfer</option>
+                      <option value="QR">QR</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">Nota</label>
+                    <input
+                      type="text"
+                      className="pl-3 pr-4 py-2.5 w-full border border-[#e4e4e7] dark:border-zinc-800 rounded-lg bg-[#ffffff] dark:bg-zinc-950 text-[#18181b] dark:text-white focus:ring-amber-500/20 focus:border-amber-500"
+                      value={editingPaymentNote}
+                      onChange={(e) => setEditingPaymentNote(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex justify-end gap-3 pt-6 mt-6">
+                    <button 
+                      type="button" 
+                      onClick={() => setEditingPaymentDetails(null)}
+                      className="px-5 py-2.5 text-sm text-[#52525b] dark:text-[#a1a1aa] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg"
+                    >Batal</button>
+                    <button 
+                      type="submit"
+                      className="px-5 py-2.5 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 font-medium flex items-center gap-2"
+                    >
+                      Simpan Perubahan
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Invoice / Quotation Modal & Print Layout */}
       <AnimatePresence>
         {invoiceRecord && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:static print:bg-[#ffffff] print:p-0 print:block">
             <motion.div 
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
               className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-3xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
@@ -4215,7 +4554,7 @@ function AppContent() {
         {statementRecord && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 /60 backdrop-blur-sm print:static print:bg-[#ffffff] print:p-0 print:block">
             <motion.div 
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
               className="bg-[#ffffff]  rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-3xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
@@ -4418,7 +4757,7 @@ function AppContent() {
         {simpleStatementRecord && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:static print:bg-[#ffffff] print:p-0 print:block">
             <motion.div 
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
               className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7]  w-full max-w-3xl max-h-screen overflow-hidden flex flex-col print:shadow-none print:border-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"
@@ -4559,7 +4898,7 @@ function AppContent() {
         {receiptData && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:static print:bg-[#ffffff] print:p-0 print:block">
             <motion.div 
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
               className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden print:shadow-none print:max-h-none print:w-full print:max-w-none print:overflow-visible print:block"

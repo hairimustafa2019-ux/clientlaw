@@ -1,4 +1,5 @@
-{
+const fs = require('fs');
+const code = `{
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
@@ -14,4 +15,6 @@
     "strict": false
   },
   "include": ["src"]
-}
+}`;
+fs.writeFileSync('tsconfig.json', code, 'utf-8');
+console.log('Fixed tsconfig for linting error overrides');
