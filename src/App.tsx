@@ -8,7 +8,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History, ToggleLeft, ToggleRight, Cloud, RefreshCw, Calendar } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
-import { records as initialRecords, CaseRecord } from './data';
+import { records as initialRecords, CaseRecord, PaymentEntry } from './data';
 import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
@@ -290,8 +290,8 @@ function AppContent() {
   
   const [paymentSortColumn, setPaymentSortColumn] = useState<'date' | 'amount' | null>(null);
   const [paymentSortDirection, setPaymentSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [dateSortOrder, setDateSortOrder] = useState<'asc' | 'desc' | null>(null);
-  const [nameSortOrder, setNameSortOrder] = useState<'asc' | 'desc' | null>('asc');
+  const [dateSortOrder, setDateSortOrder] = useState<'asc' | 'desc' | null>('desc');
+  const [nameSortOrder, setNameSortOrder] = useState<'asc' | 'desc' | null>(null);
 
   const [isNewRecordModalOpen, setIsNewRecordModalOpen] = useState(false);
   const [isImportingContacts, setIsImportingContacts] = useState(false);
@@ -794,15 +794,28 @@ function AppContent() {
   };
 
   const handleExportData = () => {
-    const headers = ['Nama', 'Telefon', 'Alamat', 'Kes', 'Total Fee', 'Bayaran Terakhir', 'Tarikh Akhir', 'Baki Sebelum', 'Baki Fee Terkini', 'Baki Mileage'];
+    const headers = ['ID Rekod', 'Nama Pelanggan', 'No Telefon', 'Alamat', 'Kategori Kes', 'Nota Kes', 'Tarikh', 'Total Fee', 'Bayaran Terakhir', 'Baki Sebelum', 'Baki Fee Terkini', 'Baki Mileage'];
     const csvContent = [
       headers.join(','),
       ...filteredRecords.map(r => 
-        [`"${r.nama}"`, `"${r.telefon || ''}"`, `"${r.emel || ''}"`, `"${(r.alamat || '').replace(/"/g, '""')}"`, `"${r.kes}"`, r.totalFee, r.bayaranTerakhir, formatDateDMY(r.tarikh), r.bakiSebelum, r.bakiFeeTerkini, r.bakiMileage].join(',')
+        [
+          `"${(r.id || '').replace(/"/g, '""')}"`,
+          `"${(r.nama || '').replace(/"/g, '""')}"`,
+          `"${(r.telefon || '').replace(/"/g, '""')}"`,
+          `"${(r.alamat || '').replace(/"/g, '""')}"`,
+          `"${(r.kes || '').replace(/"/g, '""')}"`,
+          `"${(r.nota || '').replace(/"/g, '""')}"`,
+          `"${formatDateDMY(r.tarikh)}"`,
+          r.totalFee || 0,
+          r.bayaranTerakhir || 0,
+          r.bakiSebelum || 0,
+          r.bakiFeeTerkini || 0,
+          r.bakiMileage || 0
+        ].join(',')
       )
     ].join('\n');
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
@@ -921,9 +934,61 @@ function AppContent() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDownloadTemplate = () => {
-    const headers = "id,nama,kes,jumlahKeseluruhan,bakiSebelum,bayaranTerakhir,bakiFeeTerkini,bakiMileage,tarikh,stat,alamat,telefon,email,totalFee\n";
-    const example = "R001,Ali Bin Abu,Faraid,5000,2000,1000,1000,500,20/05/2024,Aktif,123 Jalan Ampang,012-3456789,ali@example.com,5000\n";
-    const blob = new Blob([headers + example], { type: "text/csv;charset=utf-8" });
+    const headers = [
+      'ID Rekod',
+      'Nama Pelanggan',
+      'No Telefon',
+      'Alamat',
+      'Kategori Kes',
+      'Nota Kes',
+      'Tarikh',
+      'Total Fee',
+      'Bayaran Terakhir',
+      'Baki Sebelum',
+      'Baki Fee Terkini',
+      'Baki Mileage'
+    ];
+    const example1 = [
+      'CS001',
+      'Ali Bin Abu',
+      '012-3456789',
+      'No 12 Jalan Ampang, 50450 Kuala Lumpur',
+      'Faraid',
+      'Perbincangan pembahagian harta pusaka',
+      '20/05/2024',
+      '5000',
+      '1000',
+      '5000',
+      '4000',
+      '200'
+    ];
+    const example2 = [
+      'CS002',
+      'Siti Aminah binti Omar',
+      '019-8765432',
+      'Bandar Baru Bangi, Selangor',
+      'Takliq',
+      'Tuntutan fasakh & nafkah anak',
+      '15/06/2024',
+      '3500',
+      '1500',
+      '3500',
+      '2000',
+      '0'
+    ];
+    const escapeCsvField = (field: string) => {
+      if (field.includes(',') || field.includes('"') || field.includes('\n')) {
+        return `"${field.replace(/"/g, '""')}"`;
+      }
+      return field;
+    };
+    const csvContent = [
+      headers.map(escapeCsvField).join(','),
+      example1.map(escapeCsvField).join(','),
+      example2.map(escapeCsvField).join(',')
+    ].join('\n') + '\n';
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -941,96 +1006,162 @@ function AppContent() {
     const reader = new FileReader();
     reader.onload = async (e) => {
       const text = e.target?.result as string;
-      const lines = text.split('\n');
-      if (lines.length < 2) return;
-      
-      const newRecordsFromCsv: CaseRecord[] = [];
-      const headers = lines[0].toLowerCase().split(',').map(h => h.replace(/^"|"$/g, '').trim());
-      
-      const colIndex = {
-        id: headers.findIndex(h => h === 'id' || h.includes('id rekod')),
-        nama: headers.findIndex(h => h.includes('nama')),
-        telefon: headers.findIndex(h => h.includes('telefon')),
-        
-        alamat: headers.findIndex(h => h.includes('alamat')),
-        kes: headers.findIndex(h => h.includes('kes')),
-        totalFee: headers.findIndex(h => h.includes('total fee') || h.includes('jumlah fee')),
-        bayaranTerakhir: headers.findIndex(h => h.includes('bayaran terakhir')),
-        tarikh: headers.findIndex(h => h.includes('tarikh')),
-        bakiSebelum: headers.findIndex(h => h.includes('baki sebelum')),
-        bakiTerkini: headers.findIndex(h => h.includes('baki') && h.includes('terkini') && !h.includes('mileage')),
-        bakiMileage: headers.findIndex(h => h.includes('mileage'))
+      if (!text) return;
+
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+      if (lines.length < 2) {
+        alert("Fail CSV tidak mengandungi data yang mencukupi.");
+        return;
+      }
+
+      // Robust CSV parser supporting quotes and commas inside fields
+      const parseCSVLine = (line: string): string[] => {
+        const result: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+              current += '"';
+              i++;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (char === ',' && !inQuotes) {
+            result.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        result.push(current.trim());
+        return result;
       };
 
+      const parseNumeric = (val: any): number => {
+        if (val === undefined || val === null) return 0;
+        if (typeof val === 'number') return isNaN(val) ? 0 : val;
+        const str = String(val).replace(/RM/gi, '').replace(/\s+/g, '').replace(/,/g, '').trim();
+        const num = parseFloat(str);
+        return isNaN(num) ? 0 : num;
+      };
+
+      const rawHeaders = parseCSVLine(lines[0]);
+      const headers = rawHeaders.map(h => h.toLowerCase().replace(/^"|"$/g, '').trim());
+
+      const findCol = (keywords: string[]) => {
+        return headers.findIndex(h => keywords.some(k => h === k || h.includes(k)));
+      };
+
+      const colIndex = {
+        id: findCol(['id rekod', 'id', 'no rujukan', 'rujukan', 'no kes', 'no. kes', 'no']),
+        nama: findCol(['nama pelanggan', 'nama klien', 'nama']),
+        telefon: findCol(['no telefon', 'no. telefon', 'telefon', 'phone', 'tel', 'hp', 'no hp']),
+        alamat: findCol(['alamat', 'address', 'lokasi']),
+        kes: findCol(['kategori kes', 'jenis kes', 'kes', 'category']),
+        nota: findCol(['nota kes', 'nota', 'catatan', 'keterangan', 'remarks', 'note', 'notes']),
+        tarikh: findCol(['tarikh kemaskini', 'tarikh akhir', 'tarikh daftar', 'tarikh kes', 'tarikh', 'date']),
+        totalFee: findCol(['total fee', 'jumlah fee', 'fee keseluruhan', 'fee guaman', 'fee', 'totalfee', 'jumlahkeseluruhan']),
+        bayaranTerakhir: findCol(['bayaran terakhir', 'jumlah bayaran (fee)', 'bayaran fee', 'jumlah bayaran', 'bayaran', 'terakhir', 'paid', 'last payment']),
+        bakiSebelum: findCol(['baki sebelum', 'bakisebelum', 'previous balance']),
+        bakiFeeTerkini: findCol(['baki fee terkini', 'baki fee (rm)', 'baki fee', 'baki terkini', 'bakifeeterkini', 'balance']),
+        bakiMileage: findCol(['baki mileage (rm)', 'baki mileage', 'bakimileage', 'mileage', 'elaun perjalanan', 'baki elaun'])
+      };
+
+      const newRecordsFromCsv: CaseRecord[] = [];
+
       for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
+        const line = lines[i];
         if (!line) continue;
-        
-        const values = line.split(/(?!\B"[^"]*),(?![^"]*"\B)/).map(v => v.replace(/^"|"$/g, '').trim());
-        if (values.length < 4) continue;
-        
+
+        const values = parseCSVLine(line);
+        if (values.length < 2) continue;
+
         try {
-          const getValue = (idx: number) => idx !== -1 ? values[idx] : undefined;
-          
+          const getValue = (idx: number) => (idx !== -1 && idx < values.length) ? values[idx] : undefined;
+
           let rawId = getValue(colIndex.id);
-          
-          const rawNama = getValue(colIndex.nama) || '';
+          const rawNama = getValue(colIndex.nama) || (colIndex.nama === -1 && values[1] ? values[1] : values[0]);
+
+          if (!rawNama || rawNama.trim() === '') continue;
+
+          const rawTelefon = getValue(colIndex.telefon) || '';
+          const rawAlamat = getValue(colIndex.alamat) || '';
           const rawKes = getValue(colIndex.kes) || 'Umum';
-          
-          // Special fallback for older legacy schemas if columns are completely unmatched
-          const fallbackTotalFeeStr = colIndex.totalFee !== -1 ? getValue(colIndex.totalFee) : values[3];
-          const fallbackTarikh = colIndex.tarikh !== -1 ? getValue(colIndex.tarikh) : (values[8] || values[5]);
-          
-          const rawTotalFee = parseFloat(fallbackTotalFeeStr || '') || parseFloat(values[13] || '') || 0;
-          const rawBayaranTerakhir = parseFloat(getValue(colIndex.bayaranTerakhir) || '') || 0;
-          const rawTarikh = fallbackTarikh || new Date().toISOString().split('T')[0];
-          const rawBakiSebelum = parseFloat(getValue(colIndex.bakiSebelum) || '') || 0;
-          const rawBakiTerkini = parseFloat(getValue(colIndex.bakiTerkini) || '') || 0;
-          const rawBakiMileage = parseFloat(getValue(colIndex.bakiMileage) || '') || 0;
-          
-          // Ensure valid ID for Firestore
-          if (rawId && rawId.includes('/')) {
-             rawId = rawId.replace(/\//g, '-');
+          const rawNota = getValue(colIndex.nota) || '';
+
+          const rawTarikh = getValue(colIndex.tarikh) || new Date().toISOString().split('T')[0];
+
+          const rawTotalFee = parseNumeric(getValue(colIndex.totalFee));
+          const rawBayaranTerakhir = parseNumeric(getValue(colIndex.bayaranTerakhir));
+          let rawBakiSebelum = parseNumeric(getValue(colIndex.bakiSebelum));
+
+          let rawBakiFeeTerkini = 0;
+          if (colIndex.bakiFeeTerkini !== -1 && getValue(colIndex.bakiFeeTerkini) !== undefined) {
+            rawBakiFeeTerkini = parseNumeric(getValue(colIndex.bakiFeeTerkini));
+          } else if (rawTotalFee > 0) {
+            rawBakiFeeTerkini = Math.max(0, rawTotalFee - rawBayaranTerakhir);
           }
-          
-          const id = rawId || `CSV${Date.now()}${Math.floor(Math.random() * 1000)}`;
-          
+
+          if (rawBakiSebelum === 0 && rawTotalFee > 0) {
+            rawBakiSebelum = rawTotalFee;
+          }
+
+          const rawBakiMileage = parseNumeric(getValue(colIndex.bakiMileage));
+
+          if (rawId && rawId.includes('/')) {
+            rawId = rawId.replace(/\//g, '-');
+          }
+
+          const id = (rawId && rawId.trim()) ? rawId.trim() : `CSV${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+          const paymentHistory: PaymentEntry[] = rawBayaranTerakhir > 0 ? [{
+            id: `PAY-${id}-1`,
+            date: formatDateDMY(rawTarikh),
+            amount: rawBayaranTerakhir,
+            mileageAmount: 0,
+            method: 'Pindahan Bank / Tunai',
+            nota: 'Bayaran Terakhir (Diimport)'
+          }] : [];
+
           const newRecord: CaseRecord & { userId?: string } = {
             id,
-            nama: rawNama,
-            telefon: '',
-
-            alamat: '',
-            kes: rawKes,
+            nama: rawNama.trim(),
+            telefon: rawTelefon.trim(),
+            alamat: rawAlamat.trim(),
+            kes: rawKes.trim(),
+            nota: rawNota.trim(),
             totalFee: rawTotalFee,
             bayaranTerakhir: rawBayaranTerakhir,
             tarikh: formatDateDMY(rawTarikh),
             bakiSebelum: rawBakiSebelum,
-            bakiFeeTerkini: rawBakiTerkini,
+            bakiFeeTerkini: rawBakiFeeTerkini,
             bakiMileage: rawBakiMileage,
-            paymentHistory: [],
+            paymentHistory,
             userId: user ? user.uid : ""
           };
+
           newRecordsFromCsv.push(newRecord);
-          
+
           if (user) {
             const targetPath = `users/${user.uid}/records/${id}`;
             await setDoc(doc(db, 'users', user.uid, 'records', id), newRecord).catch(err => {
               handleFirestoreError(err, OperationType.WRITE, targetPath);
             });
           }
-        } catch (e) {
-          console.error("Failed to parse row", values, e);
+        } catch (err) {
+          console.error("Failed to parse row", values, err);
         }
       }
-      
+
       if (newRecordsFromCsv.length > 0) {
         setRecords(prev => [...newRecordsFromCsv, ...prev]);
-        alert(`${newRecordsFromCsv.length} rekod berjaya diimport!`);
+        alert(`${newRecordsFromCsv.length} rekod pelanggan berjaya diimport bersama butiran lengkap!`);
       } else {
-        alert("Tiada data yang sah dijumpai dalam fail CSV.");
+        alert("Tiada data yang sah dijumpai dalam fail CSV. Sila pastikan format mengikut Templat CSV.");
       }
-      
+
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -1755,11 +1886,18 @@ function AppContent() {
         const nameB = (b.nama || '').toLowerCase();
         return nameSortOrder === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
       });
-    } else if (dateSortOrder) {
+    } else if (dateSortOrder === 'asc') {
       list.sort((a, b) => {
         const timeA = parseDateObj(a.tarikh).getTime();
         const timeB = parseDateObj(b.tarikh).getTime();
-        return dateSortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+        return timeA - timeB;
+      });
+    } else {
+      // Tetapan Lalai: Susun mengikut tarikh terkini (newest first)
+      list.sort((a, b) => {
+        const timeA = parseDateObj(a.tarikh).getTime();
+        const timeB = parseDateObj(b.tarikh).getTime();
+        return timeB - timeA;
       });
     }
 
@@ -2407,6 +2545,15 @@ function AppContent() {
                       </div>
                       <ChevronRight size={18} className="text-blue-400" />
                     </button>
+                    <button onClick={handleDownloadTemplate} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-emerald-50 dark:bg-emerald-500/10 rounded-lg text-emerald-600 dark:text-emerald-400">
+                          <FileText size={18} />
+                        </div>
+                        <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Muat Turun Templat CSV</span>
+                      </div>
+                      <ChevronRight size={18} className="text-emerald-400" />
+                    </button>
                     <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-zinc-100 darkdark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
@@ -2844,17 +2991,20 @@ function AppContent() {
                     </div>
                     <select
                       className="pl-9 pr-8 py-2 appearance-none text-sm border border-[#e4e4e7]  rounded-lg w-full sm:w-44 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium text-[#3f3f46] dark:text-zinc-200  transition-all cursor-pointer"
-                      value={dateSortOrder || ''}
+                      value={dateSortOrder || 'desc'}
                       onChange={(e) => {
                         const val = e.target.value;
-                        if (val === 'desc') setDateSortOrder('desc');
-                        else if (val === 'asc') setDateSortOrder('asc');
-                        else setDateSortOrder(null);
+                        if (val === 'asc') {
+                          setDateSortOrder('asc');
+                          setNameSortOrder(null);
+                        } else {
+                          setDateSortOrder('desc');
+                          setNameSortOrder(null);
+                        }
                       }}
                       title="Susun Mengikut Tarikh"
                     >
-                      <option value="">Susunan Tarikh Asal</option>
-                      <option value="desc">Tarikh: Terkini</option>
+                      <option value="desc">Tarikh: Terkini (Lalai)</option>
                       <option value="asc">Tarikh: Terlama</option>
                     </select>
                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
@@ -3048,8 +3198,10 @@ function AppContent() {
                         onClick={() => {
                           if (nameSortOrder === 'asc') {
                             setNameSortOrder('desc');
+                            setDateSortOrder(null);
                           } else if (nameSortOrder === 'desc') {
                             setNameSortOrder(null);
+                            setDateSortOrder('desc');
                           } else {
                             setNameSortOrder('asc');
                             setDateSortOrder(null);
@@ -3077,8 +3229,7 @@ function AppContent() {
                         onClick={() => {
                           if (dateSortOrder === 'desc') {
                             setDateSortOrder('asc');
-                          } else if (dateSortOrder === 'asc') {
-                            setDateSortOrder(null);
+                            setNameSortOrder(null);
                           } else {
                             setDateSortOrder('desc');
                             setNameSortOrder(null);

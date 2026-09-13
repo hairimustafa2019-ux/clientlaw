@@ -2,5 +2,5 @@
   "name": "Sistem Pengurusan Kes & Bayaran",
   "description": "Aplikasi pengurusan data kes dan rekod bayaran guaman/firma berdasarkan data yang dimuat naik.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
