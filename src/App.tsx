@@ -182,15 +182,7 @@ function AppContent() {
     };
   }, []);
 
-  const [records, setRecords] = useState<CaseRecord[]>(() => {
-    const saved = localStorage.getItem('localOfflineRecords');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {}
-    }
-    return initialRecords;
-  });
+  const [records, setRecords] = useState<CaseRecord[]>(initialRecords);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('darkMode') === 'true' || 
@@ -199,16 +191,6 @@ function AppContent() {
     return false;
   });
 
-  const [whatsappTemplate, setWhatsappTemplate] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('whatsappTemplate') || 'Salam {nama}, ini adalah peringatan mesra berkenaan baki tertunggak sebanyak {baki} untuk kes {kes}.';
-    }
-    return 'Salam {nama}, ini adalah peringatan mesra berkenaan baki tertunggak sebanyak {baki} untuk kes {kes}.';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('whatsappTemplate', whatsappTemplate);
-  }, [whatsappTemplate]);
 
   const [overdueDays, setOverdueDays] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -222,19 +204,15 @@ function AppContent() {
     localStorage.setItem('overdueDays', overdueDays.toString());
   }, [overdueDays]);
 
-  const [whatsappIncludeLink, setWhatsappIncludeLink] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('whatsappIncludeLink') === 'true';
-    }
-    return false;
-  });
-
-  useEffect(() => {
-    localStorage.setItem('whatsappIncludeLink', String(whatsappIncludeLink));
-  }, [whatsappIncludeLink]);
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('autoBackupEnabled') === 'true';
+    }
+    return false;
+  });
+  const [autoSyncSheetsEnabled, setAutoSyncSheetsEnabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('autoSyncSheetsEnabled') === 'true';
     }
     return false;
   });
@@ -421,17 +399,24 @@ function AppContent() {
   }, [autoBackupEnabled]);
 
   useEffect(() => {
+    localStorage.setItem('autoSyncSheetsEnabled', autoSyncSheetsEnabled.toString());
+  }, [autoSyncSheetsEnabled]);
+
+  useEffect(() => {
     if (skipNextBackupRef.current) {
       skipNextBackupRef.current = false;
       return;
     }
-    if (autoBackupEnabled && user && authReady) {
-      const timeoutId = setTimeout(() => {
-        silentBackupToCloud(records);
+    
+    let timeoutId: any;
+    if ((autoBackupEnabled || autoSyncSheetsEnabled) && user && authReady) {
+      timeoutId = setTimeout(() => {
+        if (autoBackupEnabled) silentBackupToCloud(records);
+        if (autoSyncSheetsEnabled) silentSyncToGoogleSheets(records);
       }, 1500);
-      return () => clearTimeout(timeoutId);
     }
-  }, [records, autoBackupEnabled, user, authReady]);
+    return () => clearTimeout(timeoutId);
+  }, [records, autoBackupEnabled, autoSyncSheetsEnabled, user, authReady]);
 
   useEffect(() => {
     if (darkMode) {
@@ -454,20 +439,12 @@ function AppContent() {
   useEffect(() => {
     if (!authReady) return;
     if (!user) {
-      const saved = localStorage.getItem('localOfflineRecords');
-      if (saved) {
-        try {
-          setRecords(JSON.parse(saved));
-        } catch(e) {}
-      } else {
-        setRecords(initialRecords);
-      }
+      setRecords(initialRecords);
       return;
     }
 
     const targetPath = `users/${user.uid}/records`;
     
-    // Auto sync local offline records disabled to prevent overwriting cloud with initialRecords
     const q = query(collection(db, targetPath));
 
     const unsubscribe = onSnapshot(q, async (snapshot) => {
@@ -476,24 +453,6 @@ function AppContent() {
         fetchedRecords.push(doc.data() as CaseRecord);
       });
       
-      if (fetchedRecords.length === 0) {
-        const saved = localStorage.getItem('localOfflineRecords');
-        if (saved) {
-           try {
-              const localRecs = JSON.parse(saved);
-              if (localRecs && localRecs.length > 0) {
-                 const batch = writeBatch(db);
-                 localRecs.forEach((r) => {
-                    const rRef = doc(db, targetPath, r.id);
-                    batch.set(rRef, { ...r, userId: user.uid });
-                 });
-                 await batch.commit();
-                 return; // will re-trigger
-              }
-           } catch(e) {}
-        }
-      }
-
       skipNextBackupRef.current = true;
       setRecords(fetchedRecords);
     }, (error) => {
@@ -501,13 +460,6 @@ function AppContent() {
     });
     return () => unsubscribe();
   }, [user, authReady]);
-
-  useEffect(() => {
-    // Only save to local storage if user is truly offline and not just logged out with initial data
-    if (authReady && !user && records.length > 0 && records !== initialRecords) {
-      localStorage.setItem('localOfflineRecords', JSON.stringify(records));
-    }
-  }, [records, user, authReady]);
 
   // Auto-load PDF data one-time
   useEffect(() => {
@@ -909,6 +861,112 @@ function AppContent() {
     XLSX.utils.book_append_sheet(wb, wsPayments, "Sejarah Pembayaran");
 
     XLSX.writeFile(wb, `Data_Lengkap_Pelanggan_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const silentSyncToGoogleSheets = async (currentRecords: CaseRecord[]) => {
+    if (!user || !autoSyncSheetsEnabled) return;
+    try {
+        let token = cachedAccessToken;
+        if (!token) return;
+
+        let spreadsheetId = localStorage.getItem('autoSyncSpreadsheetId');
+        
+        if (!spreadsheetId) {
+            const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    properties: {
+                        title: `Auto-Sync Data Kes HMA`
+                    }
+                })
+            });
+            
+            if (!createRes.ok) {
+                if (createRes.status === 401 || createRes.status === 403) setCachedAccessToken(null);
+                return;
+            }
+            
+            const spreadsheet = await createRes.json();
+            spreadsheetId = spreadsheet.spreadsheetId;
+            if (spreadsheetId) {
+                localStorage.setItem('autoSyncSpreadsheetId', spreadsheetId);
+            } else {
+                return;
+            }
+        }
+        
+        const headers = ['ID Rekod', 'Nama Pelanggan', 'Telefon', 'Alamat', 'Kategori Kes', 'Total Fee (RM)', 'Baki Fee Terkini (RM)', 'Baki Mileage (RM)', 'Tarikh', 'Nota'];
+        const rows = currentRecords.map(r => [
+            r.id,
+            r.nama,
+            r.telefon || '',
+            r.alamat || '',
+            r.kes,
+            r.totalFee.toString(),
+            r.bakiFeeTerkini.toString(),
+            (r.bakiMileage || 0).toString(),
+            formatDateDMY(r.tarikh),
+            r.nota || ''
+        ]);
+        
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:Z:clear`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:J${rows.length + 1}?valueInputOption=USER_ENTERED`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                values: [headers, ...rows]
+            })
+        });
+        
+        if (!updateRes.ok && (updateRes.status === 401 || updateRes.status === 403)) {
+            setCachedAccessToken(null);
+        } else {
+            console.log("Silent Sync to Google Sheets successful");
+        }
+    } catch (e: any) {
+        console.error("Silent Sync to Google Sheets Failed:", e);
+    }
+  };
+
+  const handleToggleAutoSyncSheets = async () => {
+    if (!autoSyncSheetsEnabled) {
+       try {
+          let token = cachedAccessToken;
+          if (!token) {
+             const provider = new GoogleAuthProvider();
+             provider.addScope('https://www.googleapis.com/auth/drive.file');
+             provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+             const result = await signInWithPopup(auth, provider);
+             const credential = GoogleAuthProvider.credentialFromResult(result);
+             token = credential?.accessToken || null;
+             if (token) {
+                 setCachedAccessToken(token);
+             } else {
+                 throw new Error("Tiada token akses Google.");
+             }
+          }
+          setAutoSyncSheetsEnabled(true);
+          localStorage.setItem('autoSyncSheetsEnabled', 'true');
+       } catch (e: any) {
+          alert('Gagal mengaktifkan Auto-Sync Google Sheets: ' + e.message);
+       }
+    } else {
+       setAutoSyncSheetsEnabled(false);
+       localStorage.setItem('autoSyncSheetsEnabled', 'false');
+    }
   };
 
   const silentBackupToCloud = async (currentRecords: CaseRecord[]) => {
@@ -1323,7 +1381,15 @@ function AppContent() {
       const targetPath = `users/${user.uid}/records/${deletingRecord.id}`;
       try {
           await deleteDoc(doc(db, 'users', user.uid, 'records', deletingRecord.id));
-      } catch(err) {
+          console.log(`[Firestore Success] Rekod ${deletingRecord.id} berjaya dipadam dari awan.`);
+      } catch(err: any) {
+          console.error(`[Firestore Delete Error] Konflik atau ralat memadam rekod:`, {
+            recordId: deletingRecord.id,
+            userId: user.uid,
+            errorMessage: err.message,
+            errorCode: err.code,
+            timestamp: new Date().toISOString()
+          });
           handleFirestoreError(err, OperationType.DELETE, targetPath);
       }
     }
@@ -1379,7 +1445,15 @@ function AppContent() {
           const targetPath = `users/${user.uid}/records/${id}`;
           try {
               await deleteDoc(doc(db, 'users', user.uid, 'records', id));
-          } catch(err) {
+              console.log(`[Firestore Success] Rekod ${id} berjaya dipadam dari awan (Kumpulan).`);
+          } catch(err: any) {
+              console.error(`[Firestore Delete Error] Konflik atau ralat memadam rekod (Kumpulan):`, {
+                recordId: id,
+                userId: user.uid,
+                errorMessage: err.message,
+                errorCode: err.code,
+                timestamp: new Date().toISOString()
+              });
               handleFirestoreError(err, OperationType.DELETE, targetPath);
           }
       }
@@ -2508,7 +2582,7 @@ function AppContent() {
                       </div>
                       <ChevronRight size={18} className="text-[#a1a1aa]" />
                     </button>
-                    <button onClick={() => setAutoBackupEnabled(!autoBackupEnabled)} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
+                    <button onClick={() => setAutoBackupEnabled(!autoBackupEnabled)} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors border-b border-zinc-100 dark:border-zinc-800/50">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600 dark:text-blue-400">
                           <Cloud size={18} />
@@ -2517,6 +2591,20 @@ function AppContent() {
                       </div>
                       <div className="text-[#a1a1aa]">
                         {autoBackupEnabled ? <ToggleRight size={24} className="text-blue-500" /> : <ToggleLeft size={24} />}
+                      </div>
+                    </button>
+                    <button onClick={handleToggleAutoSyncSheets} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-green-50 dark:bg-green-900/20 rounded-lg text-green-600 dark:text-green-400">
+                          <RefreshCw size={18} />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Auto-Sync ke Google Sheets</span>
+                          {autoSyncSheetsEnabled && !cachedAccessToken && <span className="text-xs text-red-500">Klik semula untuk sahkan sambungan</span>}
+                        </div>
+                      </div>
+                      <div className="text-[#a1a1aa]">
+                        {autoSyncSheetsEnabled ? <ToggleRight size={24} className="text-green-500" /> : <ToggleLeft size={24} />}
                       </div>
                     </button>
                     {!user ? (
@@ -2620,33 +2708,6 @@ function AppContent() {
                   </div>
                 </div>
                 
-                <div className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-sm border border-[#f4f4f5]  overflow-hidden">
-                  <div className="p-4 border-b border-[#f4f4f5] ">
-                    <h2 className="text-sm font-bold text-[#18181b] dark:text-white ">Tetapan Peringatan WhatsApp</h2>
-                  </div>
-                  <div className="p-4 flex flex-col gap-3">
-                    <label className="text-xs font-semibold text-[#71717a] dark:text-[#a1a1aa] uppercase tracking-wider">Template Mesej</label>
-                    <textarea
-                      rows={4}
-                      className="w-full px-3 py-2 border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-[#18181b] dark:text-white  resize-y"
-                      value={whatsappTemplate}
-                      onChange={(e) => setWhatsappTemplate(e.target.value)}
-                    />
-                    <p className="text-[11px] text-[#71717a] dark:text-[#a1a1aa]">
-                      Gunakan tag: <code className="bg-zinc-100 darkdark:bg-zinc-800 px-1 py-0.5 rounded text-[#3f3f46] dark:text-zinc-200 ">{"{nama}"}</code>, <code className="bg-zinc-100 darkdark:bg-zinc-800 px-1 py-0.5 rounded text-[#3f3f46] dark:text-zinc-200 ">{"{kes}"}</code>, <code className="bg-zinc-100 darkdark:bg-zinc-800 px-1 py-0.5 rounded text-[#3f3f46] dark:text-zinc-200 ">{"{baki}"}</code>.
-                    </p>
-                    <label className="flex items-center gap-2 mt-2 cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={whatsappIncludeLink}
-                        onChange={(e) => setWhatsappIncludeLink(e.target.checked)}
-                        className="rounded border-[#d4d4d8]  text-[#059669] focus:ring-emerald-500 dark:bg-zinc-900"
-                      />
-                      <span className="text-sm text-[#3f3f46] dark:text-zinc-200 ">Sertakan Pautan Penyata PDF (jika ada)</span>
-                    </label>
-                  </div>
-                </div>
-
                 <div className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-sm border border-[#f4f4f5]  overflow-hidden">
                   <div className="p-4 border-b border-[#f4f4f5] ">
                     <h2 className="text-sm font-bold text-[#18181b] dark:text-white ">Tetapan Penjejak Tunggakan</h2>
@@ -2932,16 +2993,7 @@ function AppContent() {
                                  <td className="px-4 py-3 text-right font-mono font-medium text-red-600 dark:text-red-400">{formatRM(r.bakiFeeTerkini)}</td>
                                  <td className="px-4 py-3 text-center">
                                    {r.telefon ? (
-                                      <a 
-                                        href={`https://wa.me/${r.telefon.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(whatsappTemplate.replace(/\{nama\}/g, r.nama || '').replace(/\{kes\}/g, r.kes || '').replace(/\{baki\}/g, formatRM(r.bakiFeeTerkini)) + (whatsappIncludeLink && r.statementUrl ? '\n\nPautan Penyata: ' + r.statementUrl : ''))}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-500/10 hover:bg-emerald-200 dark:hover:bg-emerald-500/20 rounded-lg transition-colors border border-emerald-200 dark:border-emerald-500/20 shadow-sm"
-                                        title="Hantar Peringatan WhatsApp"
-                                      >
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-message-circle"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
-                                        WhatsApp
-                                      </a>
+                                      <span className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">{r.telefon}</span>
                                    ) : <span className="text-[10px] text-[#a1a1aa]">Tiada No. Tel</span>}
                                  </td>
                                </tr>
