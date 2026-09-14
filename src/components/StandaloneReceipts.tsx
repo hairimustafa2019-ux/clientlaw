@@ -24,6 +24,34 @@ export type StandaloneReceiptData = {
   userId?: string;
 };
 
+export function formatReceiptDateDMY(dateStr?: string): string {
+  if (!dateStr) return '';
+  const trimmed = dateStr.trim();
+  if (trimmed.includes('/')) {
+    const parts = trimmed.split('/');
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        return `${parts[2].padStart(2, '0')}/${parts[1].padStart(2, '0')}/${parts[0]}`;
+      }
+      return `${parts[0].padStart(2, '0')}/${parts[1].padStart(2, '0')}/${parts[2]}`;
+    }
+  }
+  if (trimmed.includes('-')) {
+    const parts = trimmed.split('T')[0].split('-');
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        return `${parts[2].padStart(2, '0')}/${parts[1].padStart(2, '0')}/${parts[0]}`;
+      }
+      return `${parts[0].padStart(2, '0')}/${parts[1].padStart(2, '0')}/${parts[2]}`;
+    }
+  }
+  const d = new Date(trimmed);
+  if (!isNaN(d.getTime())) {
+    return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`;
+  }
+  return trimmed;
+}
+
 export default function StandaloneReceipts({ 
   initialData, 
   user, 
@@ -191,8 +219,7 @@ export default function StandaloneReceipts({
       return;
     }
     
-    let d = new Date(form.tarikh);
-    const tarikhDisplay = `${d.getDate().toString().padStart(2, "0")}/${(d.getMonth() + 1).toString().padStart(2, "0")}/${d.getFullYear()}`;
+    const tarikhDisplay = formatReceiptDateDMY(form.tarikh);
     
     if (user) {
       const rId = editingId || doc(collection(db, `users/${user.uid}/receipts`)).id;
@@ -330,7 +357,10 @@ export default function StandaloneReceipts({
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">Tarikh:</label>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300">Tarikh (DD/MM/YYYY):</label>
+                    <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400">Contoh: 13/10/2026</span>
+                  </div>
                   <input type="date" className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950" 
                     value={form.tarikh} onChange={e => setForm({...form, tarikh: e.target.value})} required />
                 </div>
@@ -461,7 +491,7 @@ export default function StandaloneReceipts({
                   let paparanItem = (data.items && data.items.length > 0) ? data.items.map(i => i.perkara).join(', ') : ((data as any).item || "-");
                   return (
                     <tr key={index} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                      <td className="p-3">{data.tarikhDisplay || `${new Date(data.tarikh).getDate().toString().padStart(2, "0")}/${(new Date(data.tarikh).getMonth()+1).toString().padStart(2, "0")}/${new Date(data.tarikh).getFullYear()}`}</td>
+                      <td className="p-3">{formatReceiptDateDMY(data.tarikhDisplay || data.tarikh)}</td>
                       <td className="p-3 font-medium uppercase">{data.nama}</td>
                       <td className="p-3 text-xs text-zinc-600 dark:text-zinc-400">{paparanItem}</td>
                       <td className="p-3">{data.jumlah.toFixed(2)}</td>
@@ -520,7 +550,7 @@ export default function StandaloneReceipts({
                       <span className="whitespace-pre-line uppercase">{form.alamat || '-'}</span>
                     </div>
                     <div className="text-right">
-                      <strong>TARIKH:</strong> <span>{form.tarikhDisplay || `${new Date(form.tarikh).getDate().toString().padStart(2, "0")}/${(new Date(form.tarikh).getMonth()+1).toString().padStart(2, "0")}/${new Date(form.tarikh).getFullYear()}`}</span>
+                      <strong>TARIKH:</strong> <span>{formatReceiptDateDMY(form.tarikhDisplay || form.tarikh)}</span>
                     </div>
                   </div>
 
