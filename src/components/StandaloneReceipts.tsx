@@ -3,7 +3,7 @@ import { Printer, Edit, Trash2, Plus, Download, X, FileMinus } from 'lucide-reac
 import { motion, AnimatePresence } from 'motion/react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query, writeBatch, Firestore } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, writeBatch, Firestore } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import { CaseRecord } from '../data';
 
@@ -112,13 +112,18 @@ export default function StandaloneReceipts({
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedReceipts: StandaloneReceiptData[] = [];
       snapshot.forEach(doc => {
-        fetchedReceipts.push(doc.data() as StandaloneReceiptData);
+        const data = doc.data() as StandaloneReceiptData;
+        fetchedReceipts.push({
+          ...data,
+          id: String(data.id || doc.id)
+        });
       });
       
       // Sort receipts by tarikh descending, or fallback to id
       fetchedReceipts.sort((a, b) => b.tarikh.localeCompare(a.tarikh));
       
       setRecords(fetchedReceipts);
+      localStorage.setItem('hma_receipts', JSON.stringify(fetchedReceipts));
     }, (error) => {
       console.error("Failed to load receipts from Firestore:", error);
     });
@@ -325,19 +330,39 @@ export default function StandaloneReceipts({
 
   const padamRekod = async (rec: StandaloneReceiptData) => {
     if (confirm("Adakah anda pasti untuk memadam rekod ini?")) {
-      if (user && rec.id) {
+      const targetId = rec.id ? String(rec.id) : null;
+      const previousRecords = [...records];
+
+      // 1. Immediate optimistic UI update
+      setRecords(prev => {
+        const remaining = prev.filter(r => {
+          if (targetId && r.id) return String(r.id) !== targetId;
+          return !(r.nama === rec.nama && r.tarikh === rec.tarikh && r.jumlah === rec.jumlah);
+        });
+        localStorage.setItem('hma_receipts', JSON.stringify(remaining));
+        return remaining;
+      });
+
+      if (user && targetId) {
         try {
-          await deleteDoc(doc(db, `users/${user.uid}/receipts`, rec.id));
-        } catch (err) {
+          await deleteDoc(doc(db, `users/${user.uid}/receipts`, targetId));
+          console.log(`[Firestore Success] Resit ${targetId} berjaya dipadam dari awan.`);
+        } catch (err: any) {
           console.error("Failed to delete receipt from Firestore:", err);
-          alert("Gagal memadam resit dari cloud.");
-        }
-      } else {
-        const idx = records.findIndex(r => r.id === rec.id || (r.nama === rec.nama && r.tarikh === rec.tarikh && r.jumlah === rec.jumlah));
-        if (idx !== -1) {
-          const newRecords = [...records];
-          newRecords.splice(idx, 1);
-          setRecords(newRecords);
+          
+          // 2. REVERT ONLY IF FIRESTORE DELETE FAILS
+          setRecords(previousRecords);
+          localStorage.setItem('hma_receipts', JSON.stringify(previousRecords));
+
+          let errorMsg = `Gagal memadam resit "${rec.nama || targetId}" dari awan (Firestore). Resit telah dipulihkan.`;
+          if (err?.code === 'permission-denied') {
+            errorMsg = "Kebenaran ditolak (Permission Denied). Resit telah dipulihkan semula.";
+          } else if (err?.code === 'unavailable') {
+            errorMsg = "Sambungan internet atau awan terputus. Resit telah dipulihkan semula.";
+          } else if (err?.message) {
+            errorMsg = `Ralat awan: ${err.message}. Resit telah dipulihkan semula.`;
+          }
+          alert(errorMsg);
         }
       }
     }

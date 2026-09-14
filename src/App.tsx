@@ -6,7 +6,7 @@
 import StandaloneReceipts from './components/StandaloneReceipts';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History, ToggleLeft, ToggleRight, Cloud, RefreshCw, Calendar } from 'lucide-react';
+import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History, ToggleLeft, ToggleRight, Cloud, RefreshCw, Calendar, AlertCircle, Info } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { records as initialRecords, CaseRecord, PaymentEntry } from './data';
 import { jsPDF } from 'jspdf';
@@ -171,6 +171,20 @@ function AppContent() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
 
+  const [toast, setToast] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string; details?: string } | null>(null);
+  const toastTimerRef = useRef<any>(null);
+
+  const showToast = (type: 'success' | 'error' | 'info', message: string, details?: string) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    const id = String(Date.now());
+    setToast({ id, type, message, details });
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+    }, 6000);
+  };
+
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -182,7 +196,19 @@ function AppContent() {
     };
   }, []);
 
-  const [records, setRecords] = useState<CaseRecord[]>(initialRecords);
+  const [records, setRecords] = useState<CaseRecord[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('hma_case_records');
+      if (saved !== null) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {
+          console.error("Error parsing saved records from localStorage:", e);
+        }
+      }
+    }
+    return initialRecords;
+  });
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('darkMode') === 'true' || 
@@ -439,7 +465,16 @@ function AppContent() {
   useEffect(() => {
     if (!authReady) return;
     if (!user) {
-      setRecords(initialRecords);
+      const saved = localStorage.getItem('hma_case_records');
+      if (saved !== null) {
+        try {
+          setRecords(JSON.parse(saved));
+        } catch (e) {
+          setRecords(initialRecords);
+        }
+      } else {
+        setRecords(initialRecords);
+      }
       return;
     }
 
@@ -450,11 +485,56 @@ function AppContent() {
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       const fetchedRecords: CaseRecord[] = [];
       snapshot.forEach(doc => {
-        fetchedRecords.push(doc.data() as CaseRecord);
+        const data = doc.data() as CaseRecord;
+        fetchedRecords.push({
+          ...data,
+          id: String(data.id || doc.id)
+        });
       });
       
-      skipNextBackupRef.current = true;
-      setRecords(fetchedRecords);
+      if (!snapshot.empty) {
+        localStorage.setItem(`cloud_initialized_${user.uid}`, 'true');
+        skipNextBackupRef.current = true;
+        setRecords(fetchedRecords);
+        localStorage.setItem('hma_case_records', JSON.stringify(fetchedRecords));
+      } else {
+        const hasInitializedCloud = localStorage.getItem(`cloud_initialized_${user.uid}`);
+        if (!hasInitializedCloud) {
+          // First time user logs in: seed local/initial records to Firestore
+          const saved = localStorage.getItem('hma_case_records');
+          let recordsToSync: CaseRecord[] = [];
+          if (saved !== null) {
+            try {
+              recordsToSync = JSON.parse(saved);
+            } catch (e) {
+              recordsToSync = initialRecords;
+            }
+          } else {
+            recordsToSync = initialRecords;
+          }
+
+          if (recordsToSync && recordsToSync.length > 0) {
+            const batch = writeBatch(db);
+            for (const r of recordsToSync) {
+              const rId = String(r.id);
+              const docRef = doc(db, 'users', user.uid, 'records', rId);
+              batch.set(docRef, { ...r, id: rId, userId: user.uid }, { merge: true });
+            }
+            try {
+              await batch.commit();
+              console.log("Initial records migrated to user's Firestore.");
+            } catch (err) {
+              console.error("Failed to seed initial records to Firestore:", err);
+            }
+          }
+          localStorage.setItem(`cloud_initialized_${user.uid}`, 'true');
+        } else {
+          // Cloud was initialized and is empty (user intentionally deleted all records)
+          skipNextBackupRef.current = true;
+          setRecords([]);
+          localStorage.setItem('hma_case_records', JSON.stringify([]));
+        }
+      }
     }, (error) => {
        handleFirestoreError(error, OperationType.GET, targetPath);
     });
@@ -520,6 +600,7 @@ function AppContent() {
       return;
     }
     localStorage.setItem('lastModificationDate', Date.now().toString());
+    localStorage.setItem('hma_case_records', JSON.stringify(records));
   }, [records]);
 
   React.useEffect(() => {
@@ -571,17 +652,37 @@ function AppContent() {
 
   const handleFormatData = async () => {
     if (window.confirm("AMARAN: Adakah anda pasti mahu memadam SEMUA rekod? Tindakan ini tidak boleh dipulihkan.")) {
+      const previousRecords = [...records];
+      skipNextBackupRef.current = true;
+      setRecords([]);
+      localStorage.setItem('hma_case_records', JSON.stringify([]));
+
       if (user) {
         try {
-          for (const rec of records) {
-            await deleteDoc(doc(db, 'users', user.uid, 'records', rec.id));
+          const q = query(collection(db, `users/${user.uid}/records`));
+          const snapshot = await getDocs(q);
+          if (!snapshot.empty) {
+            const batch = writeBatch(db);
+            snapshot.forEach(d => {
+              batch.delete(d.ref);
+            });
+            await batch.commit();
+            console.log("[Firestore Success] Semua rekod berjaya dipadam dari awan.");
           }
-        } catch (err) {
+          localStorage.setItem(`cloud_initialized_${user.uid}`, 'true');
+          showToast('success', 'Semua data telah berjaya dipadam dari awan.');
+        } catch (err: any) {
           console.error("Gagal memadam dari awan", err);
+          // Revert ONLY if Firestore delete fails
+          setRecords(previousRecords);
+          localStorage.setItem('hma_case_records', JSON.stringify(previousRecords));
+          showToast('error', 'Gagal memadam semua data dari awan.', err.message || 'Sila cuba lagi.');
+          handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}/records`);
+          return;
         }
+      } else {
+        showToast('success', 'Semua data telah berjaya dipadam secara setempat.');
       }
-      setRecords([]);
-      alert("Semua data telah berjaya dipadam (diformat).");
     }
   };
 
@@ -992,11 +1093,16 @@ function AppContent() {
       const snapshot = await getDocs(q);
       const fetchedRecords: CaseRecord[] = [];
       snapshot.forEach(doc => {
-        fetchedRecords.push(doc.data() as CaseRecord);
+        const data = doc.data() as CaseRecord;
+        fetchedRecords.push({
+          ...data,
+          id: String(data.id || doc.id)
+        });
       });
       skipNextBackupRef.current = true;
       setRecords(fetchedRecords);
-      // alert("Data berjaya dikemaskini.");
+      localStorage.setItem('hma_case_records', JSON.stringify(fetchedRecords));
+      localStorage.setItem(`cloud_initialized_${user.uid}`, 'true');
     } catch (error) {
       console.error("Failed to refresh data:", error);
       alert("Gagal memuat semula data.");
@@ -1376,25 +1482,58 @@ function AppContent() {
 
   const handleDeleteRecord = async () => {
     if (!deletingRecord) return;
-    setRecords(prev => prev.filter(rec => rec.id !== deletingRecord.id));
-    if (user) {
-      const targetPath = `users/${user.uid}/records/${deletingRecord.id}`;
-      try {
-          await deleteDoc(doc(db, 'users', user.uid, 'records', deletingRecord.id));
-          console.log(`[Firestore Success] Rekod ${deletingRecord.id} berjaya dipadam dari awan.`);
-      } catch(err: any) {
-          console.error(`[Firestore Delete Error] Konflik atau ralat memadam rekod:`, {
-            recordId: deletingRecord.id,
-            userId: user.uid,
-            errorMessage: err.message,
-            errorCode: err.code,
-            timestamp: new Date().toISOString()
-          });
-          handleFirestoreError(err, OperationType.DELETE, targetPath);
-      }
-    }
+    const targetId = String(deletingRecord.id);
+    const targetRecord = deletingRecord;
+    const previousRecords = [...records];
+
     setDeletingRecord(null);
     setExpandedRowId(null);
+
+    // 1. Immediate optimistic UI update (removes item immediately from state and cache)
+    setRecords(prev => {
+      const remaining = prev.filter(rec => String(rec.id) !== targetId);
+      localStorage.setItem('hma_case_records', JSON.stringify(remaining));
+      return remaining;
+    });
+
+    if (user) {
+      const targetPath = `users/${user.uid}/records/${targetId}`;
+      try {
+        await deleteDoc(doc(db, 'users', user.uid, 'records', targetId));
+        console.log(`[Firestore Success] Rekod ${targetId} berjaya dipadam dari awan.`);
+        localStorage.setItem(`cloud_initialized_${user.uid}`, 'true');
+        showToast('success', `Rekod "${targetRecord.nama || targetId}" berjaya dipadam dari awan.`);
+      } catch(err: any) {
+        console.error(`[Firestore Delete Error] Ralat memadam rekod:`, {
+          recordId: targetId,
+          userId: user.uid,
+          errorMessage: err.message,
+          errorCode: err.code,
+          timestamp: new Date().toISOString()
+        });
+
+        // 2. REVERT ONLY IF FIRESTORE DELETE FAILS
+        setRecords(previousRecords);
+        localStorage.setItem('hma_case_records', JSON.stringify(previousRecords));
+
+        let userMsg = `Gagal memadam rekod "${targetRecord.nama || targetId}" dari awan.`;
+        let userDetail = 'Rekod telah dipulihkan semula ke dalam senarai anda.';
+        if (err.code === 'permission-denied') {
+          userMsg = 'Kebenaran ditolak oleh Firestore (Permission Denied). Rekod telah dipulihkan.';
+          userDetail = 'Akaun anda tidak mempunyai kebenaran untuk memadam rekod ini.';
+        } else if (err.code === 'unavailable') {
+          userMsg = 'Tiada sambungan internet atau perkhidmatan Firestore tidak dapat dihubungi.';
+          userDetail = 'Rekod telah dipulihkan semula. Sila semak sambungan anda.';
+        } else if (err.message) {
+          userDetail = `${err.message}. Rekod telah dipulihkan semula.`;
+        }
+
+        showToast('error', userMsg, userDetail);
+        handleFirestoreError(err, OperationType.DELETE, targetPath);
+      }
+    } else {
+      showToast('success', `Rekod "${targetRecord.nama || targetId}" dipadam secara setempat.`);
+    }
   };
 
   const handleSettleBakiFeeToZero = async () => {
@@ -1439,27 +1578,68 @@ function AppContent() {
   };
 
   const handleDeleteSelected = async () => {
-    setRecords(prev => prev.filter(rec => !selectedRecords.includes(rec.id)));
-    if (user) {
-      for (const id of selectedRecords) {
-          const targetPath = `users/${user.uid}/records/${id}`;
-          try {
-              await deleteDoc(doc(db, 'users', user.uid, 'records', id));
-              console.log(`[Firestore Success] Rekod ${id} berjaya dipadam dari awan (Kumpulan).`);
-          } catch(err: any) {
-              console.error(`[Firestore Delete Error] Konflik atau ralat memadam rekod (Kumpulan):`, {
-                recordId: id,
-                userId: user.uid,
-                errorMessage: err.message,
-                errorCode: err.code,
-                timestamp: new Date().toISOString()
-              });
-              handleFirestoreError(err, OperationType.DELETE, targetPath);
-          }
-      }
+    if (!selectedRecords.length) {
+      setIsDeletingSelected(false);
+      return;
     }
+    const idsToDelete = new Set<string>(selectedRecords.map(id => String(id)));
+    const targetIds: string[] = Array.from(idsToDelete);
+    const count = targetIds.length;
+    const previousRecords = [...records];
+    const previousSelected = [...selectedRecords];
+
     setSelectedRecords([]);
     setIsDeletingSelected(false);
+
+    // 1. Immediate optimistic UI update (removes selected items immediately)
+    setRecords(prev => {
+      const remaining = prev.filter(rec => !idsToDelete.has(String(rec.id)));
+      localStorage.setItem('hma_case_records', JSON.stringify(remaining));
+      return remaining;
+    });
+
+    if (user) {
+      try {
+        const batch = writeBatch(db);
+        for (const id of targetIds) {
+          batch.delete(doc(db, 'users', user.uid, 'records', String(id)));
+        }
+        await batch.commit();
+        console.log(`[Firestore Success] ${targetIds.length} rekod berjaya dipadam dari awan (Kumpulan).`);
+        localStorage.setItem(`cloud_initialized_${user.uid}`, 'true');
+        showToast('success', `${count} rekod terpilih berjaya dipadam sepenuhnya dari awan.`);
+      } catch(err: any) {
+        console.error(`[Firestore Delete Error] Ralat memadam rekod (Kumpulan):`, {
+          recordIds: targetIds,
+          userId: user.uid,
+          errorMessage: err.message,
+          errorCode: err.code,
+          timestamp: new Date().toISOString()
+        });
+
+        // 2. REVERT ONLY IF FIRESTORE DELETE FAILS
+        setRecords(previousRecords);
+        setSelectedRecords(previousSelected);
+        localStorage.setItem('hma_case_records', JSON.stringify(previousRecords));
+
+        let userMsg = `Gagal memadam ${count} rekod dari pangkalan data awan.`;
+        let userDetail = 'Semua rekod terpilih telah dipulihkan semula.';
+        if (err.code === 'permission-denied') {
+          userMsg = 'Kebenaran ditolak oleh Firestore (Permission Denied). Rekod telah dipulihkan.';
+          userDetail = 'Akaun anda tidak mempunyai akses memadam bagi rekod yang dipilih.';
+        } else if (err.code === 'unavailable') {
+          userMsg = 'Sambungan internet atau awan terputus. Semua rekod telah dipulihkan.';
+          userDetail = 'Sila semak sambungan internet anda dan cuba lagi.';
+        } else if (err.message) {
+          userDetail = `${err.message}. Rekod telah dipulihkan semula.`;
+        }
+
+        showToast('error', userMsg, userDetail);
+        handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}/records`);
+      }
+    } else {
+      showToast('success', `${count} rekod dipadam secara setempat.`);
+    }
   };
 
   const handleUpdatePayment = async (e: React.FormEvent) => {
@@ -2276,6 +2456,7 @@ function AppContent() {
                       title="Padam Bayaran"
                       onClick={async () => {
                         if (window.confirm('Padam rekod bayaran ini?')) {
+                          const previousRecords = [...records];
                           const newHistory = record.paymentHistory.filter((p: any) => p.id !== payment.id);
                           const updatedRecord = {
                             ...record,
@@ -2284,14 +2465,28 @@ function AppContent() {
                             bakiMileage: record.bakiMileage + (payment.mileageAmount || 0),
                             bayaranTerakhir: newHistory.length > 0 ? newHistory[0].amount : 0
                           };
-                          setRecords((prev: any) => prev.map((r: any) => r.id === record.id ? updatedRecord : r));
+                          
+                          // Immediate optimistic UI update
+                          setRecords((prev: any) => {
+                            const updated = prev.map((r: any) => r.id === record.id ? updatedRecord : r);
+                            localStorage.setItem('hma_case_records', JSON.stringify(updated));
+                            return updated;
+                          });
+
                           if (user) {
                             const targetPath = `users/${user.uid}/records/${record.id}`;
                             try {
                               await setDoc(doc(db, 'users', user.uid, 'records', record.id), updatedRecord);
+                              showToast('success', 'Rekod bayaran berjaya dipadam dari awan.');
                             } catch (err: any) {
+                              // Revert ONLY if Firestore update fails
+                              setRecords(previousRecords);
+                              localStorage.setItem('hma_case_records', JSON.stringify(previousRecords));
+                              showToast('error', 'Gagal memadam rekod bayaran dari awan. Rekod dipulihkan.', err.message);
                               handleFirestoreError(err, OperationType.WRITE, targetPath);
                             }
+                          } else {
+                            showToast('success', 'Rekod bayaran dipadam secara setempat.');
                           }
                         }
                       }}
@@ -5773,6 +5968,49 @@ function AppContent() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key={toast.id}
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ duration: 0.2 }}
+            className={`fixed bottom-6 right-6 z-[9999] max-w-md w-[calc(100vw-3rem)] sm:w-auto p-4 rounded-xl shadow-2xl border flex items-start gap-3 print:hidden backdrop-blur-md ${
+              toast.type === 'error'
+                ? 'bg-red-950/95 border-red-800 text-red-100 shadow-red-950/40'
+                : toast.type === 'success'
+                ? 'bg-emerald-950/95 border-emerald-800 text-emerald-100 shadow-emerald-950/40'
+                : 'bg-zinc-900/95 border-zinc-700 text-zinc-100 shadow-zinc-950/40'
+            }`}
+          >
+            <div className="mt-0.5 shrink-0">
+              {toast.type === 'error' ? (
+                <AlertCircle className="w-5 h-5 text-red-400" />
+              ) : toast.type === 'success' ? (
+                <CheckCircle className="w-5 h-5 text-emerald-400" />
+              ) : (
+                <Info className="w-5 h-5 text-blue-400" />
+              )}
+            </div>
+            <div className="flex-1 text-sm pr-1">
+              <p className="font-semibold text-white leading-snug">{toast.message}</p>
+              {toast.details && (
+                <p className="mt-1 text-xs opacity-90 text-zinc-300 font-normal leading-relaxed">{toast.details}</p>
+              )}
+            </div>
+            <button
+              onClick={() => setToast(null)}
+              className="text-zinc-400 hover:text-white p-1 rounded transition-colors shrink-0"
+              aria-label="Tutup notifikasi"
+            >
+              <X size={16} />
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
