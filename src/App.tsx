@@ -6,7 +6,7 @@
 import StandaloneReceipts from './components/StandaloneReceipts';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History, ToggleLeft, ToggleRight, Cloud, RefreshCw, Calendar, AlertCircle, Info } from 'lucide-react';
+import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History, ToggleLeft, ToggleRight, Cloud, RefreshCw, Calendar, AlertCircle, Info, Folder, Edit2, Save } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { records as initialRecords, CaseRecord, PaymentEntry } from './data';
 import { jsPDF } from 'jspdf';
@@ -59,8 +59,18 @@ const formatRM = (amount: number) => {
 };
 
 const parseDateObj = (dateInput: string | Date | any): Date => {
-  if (!dateInput) return new Date();
+  if (!dateInput && dateInput !== 0) return new Date();
   if (dateInput instanceof Date) return isNaN(dateInput.getTime()) ? new Date() : dateInput;
+
+  // Support Excel serial number dates (e.g. 45432)
+  if (typeof dateInput === 'number' || (!isNaN(Number(dateInput)) && Number(dateInput) > 20000 && Number(dateInput) < 90000)) {
+    const serial = Number(dateInput);
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    const ms = excelEpoch.getTime() + Math.round(serial * 86400000);
+    const d = new Date(ms);
+    if (!isNaN(d.getTime())) return d;
+  }
+
   const str = String(dateInput).trim();
   if (!str) return new Date();
 
@@ -302,17 +312,19 @@ function AppContent() {
   const handleUpdateClientProfile = async (e: React.FormEvent, nama: string) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
-    const telefon = formData.get('telefon') as string;
-    const alamat = formData.get('alamat') as string;
+    const telefon = (formData.get('telefon') as string || '').trim();
+    const emel = (formData.get('emel') as string || '').trim();
+    const alamat = (formData.get('alamat') as string || '').trim();
     
     const updatedRecords = records.map(r => {
       if (r.nama === nama) {
-        return { ...r, telefon, alamat };
+        return { ...r, telefon, emel, alamat };
       }
       return r;
     });
     
     setRecords(updatedRecords);
+    localStorage.setItem('hma_case_records', JSON.stringify(updatedRecords));
     
     if (user) {
       try {
@@ -326,16 +338,17 @@ function AppContent() {
       }
     }
     
-    alert('Profil Pelanggan Berjaya Dikemaskini');
+    showToast('success', 'Profil Pelanggan Berjaya Dikemaskini');
   };
-
-  
   const [paymentSortColumn, setPaymentSortColumn] = useState<'date' | 'amount' | null>(null);
   const [paymentSortDirection, setPaymentSortDirection] = useState<'asc' | 'desc'>('desc');
   const [dateSortOrder, setDateSortOrder] = useState<'asc' | 'desc' | null>('desc');
   const [nameSortOrder, setNameSortOrder] = useState<'asc' | 'desc' | null>(null);
 
   const [isNewRecordModalOpen, setIsNewRecordModalOpen] = useState(false);
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [newCategoryName, setNewCategoryName] = useState("");
   const [isImportingContacts, setIsImportingContacts] = useState(false);
   const [cachedAccessToken, setCachedAccessToken] = useState<string | null>(null);
   const [availableContacts, setAvailableContacts] = useState<any[]>([]);
@@ -407,6 +420,9 @@ function AppContent() {
 
   const [newRecordData, setNewRecordData] = useState({
     nama: '',
+    telefon: '',
+    emel: '',
+    alamat: '',
     kes: '',
     tarikh: new Date().toISOString().split('T')[0],
     totalFee: '',
@@ -650,6 +666,80 @@ function AppContent() {
     }
   }, []);
 
+  const handleRenameCategory = async (oldName: string, newName: string) => {
+    if (!newName.trim() || oldName === newName) return;
+    
+    const previousRecords = [...records];
+    const updatedRecords = records.map(r => 
+      r.kes === oldName ? { ...r, kes: newName.trim() } : r
+    );
+    
+    skipNextBackupRef.current = true;
+    setRecords(updatedRecords);
+    localStorage.setItem('hma_case_records', JSON.stringify(updatedRecords));
+    
+    if (user) {
+      try {
+        const batch = writeBatch(db);
+        const q = query(collection(db, `users/${user.uid}/records`), where("kes", "==", oldName));
+        const snapshot = await getDocs(q);
+        
+        snapshot.forEach(d => {
+          batch.update(d.ref, { kes: newName.trim() });
+        });
+        
+        if (!snapshot.empty) {
+          await batch.commit();
+        }
+        showToast('success', `Kategori "${oldName}" berjaya ditukar kepada "${newName.trim()}".`);
+      } catch (err: any) {
+        console.error("Gagal menamakan semula kategori di awan", err);
+        setRecords(previousRecords);
+        localStorage.setItem('hma_case_records', JSON.stringify(previousRecords));
+        showToast('error', 'Gagal menamakan semula kategori di awan.', err.message);
+      }
+    } else {
+      showToast('success', `Kategori "${oldName}" berjaya ditukar kepada "${newName.trim()}" secara setempat.`);
+    }
+  };
+
+  const handleDeleteCategory = async (categoryName: string) => {
+    if (!window.confirm(`Adakah anda pasti mahu memadam kategori "${categoryName}"? Kesemua rekod dalam kategori ini akan ditukar kepada "Tiada Kategori".`)) return;
+    
+    const previousRecords = [...records];
+    const updatedRecords = records.map(r => 
+      r.kes === categoryName ? { ...r, kes: "Tiada Kategori" } : r
+    );
+    
+    skipNextBackupRef.current = true;
+    setRecords(updatedRecords);
+    localStorage.setItem('hma_case_records', JSON.stringify(updatedRecords));
+    
+    if (user) {
+      try {
+        const batch = writeBatch(db);
+        const q = query(collection(db, `users/${user.uid}/records`), where("kes", "==", categoryName));
+        const snapshot = await getDocs(q);
+        
+        snapshot.forEach(d => {
+          batch.update(d.ref, { kes: "Tiada Kategori" });
+        });
+        
+        if (!snapshot.empty) {
+          await batch.commit();
+        }
+        showToast('success', `Kategori "${categoryName}" berjaya dipadam.`);
+      } catch (err: any) {
+        console.error("Gagal memadam kategori di awan", err);
+        setRecords(previousRecords);
+        localStorage.setItem('hma_case_records', JSON.stringify(previousRecords));
+        showToast('error', 'Gagal memadam kategori di awan.', err.message);
+      }
+    } else {
+      showToast('success', `Kategori "${categoryName}" berjaya dipadam secara setempat.`);
+    }
+  };
+
   const handleFormatData = async () => {
     if (window.confirm("AMARAN: Adakah anda pasti mahu memadam SEMUA rekod? Tindakan ini tidak boleh dipulihkan.")) {
       const previousRecords = [...records];
@@ -687,6 +777,16 @@ function AppContent() {
   };
 
   
+  const handleClearLocalStorage = () => {
+    if (window.confirm("Pasti mahu kosongkan data tempatan (local storage)? Aplikasi akan dimuat semula.")) {
+      localStorage.removeItem('hma_case_records');
+      if (user) {
+        localStorage.removeItem(`cloud_initialized_${user.uid}`);
+      }
+      window.location.reload();
+    }
+  };
+
   const handleExportDBToDrive = async () => {
     if (!user) {
       alert("Sila log masuk untuk mengeksport pangkalan data.");
@@ -844,22 +944,25 @@ function AppContent() {
         const spreadsheetId = spreadsheet.spreadsheetId;
         
         // 2. Prepare data
-        const headers = ['ID Rekod', 'Nama Pelanggan', 'Telefon', 'Alamat', 'Kategori Kes', 'Total Fee (RM)', 'Baki Fee Terkini (RM)', 'Baki Mileage (RM)', 'Tarikh', 'Nota'];
+        const headers = ['ID Rekod', 'Nama Pelanggan', 'No Telefon', 'Emel', 'Alamat', 'Kategori Kes', 'Nota Kes', 'Tarikh', 'Total Fee (RM)', 'Bayaran Terakhir (RM)', 'Baki Sebelum (RM)', 'Baki Fee Terkini (RM)', 'Baki Mileage (RM)'];
         const rows = filteredRecords.map(r => [
             r.id,
             r.nama,
             r.telefon || '',
+            r.emel || '',
             r.alamat || '',
             r.kes,
-            r.totalFee.toString(),
-            r.bakiFeeTerkini.toString(),
-            (r.bakiMileage || 0).toString(),
+            r.nota || '',
             formatDateDMY(r.tarikh),
-            r.nota || ''
+            (Number(r.totalFee) || 0).toFixed(2),
+            (Number(r.bayaranTerakhir) || 0).toFixed(2),
+            (Number(r.bakiSebelum) || 0).toFixed(2),
+            (Number(r.bakiFeeTerkini) || 0).toFixed(2),
+            (Number(r.bakiMileage) || 0).toFixed(2)
         ]);
         
         // 3. Update spreadsheet
-        const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:J${rows.length + 1}?valueInputOption=USER_ENTERED`, {
+        const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:M${rows.length + 1}?valueInputOption=USER_ENTERED`, {
             method: 'PUT',
             headers: {
                 'Authorization': `Bearer ${token}`,
@@ -885,23 +988,39 @@ function AppContent() {
   };
 
   const handleExportData = () => {
-    const headers = ['ID Rekod', 'Nama Pelanggan', 'No Telefon', 'Alamat', 'Kategori Kes', 'Nota Kes', 'Tarikh', 'Total Fee', 'Bayaran Terakhir', 'Baki Sebelum', 'Baki Fee Terkini', 'Baki Mileage'];
-    const csvContent = [
+    const headers = [
+      'ID Rekod',
+      'Nama Pelanggan',
+      'No Telefon',
+      'Emel',
+      'Alamat',
+      'Kategori Kes',
+      'Nota Kes',
+      'Tarikh',
+      'Total Fee',
+      'Bayaran Terakhir',
+      'Baki Sebelum',
+      'Baki Fee Terkini',
+      'Baki Mileage'
+    ];
+    const escapeCsv = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+    const csvContent = '\uFEFF' + [
       headers.join(','),
       ...filteredRecords.map(r => 
         [
-          `"${(r.id || '').replace(/"/g, '""')}"`,
-          `"${(r.nama || '').replace(/"/g, '""')}"`,
-          `"${(r.telefon || '').replace(/"/g, '""')}"`,
-          `"${(r.alamat || '').replace(/"/g, '""')}"`,
-          `"${(r.kes || '').replace(/"/g, '""')}"`,
-          `"${(r.nota || '').replace(/"/g, '""')}"`,
-          `"${formatDateDMY(r.tarikh)}"`,
-          r.totalFee || 0,
-          r.bayaranTerakhir || 0,
-          r.bakiSebelum || 0,
-          r.bakiFeeTerkini || 0,
-          r.bakiMileage || 0
+          escapeCsv(r.id || ''),
+          escapeCsv(r.nama || ''),
+          escapeCsv(r.telefon || ''),
+          escapeCsv(r.emel || ''),
+          escapeCsv(r.alamat || ''),
+          escapeCsv(r.kes || ''),
+          escapeCsv(r.nota || ''),
+          escapeCsv(formatDateDMY(r.tarikh)),
+          (Number(r.totalFee) || 0).toFixed(2),
+          (Number(r.bayaranTerakhir) || 0).toFixed(2),
+          (Number(r.bakiSebelum) || 0).toFixed(2),
+          (Number(r.bakiFeeTerkini) || 0).toFixed(2),
+          (Number(r.bakiMileage) || 0).toFixed(2)
         ].join(',')
       )
     ].join('\n');
@@ -920,18 +1039,18 @@ function AppContent() {
     // 1. Data Rekod Utama
     const recordsData = filteredRecords.map(r => ({
       'ID Rekod': r.id,
-      'Nama': r.nama,
-      'Telefon': r.telefon || '',
-      
+      'Nama Pelanggan': r.nama,
+      'No Telefon': r.telefon || '',
+      'Emel': r.emel || '',
       'Alamat': r.alamat || '',
       'Kategori Kes': r.kes,
-      'Total Fee': r.totalFee,
-      'Bayaran Terakhir': r.bayaranTerakhir,
-      'Tarikh Akhir': formatDateDMY(r.tarikh),
-      'Baki Sebelum': r.bakiSebelum,
-      'Baki Fee Terkini': r.bakiFeeTerkini,
-      'Baki Mileage': r.bakiMileage || 0,
-      'Nota': r.nota || '',
+      'Nota Kes': r.nota || '',
+      'Tarikh': formatDateDMY(r.tarikh),
+      'Total Fee (RM)': Number(r.totalFee) || 0,
+      'Bayaran Terakhir (RM)': Number(r.bayaranTerakhir) || 0,
+      'Baki Sebelum (RM)': Number(r.bakiSebelum) || 0,
+      'Baki Fee Terkini (RM)': Number(r.bakiFeeTerkini) || 0,
+      'Baki Mileage (RM)': Number(r.bakiMileage) || 0,
       'URL Penyata': r.statementUrl || ''
     }));
 
@@ -945,8 +1064,8 @@ function AppContent() {
             'Nama Pelanggan': r.nama,
             'No. Resit / ID Bayaran': p.id,
             'Tarikh Bayaran': formatDateDMY(p.date),
-            'Bayaran Fee (RM)': p.amount || 0,
-            'Bayaran Mileage (RM)': p.mileageAmount || 0,
+            'Bayaran Fee (RM)': Number(p.amount) || 0,
+            'Bayaran Mileage (RM)': Number(p.mileageAmount) || 0,
             'Kaedah Bayaran': p.method,
             'Nota': p.nota || ''
           });
@@ -957,6 +1076,35 @@ function AppContent() {
     const wb = XLSX.utils.book_new();
     const wsRecords = XLSX.utils.json_to_sheet(recordsData);
     const wsPayments = XLSX.utils.json_to_sheet(paymentsData);
+
+    // Format neat column widths (kemas dan teratur)
+    wsRecords['!cols'] = [
+      { wch: 14 }, // ID Rekod
+      { wch: 30 }, // Nama Pelanggan
+      { wch: 16 }, // No Telefon
+      { wch: 24 }, // Emel
+      { wch: 35 }, // Alamat
+      { wch: 20 }, // Kategori Kes
+      { wch: 30 }, // Nota Kes
+      { wch: 14 }, // Tarikh
+      { wch: 16 }, // Total Fee (RM)
+      { wch: 20 }, // Bayaran Terakhir (RM)
+      { wch: 16 }, // Baki Sebelum (RM)
+      { wch: 20 }, // Baki Fee Terkini (RM)
+      { wch: 16 }, // Baki Mileage (RM)
+      { wch: 30 }  // URL Penyata
+    ];
+
+    wsPayments['!cols'] = [
+      { wch: 14 }, // ID Rekod
+      { wch: 30 }, // Nama Pelanggan
+      { wch: 22 }, // No. Resit / ID Bayaran
+      { wch: 14 }, // Tarikh Bayaran
+      { wch: 18 }, // Bayaran Fee (RM)
+      { wch: 22 }, // Bayaran Mileage (RM)
+      { wch: 24 }, // Kaedah Bayaran
+      { wch: 30 }  // Nota
+    ];
 
     XLSX.utils.book_append_sheet(wb, wsRecords, "Rekod Pelanggan");
     XLSX.utils.book_append_sheet(wb, wsPayments, "Sejarah Pembayaran");
@@ -1000,18 +1148,21 @@ function AppContent() {
             }
         }
         
-        const headers = ['ID Rekod', 'Nama Pelanggan', 'Telefon', 'Alamat', 'Kategori Kes', 'Total Fee (RM)', 'Baki Fee Terkini (RM)', 'Baki Mileage (RM)', 'Tarikh', 'Nota'];
+        const headers = ['ID Rekod', 'Nama Pelanggan', 'No Telefon', 'Emel', 'Alamat', 'Kategori Kes', 'Nota Kes', 'Tarikh', 'Total Fee (RM)', 'Bayaran Terakhir (RM)', 'Baki Sebelum (RM)', 'Baki Fee Terkini (RM)', 'Baki Mileage (RM)'];
         const rows = currentRecords.map(r => [
             r.id,
             r.nama,
             r.telefon || '',
+            r.emel || '',
             r.alamat || '',
             r.kes,
-            r.totalFee.toString(),
-            r.bakiFeeTerkini.toString(),
-            (r.bakiMileage || 0).toString(),
+            r.nota || '',
             formatDateDMY(r.tarikh),
-            r.nota || ''
+            (Number(r.totalFee) || 0).toFixed(2),
+            (Number(r.bayaranTerakhir) || 0).toFixed(2),
+            (Number(r.bakiSebelum) || 0).toFixed(2),
+            (Number(r.bakiFeeTerkini) || 0).toFixed(2),
+            (Number(r.bakiMileage) || 0).toFixed(2)
         ]);
         
         await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:Z:clear`, {
@@ -1021,7 +1172,7 @@ function AppContent() {
             }
         });
 
-        const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:J${rows.length + 1}?valueInputOption=USER_ENTERED`, {
+        const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:M${rows.length + 1}?valueInputOption=USER_ENTERED`, {
             method: 'PUT',
             headers: {
                 'Authorization': `Bearer ${token}`,
@@ -1140,6 +1291,7 @@ function AppContent() {
       'ID Rekod',
       'Nama Pelanggan',
       'No Telefon',
+      'Emel',
       'Alamat',
       'Kategori Kes',
       'Nota Kes',
@@ -1154,29 +1306,31 @@ function AppContent() {
       'CS001',
       'Ali Bin Abu',
       '012-3456789',
+      'ali.abu@example.com',
       'No 12 Jalan Ampang, 50450 Kuala Lumpur',
       'Faraid',
       'Perbincangan pembahagian harta pusaka',
       '20/05/2024',
-      '5000',
-      '1000',
-      '5000',
-      '4000',
-      '200'
+      '5000.00',
+      '1000.00',
+      '5000.00',
+      '4000.00',
+      '200.00'
     ];
     const example2 = [
       'CS002',
       'Siti Aminah binti Omar',
       '019-8765432',
+      'siti.aminah@example.com',
       'Bandar Baru Bangi, Selangor',
       'Takliq',
       'Tuntutan fasakh & nafkah anak',
       '15/06/2024',
-      '3500',
-      '1500',
-      '3500',
-      '2000',
-      '0'
+      '3500.00',
+      '1500.00',
+      '3500.00',
+      '2000.00',
+      '0.00'
     ];
     const escapeCsvField = (field: string) => {
       if (field.includes(',') || field.includes('"') || field.includes('\n')) {
@@ -1184,7 +1338,7 @@ function AppContent() {
       }
       return field;
     };
-    const csvContent = [
+    const csvContent = '\uFEFF' + [
       headers.map(escapeCsvField).join(','),
       example1.map(escapeCsvField).join(','),
       example2.map(escapeCsvField).join(',')
@@ -1205,51 +1359,23 @@ function AppContent() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const text = e.target?.result as string;
-      if (!text) return;
+    const parseNumeric = (val: any): number => {
+      if (val === undefined || val === null) return 0;
+      if (typeof val === 'number') return isNaN(val) ? 0 : val;
+      const str = String(val).replace(/RM/gi, '').replace(/\s+/g, '').replace(/,/g, '').trim();
+      const num = parseFloat(str);
+      return isNaN(num) ? 0 : num;
+    };
 
-      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-      if (lines.length < 2) {
-        alert("Fail CSV tidak mengandungi data yang mencukupi.");
+    const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+
+    const processImportedRows = async (rawRows: any[][], paymentsList?: any[]) => {
+      if (!rawRows || rawRows.length < 2) {
+        showToast('error', 'Fail tidak mengandungi data yang mencukupi.');
         return;
       }
 
-      // Robust CSV parser supporting quotes and commas inside fields
-      const parseCSVLine = (line: string): string[] => {
-        const result: string[] = [];
-        let current = '';
-        let inQuotes = false;
-        for (let i = 0; i < line.length; i++) {
-          const char = line[i];
-          if (char === '"') {
-            if (inQuotes && line[i + 1] === '"') {
-              current += '"';
-              i++;
-            } else {
-              inQuotes = !inQuotes;
-            }
-          } else if (char === ',' && !inQuotes) {
-            result.push(current.trim());
-            current = '';
-          } else {
-            current += char;
-          }
-        }
-        result.push(current.trim());
-        return result;
-      };
-
-      const parseNumeric = (val: any): number => {
-        if (val === undefined || val === null) return 0;
-        if (typeof val === 'number') return isNaN(val) ? 0 : val;
-        const str = String(val).replace(/RM/gi, '').replace(/\s+/g, '').replace(/,/g, '').trim();
-        const num = parseFloat(str);
-        return isNaN(num) ? 0 : num;
-      };
-
-      const rawHeaders = parseCSVLine(lines[0]);
+      const rawHeaders = rawRows[0].map((h: any) => String(h || '').trim());
       const headers = rawHeaders.map(h => h.toLowerCase().replace(/^"|"$/g, '').trim());
 
       const findCol = (keywords: string[]) => {
@@ -1260,115 +1386,236 @@ function AppContent() {
         id: findCol(['id rekod', 'id', 'no rujukan', 'rujukan', 'no kes', 'no. kes', 'no']),
         nama: findCol(['nama pelanggan', 'nama klien', 'nama']),
         telefon: findCol(['no telefon', 'no. telefon', 'telefon', 'phone', 'tel', 'hp', 'no hp']),
+        emel: findCol(['emel', 'email', 'e-mel', 'surat elektronik']),
         alamat: findCol(['alamat', 'address', 'lokasi']),
         kes: findCol(['kategori kes', 'jenis kes', 'kes', 'category']),
         nota: findCol(['nota kes', 'nota', 'catatan', 'keterangan', 'remarks', 'note', 'notes']),
-        tarikh: findCol(['tarikh kemaskini', 'tarikh akhir', 'tarikh daftar', 'tarikh kes', 'tarikh', 'date']),
-        totalFee: findCol(['total fee', 'jumlah fee', 'fee keseluruhan', 'fee guaman', 'fee', 'totalfee', 'jumlahkeseluruhan']),
-        bayaranTerakhir: findCol(['bayaran terakhir', 'jumlah bayaran (fee)', 'bayaran fee', 'jumlah bayaran', 'bayaran', 'terakhir', 'paid', 'last payment']),
-        bakiSebelum: findCol(['baki sebelum', 'bakisebelum', 'previous balance']),
-        bakiFeeTerkini: findCol(['baki fee terkini', 'baki fee (rm)', 'baki fee', 'baki terkini', 'bakifeeterkini', 'balance']),
-        bakiMileage: findCol(['baki mileage (rm)', 'baki mileage', 'bakimileage', 'mileage', 'elaun perjalanan', 'baki elaun'])
+        tarikh: findCol(['tarikh', 'tarikh kemaskini', 'tarikh akhir', 'tarikh daftar', 'tarikh kes', 'date']),
+        totalFee: findCol(['total fee', 'total fee (rm)', 'jumlah fee', 'fee keseluruhan', 'fee guaman', 'fee', 'totalfee', 'jumlahkeseluruhan']),
+        bayaranTerakhir: findCol(['bayaran terakhir', 'bayaran terakhir (rm)', 'jumlah bayaran (fee)', 'bayaran fee', 'jumlah bayaran', 'bayaran', 'terakhir', 'paid', 'last payment']),
+        bakiSebelum: findCol(['baki sebelum', 'baki sebelum (rm)', 'bakisebelum', 'previous balance']),
+        bakiFeeTerkini: findCol(['baki fee terkini', 'baki fee terkini (rm)', 'baki fee (rm)', 'baki fee', 'baki terkini', 'bakifeeterkini', 'balance']),
+        bakiMileage: findCol(['baki mileage', 'baki mileage (rm)', 'bakimileage', 'mileage', 'elaun perjalanan', 'baki elaun']),
+        statementUrl: findCol(['url penyata', 'statement url', 'penyata url'])
       };
 
-      const newRecordsFromCsv: CaseRecord[] = [];
+      // Map payments by ID Rekod if provided from Excel sheet
+      const paymentsByRecordId: { [recordId: string]: PaymentEntry[] } = {};
+      if (paymentsList && paymentsList.length > 1) {
+        const pHeaders = paymentsList[0].map((h: any) => String(h || '').toLowerCase().trim());
+        const pFindCol = (keywords: string[]) => pHeaders.findIndex((h: string) => keywords.some(k => h === k || h.includes(k)));
+        const pCol = {
+          recordId: pFindCol(['id rekod', 'id', 'record id']),
+          paymentId: pFindCol(['no. resit', 'id bayaran', 'no resit', 'resit']),
+          date: pFindCol(['tarikh bayaran', 'tarikh', 'date']),
+          amount: pFindCol(['bayaran fee', 'fee', 'amount']),
+          mileageAmount: pFindCol(['bayaran mileage', 'mileage']),
+          method: pFindCol(['kaedah bayaran', 'kaedah', 'method']),
+          nota: pFindCol(['nota', 'catatan', 'remarks'])
+        };
 
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i];
-        if (!line) continue;
+        for (let j = 1; j < paymentsList.length; j++) {
+          const prow = paymentsList[j];
+          if (!prow || prow.length === 0) continue;
+          const recId = String(pCol.recordId !== -1 ? prow[pCol.recordId] : '').trim();
+          if (!recId) continue;
+          if (!paymentsByRecordId[recId]) paymentsByRecordId[recId] = [];
+          
+          paymentsByRecordId[recId].push({
+            id: String(pCol.paymentId !== -1 && prow[pCol.paymentId] ? prow[pCol.paymentId] : `P-${Date.now()}-${j}`),
+            date: formatDateDMY(pCol.date !== -1 ? prow[pCol.date] : new Date()),
+            amount: parseNumeric(pCol.amount !== -1 ? prow[pCol.amount] : 0),
+            mileageAmount: parseNumeric(pCol.mileageAmount !== -1 ? prow[pCol.mileageAmount] : 0),
+            method: String(pCol.method !== -1 && prow[pCol.method] ? prow[pCol.method] : 'Pindahan Bank / Tunai'),
+            nota: String(pCol.nota !== -1 && prow[pCol.nota] ? prow[pCol.nota] : '')
+          });
+        }
+      }
 
-        const values = parseCSVLine(line);
-        if (values.length < 2) continue;
+      const importedRecords: CaseRecord[] = [];
+      const currentRecordsMap = new Map<string, CaseRecord>(records.map(r => [String(r.id), r]));
 
-        try {
-          const getValue = (idx: number) => (idx !== -1 && idx < values.length) ? values[idx] : undefined;
+      for (let i = 1; i < rawRows.length; i++) {
+        const values = rawRows[i];
+        if (!values || values.length === 0) continue;
 
-          let rawId = getValue(colIndex.id);
-          const rawNama = getValue(colIndex.nama) || (colIndex.nama === -1 && values[1] ? values[1] : values[0]);
+        const getValue = (idx: number) => (idx !== -1 && idx < values.length && values[idx] !== undefined) ? String(values[idx]).trim() : '';
 
-          if (!rawNama || rawNama.trim() === '') continue;
+        const rawNama = getValue(colIndex.nama) || (colIndex.nama === -1 && values[1] ? String(values[1]).trim() : String(values[0] || '').trim());
+        if (!rawNama) continue;
 
-          const rawTelefon = getValue(colIndex.telefon) || '';
-          const rawAlamat = getValue(colIndex.alamat) || '';
-          const rawKes = getValue(colIndex.kes) || 'Umum';
-          const rawNota = getValue(colIndex.nota) || '';
+        let rawId = getValue(colIndex.id);
+        if (rawId && rawId.includes('/')) {
+          rawId = rawId.replace(/\//g, '-');
+        }
+        const id = (rawId && rawId.trim()) ? rawId.trim() : `C-${Date.now().toString().slice(-4)}${i}`;
 
-          const rawTarikh = getValue(colIndex.tarikh) || new Date().toISOString().split('T')[0];
+        const existing = currentRecordsMap.get(id);
 
-          const rawTotalFee = parseNumeric(getValue(colIndex.totalFee));
-          const rawBayaranTerakhir = parseNumeric(getValue(colIndex.bayaranTerakhir));
-          let rawBakiSebelum = parseNumeric(getValue(colIndex.bakiSebelum));
+        const rawTelefon = getValue(colIndex.telefon);
+        const rawEmel = getValue(colIndex.emel);
+        const rawAlamat = getValue(colIndex.alamat);
+        const rawKes = getValue(colIndex.kes) || 'Umum';
+        const rawNota = getValue(colIndex.nota);
+        const rawTarikh = getValue(colIndex.tarikh) || (existing ? existing.tarikh : new Date().toISOString().split('T')[0]);
 
-          let rawBakiFeeTerkini = 0;
-          if (colIndex.bakiFeeTerkini !== -1 && getValue(colIndex.bakiFeeTerkini) !== undefined) {
-            rawBakiFeeTerkini = parseNumeric(getValue(colIndex.bakiFeeTerkini));
-          } else if (rawTotalFee > 0) {
-            rawBakiFeeTerkini = Math.max(0, rawTotalFee - rawBayaranTerakhir);
-          }
+        const rawTotalFee = colIndex.totalFee !== -1 && getValue(colIndex.totalFee) !== '' ? parseNumeric(getValue(colIndex.totalFee)) : (existing ? existing.totalFee : 0);
+        const rawBayaranTerakhir = colIndex.bayaranTerakhir !== -1 && getValue(colIndex.bayaranTerakhir) !== '' ? parseNumeric(getValue(colIndex.bayaranTerakhir)) : (existing ? existing.bayaranTerakhir : 0);
+        let rawBakiSebelum = colIndex.bakiSebelum !== -1 && getValue(colIndex.bakiSebelum) !== '' ? parseNumeric(getValue(colIndex.bakiSebelum)) : (existing ? existing.bakiSebelum : rawTotalFee);
 
-          if (rawBakiSebelum === 0 && rawTotalFee > 0) {
-            rawBakiSebelum = rawTotalFee;
-          }
+        let rawBakiFeeTerkini = 0;
+        if (colIndex.bakiFeeTerkini !== -1 && getValue(colIndex.bakiFeeTerkini) !== '') {
+          rawBakiFeeTerkini = parseNumeric(getValue(colIndex.bakiFeeTerkini));
+        } else if (existing) {
+          rawBakiFeeTerkini = existing.bakiFeeTerkini;
+        } else if (rawTotalFee > 0) {
+          rawBakiFeeTerkini = Math.max(0, rawTotalFee - rawBayaranTerakhir);
+        }
 
-          const rawBakiMileage = parseNumeric(getValue(colIndex.bakiMileage));
+        if (rawBakiSebelum === 0 && rawTotalFee > 0) {
+          rawBakiSebelum = rawTotalFee;
+        }
 
-          if (rawId && rawId.includes('/')) {
-            rawId = rawId.replace(/\//g, '-');
-          }
+        const rawBakiMileage = colIndex.bakiMileage !== -1 && getValue(colIndex.bakiMileage) !== '' ? parseNumeric(getValue(colIndex.bakiMileage)) : (existing ? existing.bakiMileage : 0);
 
-          const id = (rawId && rawId.trim()) ? rawId.trim() : `CSV${Date.now()}${Math.floor(Math.random() * 1000)}`;
-
-          const paymentHistory: PaymentEntry[] = rawBayaranTerakhir > 0 ? [{
+        let paymentHistory: PaymentEntry[] = [];
+        if (paymentsByRecordId[id] && paymentsByRecordId[id].length > 0) {
+          paymentHistory = paymentsByRecordId[id];
+        } else if (existing && existing.paymentHistory && existing.paymentHistory.length > 0) {
+          paymentHistory = existing.paymentHistory;
+        } else if (rawBayaranTerakhir > 0) {
+          paymentHistory = [{
             id: `PAY-${id}-1`,
             date: formatDateDMY(rawTarikh),
             amount: rawBayaranTerakhir,
             mileageAmount: 0,
             method: 'Pindahan Bank / Tunai',
             nota: 'Bayaran Terakhir (Diimport)'
-          }] : [];
+          }];
+        }
 
-          const newRecord: CaseRecord & { userId?: string } = {
-            id,
-            nama: rawNama.trim(),
-            telefon: rawTelefon.trim(),
-            alamat: rawAlamat.trim(),
-            kes: rawKes.trim(),
-            nota: rawNota.trim(),
-            totalFee: rawTotalFee,
-            bayaranTerakhir: rawBayaranTerakhir,
-            tarikh: formatDateDMY(rawTarikh),
-            bakiSebelum: rawBakiSebelum,
-            bakiFeeTerkini: rawBakiFeeTerkini,
-            bakiMileage: rawBakiMileage,
-            paymentHistory,
-            userId: user ? user.uid : ""
-          };
+        const newRecord: CaseRecord & { userId?: string } = {
+          id,
+          nama: rawNama,
+          telefon: rawTelefon || (existing?.telefon || ''),
+          emel: rawEmel || (existing?.emel || ''),
+          alamat: rawAlamat || (existing?.alamat || ''),
+          kes: rawKes,
+          nota: rawNota || (existing?.nota || ''),
+          totalFee: rawTotalFee,
+          bayaranTerakhir: rawBayaranTerakhir,
+          tarikh: formatDateDMY(rawTarikh),
+          bakiSebelum: rawBakiSebelum,
+          bakiFeeTerkini: rawBakiFeeTerkini,
+          bakiMileage: rawBakiMileage,
+          paymentHistory,
+          statementUrl: getValue(colIndex.statementUrl) || existing?.statementUrl || '',
+          userId: user ? user.uid : ""
+        };
 
-          newRecordsFromCsv.push(newRecord);
+        importedRecords.push(newRecord);
+      }
 
-          if (user) {
-            const targetPath = `users/${user.uid}/records/${id}`;
-            await setDoc(doc(db, 'users', user.uid, 'records', id), newRecord).catch(err => {
-              handleFirestoreError(err, OperationType.WRITE, targetPath);
-            });
+      if (importedRecords.length === 0) {
+        showToast('error', 'Tiada data yang sah dijumpai dalam fail. Sila pastikan format mengikut Templat.');
+        return;
+      }
+
+      // Upsert into state neatly
+      const updatedMap = new Map(records.map(r => [r.id, r]));
+      importedRecords.forEach(r => updatedMap.set(r.id, r));
+      const updatedList = Array.from(updatedMap.values());
+
+      setRecords(updatedList);
+      localStorage.setItem('hma_case_records', JSON.stringify(updatedList));
+
+      // Sync to Firestore
+      if (user) {
+        try {
+          const batch = writeBatch(db);
+          for (const r of importedRecords) {
+            const docRef = doc(db, 'users', user.uid, 'records', r.id);
+            batch.set(docRef, r, { merge: true });
           }
+          await batch.commit();
         } catch (err) {
-          console.error("Failed to parse row", values, err);
+          console.error("Ralat simpan ke Firestore:", err);
         }
       }
 
-      if (newRecordsFromCsv.length > 0) {
-        setRecords(prev => [...newRecordsFromCsv, ...prev]);
-        alert(`${newRecordsFromCsv.length} rekod pelanggan berjaya diimport bersama butiran lengkap!`);
-      } else {
-        alert("Tiada data yang sah dijumpai dalam fail CSV. Sila pastikan format mengikut Templat CSV.");
-      }
-
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      showToast('success', `${importedRecords.length} rekod pelanggan berjaya diimport!`, 'Semua maklumat telah disusun kemas dan disegerakkan.');
     };
-    reader.readAsText(file);
+
+    if (isExcel) {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const recordsSheet = workbook.Sheets["Rekod Pelanggan"] || workbook.Sheets[firstSheetName];
+          const rawRows: any[][] = XLSX.utils.sheet_to_json(recordsSheet, { header: 1, defval: '' });
+
+          let paymentsRows: any[][] | undefined = undefined;
+          if (workbook.Sheets["Sejarah Pembayaran"]) {
+            paymentsRows = XLSX.utils.sheet_to_json(workbook.Sheets["Sejarah Pembayaran"], { header: 1, defval: '' });
+          }
+
+          await processImportedRows(rawRows, paymentsRows);
+        } catch (err: any) {
+          console.error("Gagal membaca fail Excel:", err);
+          showToast('error', 'Gagal memproses fail Excel: ' + (err.message || 'Format fail tidak sah.'));
+        } finally {
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      // CSV
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const text = e.target?.result as string;
+          if (!text) return;
+
+          // Parse CSV lines cleanly
+          const parseCSVLine = (line: string): string[] => {
+            const result: string[] = [];
+            let current = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+              const char = line[i];
+              if (char === '"') {
+                if (inQuotes && line[i + 1] === '"') {
+                  current += '"';
+                  i++;
+                } else {
+                  inQuotes = !inQuotes;
+                }
+              } else if (char === ',' && !inQuotes) {
+                result.push(current.trim());
+                current = '';
+              } else {
+                current += char;
+              }
+            }
+            result.push(current.trim());
+            return result;
+          };
+
+          const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+          const rawRows = lines.map(line => parseCSVLine(line));
+
+          await processImportedRows(rawRows);
+        } catch (err: any) {
+          console.error("Gagal membaca fail CSV:", err);
+          showToast('error', 'Gagal memproses fail CSV: ' + (err.message || 'Format fail tidak sah.'));
+        } finally {
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
   };
 
   const handleAddNewRecord = async (e: React.FormEvent) => {
@@ -1380,7 +1627,7 @@ function AppContent() {
     
     const newRecord: CaseRecord & { userId?: string } = {
       id,
-      nama: newRecordData.nama,
+      nama: newRecordData.nama.trim(),
       kes: newRecordData.kes || 'Umum',
       totalFee: totalFee,
       bayaranTerakhir: 0,
@@ -1390,13 +1637,14 @@ function AppContent() {
       bakiMileage: bakiMileage,
       paymentHistory: []
     };
-    if (newRecordData.telefon) newRecord.telefon = newRecordData.telefon;
-    
-    if (newRecordData.alamat) newRecord.alamat = newRecordData.alamat;
-    if (newRecordData.nota) newRecord.nota = newRecordData.nota;
+    if (newRecordData.telefon) newRecord.telefon = newRecordData.telefon.trim();
+    if (newRecordData.emel) newRecord.emel = newRecordData.emel.trim();
+    if (newRecordData.alamat) newRecord.alamat = newRecordData.alamat.trim();
+    if (newRecordData.nota) newRecord.nota = newRecordData.nota.trim();
     if (user) newRecord.userId = user.uid;
 
     setRecords(prev => [newRecord, ...prev]);
+    localStorage.setItem('hma_case_records', JSON.stringify([newRecord, ...records]));
     if (user) {
       const targetPath = `users/${user.uid}/records/${id}`;
       try {
@@ -1407,8 +1655,18 @@ function AppContent() {
     }
 
     setIsNewRecordModalOpen(false);
-    setNewRecordData({ nama: '', kes: '', tarikh: new Date().toISOString().split('T')[0], totalFee: '', bakiMileage: '0',
-    nota: '' });
+    setNewRecordData({
+      nama: '',
+      telefon: '',
+      emel: '',
+      alamat: '',
+      kes: '',
+      tarikh: new Date().toISOString().split('T')[0],
+      totalFee: '',
+      bakiMileage: '0',
+      nota: ''
+    });
+    showToast('success', 'Rekod Klien Berjaya Didaftarkan');
   };
 
   const handleMileageAdjustmentSubmit = async (e: React.FormEvent) => {
@@ -1928,32 +2186,40 @@ function AppContent() {
 
   const handleExportCSV = () => {
     const headers = [
-      'No', 'Tarikh Kemaskini', 'Nama Pelanggan', 'No. Telefon', 'Alamat', 'Kategori Kes', 'Nota', 
-      'Jumlah Fee (RM)', 'Jumlah Bayaran (Fee) (RM)', 'Baki Fee (RM)', 
-      'Jumlah Bayaran (Mileage) (RM)', 'Baki Mileage (RM)'
+      'ID Rekod',
+      'Nama Pelanggan',
+      'No Telefon',
+      'Emel',
+      'Alamat',
+      'Kategori Kes',
+      'Nota Kes',
+      'Tarikh',
+      'Total Fee',
+      'Bayaran Terakhir',
+      'Baki Sebelum',
+      'Baki Fee Terkini',
+      'Baki Mileage'
     ];
-
-    const csvData = [
+    const escapeCsv = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+    const csvData = '\uFEFF' + [
       headers.join(','),
-      ...filteredRecords.map((r, i) => {
-        const totalPaidFee = r.paymentHistory?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
-        const totalPaidMileage = r.paymentHistory?.reduce((sum, p) => sum + (p.mileageAmount || 0), 0) || 0;
-        
-        return [
-          i + 1,
-          `"${formatDateDMY(r.tarikh)}"`,
-          `"${r.nama || ''}"`,
-          `"${r.telefon || ''}"`,
-          `"${(r.alamat || '').replace(/"/g, '""')}"`,
-          `"${r.kes || ''}"`,
-          `"${(r.nota || '').replace(/"/g, '""')}"`,
-          r.totalFee || 0,
-          totalPaidFee,
-          r.bakiFeeTerkini || 0,
-          totalPaidMileage,
-          r.bakiMileage || 0
-        ].join(',');
-      })
+      ...filteredRecords.map(r => 
+        [
+          escapeCsv(r.id || ''),
+          escapeCsv(r.nama || ''),
+          escapeCsv(r.telefon || ''),
+          escapeCsv(r.emel || ''),
+          escapeCsv(r.alamat || ''),
+          escapeCsv(r.kes || ''),
+          escapeCsv(r.nota || ''),
+          escapeCsv(formatDateDMY(r.tarikh)),
+          (Number(r.totalFee) || 0).toFixed(2),
+          (Number(r.bayaranTerakhir) || 0).toFixed(2),
+          (Number(r.bakiSebelum) || 0).toFixed(2),
+          (Number(r.bakiFeeTerkini) || 0).toFixed(2),
+          (Number(r.bakiMileage) || 0).toFixed(2)
+        ].join(',')
+      )
     ].join('\n');
 
     const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
@@ -2844,6 +3110,15 @@ function AppContent() {
                         <ChevronRight size={18} className="text-[#a1a1aa]" />
                       </button>
                     )}
+                    <button onClick={() => setIsCategoryManagerOpen(true)} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-purple-50 dark:bg-purple-500/10 rounded-lg text-purple-600 dark:text-purple-400">
+                          <Folder size={18} />
+                        </div>
+                        <span className="text-sm font-medium text-purple-700 dark:text-purple-400">Urus Kategori Kes</span>
+                      </div>
+                      <ChevronRight size={18} className="text-purple-400" />
+                    </button>
                     {user && (
                       <button onClick={handleBackupToCloud} disabled={isBackingUp} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors disabled:opacity-50">
                         <div className="flex items-center gap-3">
@@ -2878,16 +3153,23 @@ function AppContent() {
                         <div className="p-2 bg-emerald-50 dark:bg-emerald-500/10 rounded-lg text-emerald-600 dark:text-emerald-400">
                           <FileText size={18} />
                         </div>
-                        <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Muat Turun Templat CSV</span>
+                        <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Muat Turun Templat (CSV)</span>
                       </div>
                       <ChevronRight size={18} className="text-emerald-400" />
                     </button>
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleImportCSV}
+                      accept=".csv, .xlsx, .xls"
+                      className="hidden"
+                    />
                     <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-zinc-100 darkdark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
                           <Upload size={18} />
                         </div>
-                        <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Import Data CSV</span>
+                        <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Import Data (CSV / Excel)</span>
                       </div>
                       <ChevronRight size={18} className="text-[#a1a1aa]" />
                     </button>
@@ -2899,6 +3181,18 @@ function AppContent() {
                         <span className="text-sm font-medium text-red-600 dark:text-red-400">Format Semua Data</span>
                       </div>
                       <ChevronRight size={18} className="text-red-400" />
+                    </button>
+                    <button onClick={handleClearLocalStorage} className="w-full flex items-center justify-between p-4 text-left hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg text-orange-600 dark:text-orange-400">
+                          <Trash2 size={18} />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-medium text-orange-600 dark:text-orange-400">Kosongkan Data Tempatan</span>
+                          <span className="text-[10px] text-orange-500/80 dark:text-orange-400/80">Padam cache pelayar (tidak padam awan)</span>
+                        </div>
+                      </div>
+                      <ChevronRight size={18} className="text-orange-400" />
                     </button>
                   </div>
                 </div>
@@ -3848,6 +4142,92 @@ function AppContent() {
       </main>
 
       {/* Modals */}
+      
+      {/* Category Manager Modal */}
+      <AnimatePresence>
+        {isCategoryManagerOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7] dark:border-zinc-800 w-full max-w-md flex flex-col max-h-[80vh] overflow-hidden"
+            >
+              <div className="p-4 border-b border-[#f4f4f5] dark:border-zinc-800 flex justify-between items-center bg-[#fafafa] dark:bg-zinc-900/50">
+                <h2 className="text-lg font-bold text-[#18181b] dark:text-white flex items-center gap-2">
+                  <Folder size={18} className="text-blue-500" />
+                  Urus Kategori Kes
+                </h2>
+                <button 
+                  onClick={() => setIsCategoryManagerOpen(false)}
+                  className="p-1.5 text-[#71717a] dark:text-[#a1a1aa] hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-4 flex-1 overflow-y-auto custom-scrollbar space-y-3">
+                {uniqueKes.filter(k => k !== 'Semua').length === 0 ? (
+                  <p className="text-sm text-center text-[#71717a] dark:text-[#a1a1aa] py-8">Tiada kategori tersuai dijumpai.</p>
+                ) : (
+                  uniqueKes.filter(k => k !== 'Semua').map(category => (
+                    <div key={category} className="flex flex-col gap-2 p-3 border border-[#f4f4f5] dark:border-zinc-800 rounded-lg bg-[#fafafa] dark:bg-zinc-900/50">
+                      {editingCategory === category ? (
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="text" 
+                            value={newCategoryName}
+                            onChange={(e) => setNewCategoryName(e.target.value)}
+                            className="flex-1 px-3 py-1.5 text-sm border border-blue-500 rounded-md bg-white dark:bg-zinc-950 focus:outline-none"
+                            autoFocus
+                          />
+                          <button 
+                            onClick={() => {
+                              handleRenameCategory(category, newCategoryName);
+                              setEditingCategory(null);
+                            }}
+                            className="p-1.5 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+                          >
+                            <Save size={14} />
+                          </button>
+                          <button 
+                            onClick={() => setEditingCategory(null)}
+                            className="p-1.5 bg-zinc-200 dark:bg-zinc-800 text-[#71717a] dark:text-[#a1a1aa] rounded-md hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-[#18181b] dark:text-white">{category}</span>
+                          <div className="flex items-center gap-2">
+                            <button 
+                              onClick={() => {
+                                setEditingCategory(category);
+                                setNewCategoryName(category);
+                              }}
+                              className="p-1.5 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md transition-colors"
+                              title="Tukar Nama Kategori"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteCategory(category)}
+                              className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
+                              title="Padam Kategori"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Contact Picker Modal */}
       <AnimatePresence>
@@ -3971,13 +4351,22 @@ function AppContent() {
                       <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">No. Telefon</label>
                       <input
                         type="text"
-                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white "
+                        className="px-3 py-2 w-full border border-[#e4e4e7] rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white"
                         placeholder="Contoh: 0123456789"
                         value={editingRecord.telefon || ''}
                         onChange={(e) => setEditingRecord({ ...editingRecord, telefon: e.target.value })}
                       />
                     </div>
-                    
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">Emel</label>
+                      <input
+                        type="email"
+                        className="px-3 py-2 w-full border border-[#e4e4e7] rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white"
+                        placeholder="Contoh: pelanggan@gmail.com"
+                        value={editingRecord.emel || ''}
+                        onChange={(e) => setEditingRecord({ ...editingRecord, emel: e.target.value })}
+                      />
+                    </div>
                   </div>
                   
                   <div>
@@ -4313,13 +4702,22 @@ function AppContent() {
                       <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">No. Telefon</label>
                       <input
                         type="text"
-                        className="px-3 py-2 w-full border border-[#e4e4e7]  rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white "
+                        className="px-3 py-2 w-full border border-[#e4e4e7] rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white"
                         placeholder="Contoh: 0123456789"
                         value={newRecordData.telefon || ''}
                         onChange={(e) => setNewRecordData({ ...newRecordData, telefon: e.target.value })}
                       />
                     </div>
-                    
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-2 uppercase tracking-wider">Emel</label>
+                      <input
+                        type="email"
+                        className="px-3 py-2 w-full border border-[#e4e4e7] rounded-lg text-sm bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-[#18181b] dark:text-white"
+                        placeholder="Contoh: pelanggan@gmail.com"
+                        value={newRecordData.emel || ''}
+                        onChange={(e) => setNewRecordData({ ...newRecordData, emel: e.target.value })}
+                      />
+                    </div>
                   </div>
                   
                   <div>
@@ -5932,9 +6330,12 @@ function AppContent() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-1 uppercase">No. Telefon</label>
-                            <input name="telefon" type="text" defaultValue={firstCase.telefon || ''} className="w-full px-3 py-2 text-sm border border-[#e4e4e7]  rounded-lg bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="01X-XXXXXXX" />
+                            <input name="telefon" type="text" defaultValue={firstCase.telefon || ''} className="w-full px-3 py-2 text-sm border border-[#e4e4e7] rounded-lg bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="01X-XXXXXXX" />
                           </div>
-                          
+                          <div>
+                            <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-1 uppercase">Emel</label>
+                            <input name="emel" type="email" defaultValue={firstCase.emel || ''} className="w-full px-3 py-2 text-sm border border-[#e4e4e7] rounded-lg bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="pelanggan@gmail.com" />
+                          </div>
                         </div>
                         <div>
                           <label className="block text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] mb-1 uppercase">Alamat</label>
