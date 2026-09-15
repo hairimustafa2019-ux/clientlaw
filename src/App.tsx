@@ -2888,7 +2888,7 @@ function AppContent() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#ffffff] dark:bg-zinc-950">
+      <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#ffffff] dark:bg-zinc-950 pb-[64px] md:pb-0">
         {/* Top Bar */}
         <header className="h-16 border-b border-[#f4f4f5] dark:border-[#18181b] flex items-center justify-between px-3 sm:px-6 lg:px-8 shrink-0 print:hidden z-10 bg-[#ffffff] dark:bg-zinc-950">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
