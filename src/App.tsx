@@ -345,9 +345,6 @@ function AppContent() {
   const [dateSortOrder, setDateSortOrder] = useState<'asc' | 'desc' | null>('desc');
   const [nameSortOrder, setNameSortOrder] = useState<'asc' | 'desc' | null>(null);
 
-  // Dashboard layout view mode: 'dual' for simultaneous Windows & Android, 'windows' for Windows-only, 'android' for Android-only
-  const [dashboardViewMode, setDashboardViewMode] = useState<'dual' | 'windows' | 'android'>('dual');
-  const [isAndroidSidebarOpen, setIsAndroidSidebarOpen] = useState(false);
   const [isDataMenuOpen, setIsDataMenuOpen] = useState(false);
   const dataMenuRef = useRef<HTMLDivElement>(null);
 
@@ -3688,54 +3685,13 @@ function AppContent() {
                     </p>
                   </div>
 
-                  {/* Device Mode Switcher */}
-                  <div className="flex items-center bg-zinc-100 dark:bg-zinc-900 p-1 rounded-xl border border-zinc-200/60 dark:border-zinc-800/60 self-start sm:self-auto shadow-xs">
-                    <button
-                      onClick={() => setDashboardViewMode('dual')}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                        dashboardViewMode === 'dual'
-                          ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                          : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-                      }`}
-                      title="Paparan Serentak (Windows & Android)"
-                    >
-                      <Columns size={15} />
-                      <span className="hidden sm:inline">Paparan Serentak</span>
-                      <span className="sm:hidden">Serentak</span>
-                    </button>
-                    <button
-                      onClick={() => setDashboardViewMode('windows')}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                        dashboardViewMode === 'windows'
-                          ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                          : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-                      }`}
-                      title="Paparan Windows Sahaja"
-                    >
-                      <Monitor size={15} />
-                      <span className="hidden sm:inline">Windows (Desktop)</span>
-                      <span className="sm:hidden">Windows</span>
-                    </button>
-                    <button
-                      onClick={() => setDashboardViewMode('android')}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                        dashboardViewMode === 'android'
-                          ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                          : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-                      }`}
-                      title="Paparan Android Sahaja"
-                    >
-                      <Smartphone size={15} />
-                      <span className="hidden sm:inline">Android (Mobile)</span>
-                      <span className="sm:hidden">Android</span>
-                    </button>
-                  </div>
+                  {/* Device Mode Switcher - Removed */}
                 </div>
 
                 {/* Dashboard Body Scroll Area */}
-                <div className="flex-1 px-4 sm:px-6 md:px-8 py-5 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto">
-                  {/* MAIN RESPONSIVE CONTAINER (DUAL / WINDOWS / ANDROID) */}
-                  <div className={`w-full ${dashboardViewMode === 'dual' ? 'grid grid-cols-1 2xl:grid-cols-12 gap-6 items-start' : ''}`}>
+                <div className="flex-1 px-2 sm:px-6 md:px-8 py-3 sm:py-5 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto">
+                  {/* MAIN RESPONSIVE CONTAINER (WINDOWS Desktop / ANDROID Mobile) */}
+                  <div className="w-full">
                     
                     {/* ========================================================
                         BAHAGIAN KIRI: PAPARAN WINDOWS (GRID 3-LAJUR)
@@ -3743,17 +3699,7 @@ function AppContent() {
                         - Grid 2x2 untuk empat kad data utama (tunggakan di bawah)
                         - Lajur kanan yang menggabungkan senarai kes terkini & carta bar
                        ======================================================== */}
-                    {(dashboardViewMode === 'dual' || dashboardViewMode === 'windows') && (
-                      <div className={`${dashboardViewMode === 'dual' ? '2xl:col-span-8 flex flex-col gap-4' : 'w-full flex flex-col gap-4'}`}>
-                        {dashboardViewMode === 'dual' && (
-                          <div className="flex items-center justify-between px-1 pb-1">
-                            <span className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-2">
-                              <Monitor size={16} className="text-blue-600 dark:text-blue-400" />
-                              Paparan Windows (3-Lajur)
-                            </span>
-                            <span className="text-[11px] text-zinc-400 font-medium">Desktop Workplace</span>
-                          </div>
-                        )}
+                    <div className="hidden xl:flex w-full flex-col gap-4">
 
                         {/* WINDOWS 3-COLUMN GRID */}
                         <div className="grid grid-cols-1 md:grid-cols-12 gap-4.5 items-start">
@@ -4062,7 +4008,6 @@ function AppContent() {
                           </div>
                         </div>
                       </div>
-                    )}
 
                     {/* ========================================================
                         BAHAGIAN KANAN: PAPARAN ANDROID (LINEAR & TUMPUK)
@@ -4070,124 +4015,9 @@ function AppContent() {
                         - Barisan kad data tunggal yang boleh dileret secara mendatar
                         - Senarai kes terkini di bawahnya secara linear dan tumpuk
                        ======================================================== */}
-                    {(dashboardViewMode === 'dual' || dashboardViewMode === 'android') && (
-                      <div className={`${dashboardViewMode === 'dual' ? '2xl:col-span-4 flex flex-col gap-4' : 'w-full max-w-lg mx-auto flex flex-col gap-4'}`}>
-                        {dashboardViewMode === 'dual' && (
-                          <div className="flex items-center justify-between px-1 pb-1">
-                            <span className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-2">
-                              <Smartphone size={16} className="text-emerald-600 dark:text-emerald-400" />
-                              Paparan Android (Linear &amp; Tumpuk)
-                            </span>
-                            <span className="text-[11px] text-zinc-400 font-medium">Mobile Device</span>
-                          </div>
-                        )}
-
-                        {/* Android Device Mockup Frame Container */}
-                        <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-md overflow-hidden flex flex-col relative">
-                          {/* Android Status Bar */}
-                          <div className="h-6 bg-zinc-100/70 dark:bg-zinc-800/70 px-4 flex items-center justify-between text-[10px] text-zinc-500 dark:text-zinc-400 shrink-0 font-sans border-b border-zinc-200/40 dark:border-zinc-800/40">
-                            <span>09:41</span>
-                            <div className="w-12 h-3 rounded-full bg-zinc-300/60 dark:bg-zinc-700/60 mx-auto" />
-                            <div className="flex items-center gap-1.5">
-                              <span>LTE</span>
-                              <div className="w-2.5 h-2 rounded-xs border border-zinc-400 dark:border-zinc-500">
-                                <div className="w-1.5 h-full bg-emerald-500" />
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Android App Bar with Collapsible Sidebar Trigger */}
-                          <div className="h-14 px-4 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800/60 flex items-center justify-between shrink-0">
-                            <div className="flex items-center gap-2.5">
-                              <button
-                                onClick={() => setIsAndroidSidebarOpen(!isAndroidSidebarOpen)}
-                                className="p-2 rounded-xl text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                title="Panel Sisi Boleh Diruntuhkan (Android Menu)"
-                                aria-label="Menu Android"
-                              >
-                                <Menu size={20} />
-                              </button>
-                              <div>
-                                <h4 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-tight">
-                                  HAIRI MUSTAFA
-                                </h4>
-                                <p className="text-[9px] text-zinc-500 dark:text-zinc-400">Pengurusan Kes Android</p>
-                              </div>
-                            </div>
-
-                            <button
-                              onClick={() => setIsNewRecordModalOpen(true)}
-                              className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs active:scale-95 transition-transform"
-                              title="Tambah Klien"
-                            >
-                              <Plus size={16} className="stroke-[2.5]" />
-                            </button>
-                          </div>
-
-                          {/* Panel Sisi Boleh Diruntuhkan (Collapsible Android Sidebar Drawer) */}
-                          <AnimatePresence>
-                            {isAndroidSidebarOpen && (
-                              <motion.div
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: 'auto', opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                transition={{ duration: 0.25 }}
-                                className="overflow-hidden bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200/60 dark:border-zinc-800/60"
-                              >
-                                <div className="p-4 flex flex-col gap-3">
-                                  <div className="flex items-center justify-between pb-2 border-b border-zinc-200/50 dark:border-zinc-800/50">
-                                    <div className="flex items-center gap-2.5">
-                                      <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 font-bold text-xs flex items-center justify-center">
-                                        HM
-                                      </div>
-                                      <div>
-                                        <p className="text-xs font-bold text-zinc-900 dark:text-white">Hairi Mustafa</p>
-                                        <p className="text-[10px] text-zinc-500">Peguam Syarie</p>
-                                      </div>
-                                    </div>
-                                    <button
-                                      onClick={() => setIsAndroidSidebarOpen(false)}
-                                      className="p-1 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-                                    >
-                                      <X size={16} />
-                                    </button>
-                                  </div>
-
-                                  <div className="grid grid-cols-2 gap-1.5">
-                                    <button
-                                      onClick={() => { setActiveTab('dashboard'); setIsAndroidSidebarOpen(false); }}
-                                      className="flex items-center gap-2 p-2 rounded-xl text-xs font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400"
-                                    >
-                                      <PieChart size={16} />
-                                      <span>Papan Pemuka</span>
-                                    </button>
-                                    <button
-                                      onClick={() => { setActiveTab('records'); setIsAndroidSidebarOpen(false); }}
-                                      className="flex items-center gap-2 p-2 rounded-xl text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                                    >
-                                      <Users size={16} />
-                                      <span>Rekod Kes</span>
-                                    </button>
-                                    <button
-                                      onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); setIsAndroidSidebarOpen(false); }}
-                                      className="flex items-center gap-2 p-2 rounded-xl text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                                    >
-                                      <FileText size={16} />
-                                      <span>Resit Am</span>
-                                    </button>
-                                    <button
-                                      onClick={() => { setActiveTab('settings'); setIsAndroidSidebarOpen(false); }}
-                                      className="flex items-center gap-2 p-2 rounded-xl text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                                    >
-                                      <Settings size={16} />
-                                      <span>Tetapan</span>
-                                    </button>
-                                  </div>
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-
+                    <div className="flex xl:hidden w-full max-w-lg mx-auto flex-col gap-4 pb-16">
+                      {/* Android Main Container */}
+                      <div className="bg-transparent overflow-hidden flex flex-col relative w-full">
                           {/* Android Content: Linear & Stacked */}
                           <div className="p-4 flex flex-col gap-4">
                             {/* 1. BARISAN KAD DATA TUNGGAL YANG BOLEH DILERET SECARA MENDATAR */}
@@ -4318,7 +4148,6 @@ function AppContent() {
                           </div>
                         </div>
                       </div>
-                    )}
                   </div>
 
                   {/* SISTEM PERINGATAN BAKI TERTUNGGAK (FULL WIDTH TABLE) */}
