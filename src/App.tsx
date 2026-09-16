@@ -283,6 +283,7 @@ function AppContent() {
   const invoicePrintRef = useRef<HTMLDivElement>(null);
   const [paymentRecord, setPaymentRecord] = useState<CaseRecord | null>(null);
   const [statementRecord, setStatementRecord] = useState<CaseRecord | null>(null);
+  const [editingPayment, setEditingPayment] = useState<{ recordId: string, payment: import('./data').PaymentEntry } | null>(null);
   const [simpleStatementRecord, setSimpleStatementRecord] = useState<CaseRecord | null>(null);
   const [receiptData, setReceiptData] = useState<{record: CaseRecord, payment: import('./data').PaymentEntry} | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<string>('');
@@ -2163,6 +2164,113 @@ function AppContent() {
     setPaymentNote('');
   };
 
+  const handleUpdateEditedPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPayment) return;
+
+    const recordIndex = records.findIndex(r => r.id === editingPayment.recordId);
+    if (recordIndex === -1) return;
+
+    const updatedRecords = [...records];
+    const record = { ...updatedRecords[recordIndex] };
+    const paymentIndex = record.paymentHistory?.findIndex(p => p.id === editingPayment.payment.id) ?? -1;
+    
+    if (paymentIndex === -1 || !record.paymentHistory) return;
+
+    const oldPayment = record.paymentHistory[paymentIndex];
+    const newPayment = editingPayment.payment;
+    
+    const feeDiff = (newPayment.amount || 0) - (oldPayment.amount || 0);
+    const mileageDiff = (newPayment.mileageAmount || 0) - (oldPayment.mileageAmount || 0);
+
+    record.paymentHistory[paymentIndex] = newPayment;
+    record.bakiFeeTerkini = Math.max(0, record.bakiFeeTerkini - feeDiff);
+    record.bakiMileage = Math.max(0, (record.bakiMileage || 0) - mileageDiff);
+    
+    // update bayaranTerakhir and tarikh if it was the latest payment
+    const sortedPayments = [...record.paymentHistory].sort((a: any, b: any) => {
+      const parseDate = (dStr: string) => {
+        if (!dStr) return 0;
+        const p = dStr.split('/');
+        return new Date(`${p[2]}-${p[1]}-${p[0]}`).getTime();
+      };
+      return parseDate(b.date) - parseDate(a.date);
+    });
+    if (sortedPayments.length > 0) {
+      record.bayaranTerakhir = sortedPayments[0].amount || sortedPayments[0].mileageAmount || 0;
+      record.tarikh = sortedPayments[0].date;
+    }
+
+    updatedRecords[recordIndex] = record;
+    setRecords(updatedRecords);
+    
+    if (user) {
+        try {
+            await setDoc(doc(db, 'users', user.uid, 'records', record.id), record);
+            silentBackupToCloud(updatedRecords);
+        } catch(err) {
+            handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/records/${record.id}`);
+        }
+    }
+    
+    if (statementRecord && statementRecord.id === record.id) {
+        setStatementRecord(record);
+    }
+    
+    setEditingPayment(null);
+  };
+
+  const handleDeletePayment = async (recordId: string, paymentId: string) => {
+    if (!window.confirm("Adakah anda pasti untuk memadam rekod pembayaran ini?")) return;
+    
+    const recordIndex = records.findIndex(r => r.id === recordId);
+    if (recordIndex === -1) return;
+
+    const updatedRecords = [...records];
+    const record = { ...updatedRecords[recordIndex] };
+    const paymentIndex = record.paymentHistory?.findIndex(p => p.id === paymentId) ?? -1;
+    
+    if (paymentIndex === -1 || !record.paymentHistory) return;
+
+    const oldPayment = record.paymentHistory[paymentIndex];
+    
+    record.paymentHistory = record.paymentHistory.filter(p => p.id !== paymentId);
+    record.bakiFeeTerkini = record.bakiFeeTerkini + (oldPayment.amount || 0);
+    record.bakiMileage = (record.bakiMileage || 0) + (oldPayment.mileageAmount || 0);
+    
+    const sortedPayments = [...record.paymentHistory].sort((a: any, b: any) => {
+      const parseDate = (dStr: string) => {
+        if (!dStr) return 0;
+        const p = dStr.split('/');
+        return new Date(`${p[2]}-${p[1]}-${p[0]}`).getTime();
+      };
+      return parseDate(b.date) - parseDate(a.date);
+    });
+    
+    if (sortedPayments.length > 0) {
+      record.bayaranTerakhir = sortedPayments[0].amount || sortedPayments[0].mileageAmount || 0;
+      record.tarikh = sortedPayments[0].date;
+    } else {
+      record.bayaranTerakhir = 0;
+    }
+
+    updatedRecords[recordIndex] = record;
+    setRecords(updatedRecords);
+    
+    if (user) {
+        try {
+            await setDoc(doc(db, 'users', user.uid, 'records', record.id), record);
+            silentBackupToCloud(updatedRecords);
+        } catch(err) {
+            handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/records/${record.id}`);
+        }
+    }
+    
+    if (statementRecord && statementRecord.id === record.id) {
+        setStatementRecord(record);
+    }
+  };
+
   const handleDirectPay = (amount: string) => {
     // Find most recent active customer (has baki)
     const activeRecords = [...records].reverse().filter(r => (r.bakiFeeTerkini > 0 || (r.bakiMileage && r.bakiMileage > 0)));
@@ -3669,235 +3777,142 @@ function AppContent() {
                 transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
-                {/* Dashboard Header Bar & Device Mode Switcher */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-3 shrink-0 print:hidden border-b border-zinc-100 dark:border-zinc-800/60 bg-white/50 dark:bg-zinc-950/50">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white tracking-tight">
-                        Papan Pemuka Kes
-                      </h2>
-                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 border border-blue-200/50 dark:border-blue-900/50">
-                        HAIRI MUSTAFA ASSOCIATES
-                      </span>
-                    </div>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                      Susunan responsif serentak untuk paparan Windows (Desktop) dan Android (Mudah Alih)
-                    </p>
-                  </div>
-
-                  {/* Device Mode Switcher - Removed */}
-                </div>
+                {/* Dashboard Header Bar - Removed for minimalism */}
 
                 {/* Dashboard Body Scroll Area */}
-                <div className="flex-1 px-2 sm:px-6 md:px-8 py-3 sm:py-5 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto">
+                <div className="flex-1 px-4 sm:px-8 py-6 min-h-0 flex flex-col gap-8 print:hidden overflow-y-auto">
                   {/* MAIN RESPONSIVE CONTAINER (WINDOWS Desktop / ANDROID Mobile) */}
                   <div className="w-full">
                     
                     {/* ========================================================
                         BAHAGIAN KIRI: PAPARAN WINDOWS (GRID 3-LAJUR)
-                        - Panel sisi kiri yang ringkas
-                        - Grid 2x2 untuk empat kad data utama (tunggakan di bawah)
-                        - Lajur kanan yang menggabungkan senarai kes terkini & carta bar
                        ======================================================== */}
-                    <div className="hidden xl:flex w-full flex-col gap-4">
+                    <div className="hidden xl:flex w-full flex-col gap-6">
 
-                        {/* WINDOWS 3-COLUMN GRID */}
-                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4.5 items-start">
+                        {/* WINDOWS 2-COLUMN GRID */}
+                        <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
                           
-                          {/* LAJUR 1: PANEL SISI KIRI YANG RINGKAS (col-span-12 md:col-span-3) */}
-                          <div className="md:col-span-3 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60 p-4 shadow-xs flex flex-col gap-4">
-                            {/* Firm Identity & Logo */}
-                            <div className="flex items-center gap-3 pb-3 border-b border-zinc-100 dark:border-zinc-800/60">
-                              <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-sm shrink-0 border border-blue-100 dark:border-blue-900/40 shadow-xs">
-                                HM
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-xs font-bold text-zinc-900 dark:text-white truncate uppercase tracking-tight">
-                                  HAIRI MUSTAFA
-                                </p>
-                                <p className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold truncate uppercase">
-                                  ASSOCIATES
-                                </p>
-                                <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">
-                                  Peguam Syarie
-                                </p>
-                              </div>
-                            </div>
-
-                            {/* Compact Navigation Items */}
-                            <div className="space-y-1">
-                              <span className="text-[10px] uppercase font-bold tracking-widest text-zinc-400 dark:text-zinc-500 px-2 block mb-1">
-                                Navigasi Pantas
-                              </span>
-                              <button 
-                                onClick={() => setActiveTab('dashboard')}
-                                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 transition-colors"
-                              >
-                                <PieChart size={17} />
-                                <span>Papan Pemuka</span>
-                              </button>
-                              <button 
-                                onClick={() => setActiveTab('records')}
-                                className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-white transition-colors"
-                              >
-                                <div className="flex items-center gap-2.5 min-w-0 truncate">
-                                  <Users size={17} />
-                                  <span className="truncate">Rekod Pelanggan</span>
-                                </div>
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
-                                  {filteredRecords.length}
-                                </span>
-                              </button>
-                              <button 
-                                onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }}
-                                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-white transition-colors"
-                              >
-                                <FileText size={17} />
-                                <span>Paparan Resit</span>
-                              </button>
-                              <button 
-                                onClick={() => setActiveTab('settings')}
-                                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-white transition-colors"
-                              >
-                                <Settings size={17} />
-                                <span>Tetapan</span>
-                              </button>
-                            </div>
-
-                              {/* Ringkasan Mileage & Status */}
-                            <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800/60 space-y-2">
-                              <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200/50 dark:border-zinc-800/60 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <Car size={16} className="text-zinc-500 dark:text-zinc-400" />
-                                  <span className="text-[11px] font-medium text-zinc-700 dark:text-zinc-300">Baki Mileage</span>
-                                </div>
-                                <span className="text-xs font-bold text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalMileage)}</span>
-                              </div>
-
-                              <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 flex items-center justify-between">
-                                <div className="flex items-center gap-1.5">
-                                  <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                                  <span className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">Status Sistem</span>
-                                </div>
-                                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Aktif</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* LAJUR 2: GRID 2x2 EMPAT KAD DATA UTAMA (TUNGGAKAN DI BAWAH) (col-span-12 md:col-span-5) */}
-                          <div className="md:col-span-5 flex flex-col gap-4">
+                          {/* KIRI: GRID 2x2 EMPAT KAD DATA UTAMA (TUNGGAKAN DI BAWAH) (xl:col-span-7) */}
+                          <div className="xl:col-span-7 flex flex-col gap-8">
                             {/* Grid 2x2 for Four Main Data Cards */}
-                            <div className="grid grid-cols-2 gap-3.5">
+                            <div className="grid grid-cols-2 gap-4">
                               {/* 1. Jumlah Kes (Atas Kiri) */}
-                              <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 shadow-xs hover:shadow transition-all flex flex-col justify-between h-[118px]">
+                              <motion.div 
+                                initial={{ opacity: 0, y: 15 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.5, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}
+                                whileHover={{ scale: 1.02, y: -2 }}
+                                className="p-6 rounded-3xl bg-zinc-50 dark:bg-zinc-900/40 transition-shadow hover:shadow-lg hover:shadow-zinc-200/50 dark:hover:shadow-black/50 flex flex-col justify-between h-[160px]"
+                              >
                                 <div>
-                                  <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                  <span className="text-[11px] font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
                                     Jumlah Kes
                                   </span>
                                 </div>
                                 <div>
-                                  <p className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">
+                                  <p className="text-4xl font-light tracking-tight text-zinc-900 dark:text-white tabular-nums">
                                     {stats.totalKes}
                                   </p>
-                                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
-                                    Kes Berdaftar
-                                  </p>
                                 </div>
-                              </div>
+                              </motion.div>
 
                               {/* 2. Total Fee (Atas Kanan) */}
-                              <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 shadow-xs hover:shadow transition-all flex flex-col justify-between h-[118px]">
+                              <motion.div 
+                                initial={{ opacity: 0, y: 15 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.5, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+                                whileHover={{ scale: 1.02, y: -2 }}
+                                className="p-6 rounded-3xl bg-zinc-50 dark:bg-zinc-900/40 transition-shadow hover:shadow-lg hover:shadow-zinc-200/50 dark:hover:shadow-black/50 flex flex-col justify-between h-[160px]"
+                              >
                                 <div>
-                                  <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                  <span className="text-[11px] font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
                                     Total Fee
                                   </span>
                                 </div>
                                 <div>
-                                  <p className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">
+                                  <p className="text-4xl font-light tracking-tight text-zinc-900 dark:text-white tabular-nums">
                                     {formatRM(stats.totalFee)}
                                   </p>
-                                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
-                                    Nilai Keseluruhan
-                                  </p>
                                 </div>
-                              </div>
+                              </motion.div>
 
                               {/* 3. Baki Fee Terkini (Bawah Kiri) */}
-                              <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 shadow-xs hover:shadow transition-all flex flex-col justify-between h-[118px]">
+                              <motion.div 
+                                initial={{ opacity: 0, y: 15 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.5, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
+                                whileHover={{ scale: 1.02, y: -2 }}
+                                className="p-6 rounded-3xl bg-zinc-50 dark:bg-zinc-900/40 transition-shadow hover:shadow-lg hover:shadow-zinc-200/50 dark:hover:shadow-black/50 flex flex-col justify-between h-[160px]"
+                              >
                                 <div>
-                                  <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                  <span className="text-[11px] font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
                                     Baki Terkini
                                   </span>
                                 </div>
                                 <div>
-                                  <p className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">
+                                  <p className="text-4xl font-light tracking-tight text-zinc-900 dark:text-white tabular-nums">
                                     {formatRM(stats.totalBakiTerkini)}
                                   </p>
-                                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
-                                    Belum Selesai
-                                  </p>
                                 </div>
-                              </div>
+                              </motion.div>
 
-                              {/* 4. Tunggakan - DIPINDAHKAN KE BAWAH! (Bawah Kanan) - MERAH SAHAJA */}
-                              <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-red-200/90 dark:border-red-900/60 shadow-xs hover:shadow transition-all flex flex-col justify-between h-[118px]">
+                              {/* 4. Tunggakan - MERAH SAHAJA */}
+                              <motion.div 
+                                initial={{ opacity: 0, y: 15 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.5, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                                whileHover={{ scale: 1.02, y: -2 }}
+                                className="p-6 rounded-3xl bg-red-50/50 dark:bg-red-950/20 border border-red-100/50 dark:border-red-900/20 transition-shadow hover:shadow-lg hover:shadow-red-500/10 dark:hover:shadow-red-900/20 flex flex-col justify-between h-[160px]"
+                              >
                                 <div className="flex items-center justify-between">
-                                  <span className="text-[11px] font-semibold uppercase tracking-wider text-red-600 dark:text-red-400">
+                                  <span className="text-[11px] font-medium uppercase tracking-widest text-red-600 dark:text-red-400">
                                     Tunggakan
-                                  </span>
-                                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-400">
-                                    {stats.totalOverdueCases} Kes
                                   </span>
                                 </div>
                                 <div>
-                                  <p className="text-xl sm:text-2xl font-bold tracking-tight text-red-600 dark:text-red-400 tabular-nums">
+                                  <p className="text-4xl font-light tracking-tight text-red-600 dark:text-red-400 tabular-nums">
                                     {formatRM(stats.totalOverdueAmount)}
                                   </p>
-                                  <p className="text-[10px] text-red-500/80 dark:text-red-400/80 mt-0.5">
-                                    &gt;{overdueDays} Hari Tanpa Bayaran
+                                  <p className="text-xs text-red-500/80 dark:text-red-400/80 mt-1.5 font-medium">
+                                    {stats.totalOverdueCases} kes &gt;{overdueDays} hari
                                   </p>
                                 </div>
-                              </div>
+                              </motion.div>
                             </div>
 
                             {/* Tindakan Segera & Bayaran Pantas */}
-                            <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 shadow-xs flex flex-col gap-3">
-                              <div className="flex items-center justify-between">
-                                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
-                                  <Zap size={16} className="text-blue-500" />
-                                  Tindakan Segera
-                                </h3>
-                              </div>
-                              <div className="grid grid-cols-2 gap-2.5">
+                            <div className="p-6 rounded-3xl bg-zinc-50 dark:bg-zinc-900/40 flex flex-col gap-6">
+                              <h3 className="text-[11px] font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+                                Tindakan Segera
+                              </h3>
+                              <div className="grid grid-cols-2 gap-3">
                                 <button
                                   onClick={() => setIsNewRecordModalOpen(true)}
-                                  className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 hover:bg-blue-50 dark:hover:bg-blue-950/30 hover:border-blue-200 dark:hover:border-blue-900/40 border border-zinc-200/50 dark:border-zinc-800/60 transition-all text-left flex items-center gap-3 cursor-pointer group"
+                                  className="p-3 rounded-xl bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-all text-left flex items-center gap-3 cursor-pointer group shadow-sm"
                                 >
-                                  <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                                    <Plus size={18} />
+                                  <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                    <Plus size={16} />
                                   </div>
                                   <div className="min-w-0">
-                                    <p className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 truncate">+ Klien Baharu</p>
-                                    <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Daftar rekod</p>
+                                    <p className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 truncate">Klien Baharu</p>
                                   </div>
                                 </button>
 
                                 <button
                                   onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }}
-                                  className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 hover:border-emerald-200 dark:hover:border-emerald-900/40 border border-zinc-200/50 dark:border-zinc-800/60 transition-all text-left flex items-center gap-3 cursor-pointer group"
+                                  className="p-3 rounded-xl bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-all text-left flex items-center gap-3 cursor-pointer group shadow-sm"
                                 >
-                                  <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                                    <CreditCard size={18} />
+                                  <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                    <CreditCard size={16} />
                                   </div>
                                   <div className="min-w-0">
-                                    <p className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 truncate">Paparan Resit</p>
-                                    <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Resit am</p>
+                                    <p className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 truncate">Cetak Resit</p>
                                   </div>
                                 </button>
                               </div>
 
                               {/* Bayaran Segera Quick Buttons */}
-                              <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/60">
+                              <div className="pt-4 mt-2 border-t border-zinc-200/60 dark:border-zinc-800/60">
                                 <p className="text-[10px] uppercase font-semibold text-zinc-400 dark:text-zinc-500 mb-2">
                                   Bayaran Pantas (Pelanggan Aktif Terkini)
                                 </p>
@@ -3916,75 +3931,72 @@ function AppContent() {
                             </div>
                           </div>
 
-                          {/* LAJUR 3: LAJUR KANAN MENGGABUNGKAN SENARAI KES TERKINI & CARTA BAR (col-span-12 md:col-span-4) */}
-                          <div className="md:col-span-4 flex flex-col gap-4">
+                          {/* LAJUR KANAN MENGGABUNGKAN SENARAI KES TERKINI & CARTA BAR (xl:col-span-5) */}
+                          <div className="xl:col-span-5 flex flex-col gap-8">
                             {/* Senarai Kes Terkini */}
-                            <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 shadow-xs flex flex-col">
-                              <div className="flex items-center justify-between mb-3 pb-2 border-b border-zinc-100 dark:border-zinc-800/60">
-                                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-200 flex items-center gap-2">
-                                  <Clock size={16} className="text-blue-500" />
+                            <div className="p-6 rounded-3xl bg-zinc-50 dark:bg-zinc-900/40 flex flex-col">
+                              <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-[11px] font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
                                   Kes Terkini
                                 </h3>
                                 <button 
                                   onClick={() => setActiveTab('records')}
-                                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                                  className="text-[11px] text-zinc-600 dark:text-zinc-400 font-medium hover:text-zinc-900 transition-colors"
                                 >
                                   Lihat Semua
                                 </button>
                               </div>
 
-                              <div className="space-y-2.5">
+                              <div className="space-y-1">
                                 {filteredRecords.slice(0, 4).map(record => (
                                   <div 
                                     key={record.id} 
                                     onClick={() => setStatementRecord(record)}
-                                    className="p-2.5 rounded-xl bg-zinc-50/70 dark:bg-zinc-800/40 hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-all flex items-center justify-between cursor-pointer group"
+                                    className="p-3 rounded-xl bg-transparent hover:bg-zinc-100/60 dark:hover:bg-zinc-800/40 transition-all flex items-center justify-between cursor-pointer group"
                                   >
                                     <div className="min-w-0 pr-2">
-                                      <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                                      <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate group-hover:text-zinc-700 dark:group-hover:text-zinc-300">
                                         {record.nama}
                                       </p>
-                                      <div className="flex items-center gap-1.5 mt-1">
-                                        {getKesBadge(record.kes)}
-                                        <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
-                                          &middot; {formatDateDMY(record.tarikh)}
+                                      <div className="flex items-center gap-1.5 mt-0.5">
+                                        <span className="text-xs text-zinc-400 dark:text-zinc-500">
+                                          {formatDateDMY(record.tarikh)}
                                         </span>
                                       </div>
                                     </div>
                                     <div className="text-right shrink-0">
-                                      <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 tabular-nums">
+                                      <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100 tabular-nums">
                                         {formatRM(record.bakiFeeTerkini)}
                                       </p>
-                                      <p className="text-[9px] uppercase tracking-wider text-zinc-400">
-                                        Baki
+                                      <p className={`text-[10px] font-medium ${record.bakiFeeTerkini <= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                        {record.bakiFeeTerkini <= 0 ? 'Selesai' : 'Baki'}
                                       </p>
                                     </div>
                                   </div>
                                 ))}
                                 {filteredRecords.length === 0 && (
-                                  <p className="text-xs text-zinc-400 text-center py-4">Tiada rekod kes ditemui.</p>
+                                  <p className="text-sm text-zinc-400 text-center py-6">Tiada rekod kes ditemui.</p>
                                 )}
                               </div>
                             </div>
 
                             {/* Carta Bar (Baki Fee Mengikut Kes) */}
-                            <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 shadow-xs flex flex-col">
-                              <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-200 flex items-center gap-2">
-                                  <PieChart size={16} className="text-blue-500" />
+                            <div className="p-6 rounded-3xl bg-zinc-50 dark:bg-zinc-900/40 flex flex-col">
+                              <div className="flex items-center justify-between mb-6">
+                                <h3 className="text-[11px] font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
                                   Baki Fee Mengikut Kes
                                 </h3>
                               </div>
-                              <div className="h-44 w-full">
+                              <div className="h-56 w-full">
                                 <ResponsiveContainer width="100%" height="100%">
-                                  <BarChart data={chartData.slice(0, 5)} margin={{ top: 10, right: 5, left: -15, bottom: 20 }}>
+                                  <BarChart data={chartData.slice(0, 5)} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" strokeOpacity={0.4} />
                                     <XAxis 
                                       dataKey="name" 
                                       axisLine={false}
                                       tickLine={false}
-                                      tick={{ fontSize: 9, fill: '#71717a' }}
-                                      dy={8}
+                                      tick={{ fontSize: 10, fill: '#71717a' }}
+                                      dy={12}
                                       interval={0}
                                       angle={-25}
                                       textAnchor="end"
@@ -3992,15 +4004,15 @@ function AppContent() {
                                     <YAxis 
                                       axisLine={false}
                                       tickLine={false}
-                                      tick={{ fontSize: 9, fill: '#71717a' }}
+                                      tick={{ fontSize: 10, fill: '#71717a' }}
                                       tickFormatter={(val) => `${val >= 1000 ? (val/1000).toFixed(0) + 'k' : val}`}
                                     />
                                     <Tooltip 
                                       cursor={{ fill: 'rgba(59, 130, 246, 0.05)' }}
-                                      contentStyle={{ borderRadius: '10px', fontSize: '11px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
+                                      contentStyle={{ borderRadius: '12px', fontSize: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}
                                       formatter={(value: number) => [`RM ${value}`, 'Baki Fee']}
                                     />
-                                    <Bar dataKey="baki" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} />
+                                    <Bar dataKey="baki" fill="#18181b" radius={[4, 4, 0, 0]} barSize={24} />
                                   </BarChart>
                                 </ResponsiveContainer>
                               </div>
@@ -4022,101 +4034,111 @@ function AppContent() {
                           <div className="p-4 flex flex-col gap-4">
                             {/* 1. BARISAN KAD DATA TUNGGAL YANG BOLEH DILERET SECARA MENDATAR */}
                             <div>
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 dark:text-zinc-500">
-                                  Kad Data Utama (Leret Mendatar)
-                                </span>
-                                <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
-                                  &larr; Leret &rarr;
+                              <div className="flex items-center justify-between mb-3 px-1">
+                                <span className="text-[11px] uppercase font-semibold tracking-widest text-zinc-500">
+                                  Ringkasan
                                 </span>
                               </div>
 
                               {/* Single Horizontal Swipeable Row */}
-                              <div className="flex overflow-x-auto gap-3 pb-2 pt-0.5 no-scrollbar snap-x scroll-smooth">
+                              <div className="flex overflow-x-auto gap-4 pb-4 pt-1 no-scrollbar snap-x scroll-smooth">
                                 {/* Kad 1: Jumlah Kes */}
-                                <div className="min-w-[160px] h-[105px] p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-800/70 shrink-0 snap-start flex flex-col justify-between">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Jumlah Kes</span>
-                                  <div>
-                                    <p className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">{stats.totalKes}</p>
-                                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Kes Berdaftar</p>
-                                  </div>
-                                </div>
+                                <motion.div 
+                                  initial={{ opacity: 0, scale: 0.95 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  transition={{ duration: 0.4, delay: 0.05, ease: "easeOut" }}
+                                  whileTap={{ scale: 0.98 }}
+                                  className="min-w-[150px] h-[120px] p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 shrink-0 snap-start flex flex-col justify-between"
+                                >
+                                  <span className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Jumlah Kes</span>
+                                  <p className="text-3xl font-light tracking-tight text-zinc-900 dark:text-white tabular-nums">{stats.totalKes}</p>
+                                </motion.div>
 
                                 {/* Kad 2: Total Fee */}
-                                <div className="min-w-[160px] h-[105px] p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-800/70 shrink-0 snap-start flex flex-col justify-between">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Total Fee</span>
-                                  <div>
-                                    <p className="text-lg font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalFee)}</p>
-                                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Nilai Keseluruhan</p>
-                                  </div>
-                                </div>
+                                <motion.div 
+                                  initial={{ opacity: 0, scale: 0.95 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  transition={{ duration: 0.4, delay: 0.1, ease: "easeOut" }}
+                                  whileTap={{ scale: 0.98 }}
+                                  className="min-w-[160px] h-[120px] p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 shrink-0 snap-start flex flex-col justify-between"
+                                >
+                                  <span className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Total Fee</span>
+                                  <p className="text-2xl font-light tracking-tight text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalFee)}</p>
+                                </motion.div>
 
                                 {/* Kad 3: Baki Terkini */}
-                                <div className="min-w-[160px] h-[105px] p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-800/70 shrink-0 snap-start flex flex-col justify-between">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Baki Terkini</span>
-                                  <div>
-                                    <p className="text-lg font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalBakiTerkini)}</p>
-                                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Belum Selesai</p>
-                                  </div>
-                                </div>
+                                <motion.div 
+                                  initial={{ opacity: 0, scale: 0.95 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  transition={{ duration: 0.4, delay: 0.15, ease: "easeOut" }}
+                                  whileTap={{ scale: 0.98 }}
+                                  className="min-w-[160px] h-[120px] p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 shrink-0 snap-start flex flex-col justify-between"
+                                >
+                                  <span className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Baki Terkini</span>
+                                  <p className="text-2xl font-light tracking-tight text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalBakiTerkini)}</p>
+                                </motion.div>
 
                                 {/* Kad 4: Tunggakan - MERAH SAHAJA */}
-                                <div className="min-w-[165px] h-[105px] p-3.5 rounded-2xl bg-red-50/40 dark:bg-red-950/20 border border-red-200/80 dark:border-red-900/50 shrink-0 snap-start flex flex-col justify-between">
+                                <motion.div 
+                                  initial={{ opacity: 0, scale: 0.95 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  transition={{ duration: 0.4, delay: 0.2, ease: "easeOut" }}
+                                  whileTap={{ scale: 0.98 }}
+                                  className="min-w-[170px] h-[120px] p-5 rounded-2xl bg-red-50/50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/30 shrink-0 snap-start flex flex-col justify-between"
+                                >
                                   <div className="flex items-center justify-between">
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400">Tunggakan</span>
-                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/60 text-red-700 dark:text-red-300">
-                                      {stats.totalOverdueCases} Kes
-                                    </span>
+                                    <span className="text-[10px] font-medium uppercase tracking-widest text-red-600 dark:text-red-400">Tunggakan</span>
                                   </div>
                                   <div>
-                                    <p className="text-lg font-bold tracking-tight text-red-600 dark:text-red-400 tabular-nums">{formatRM(stats.totalOverdueAmount)}</p>
-                                    <p className="text-[10px] text-red-500/80 dark:text-red-400/80 mt-0.5">&gt;{overdueDays} Hari</p>
+                                    <p className="text-2xl font-light tracking-tight text-red-600 dark:text-red-400 tabular-nums">{formatRM(stats.totalOverdueAmount)}</p>
+                                    <p className="text-[10px] text-red-500/80 dark:text-red-400/80 font-medium mt-0.5">{stats.totalOverdueCases} kes &gt;{overdueDays} hari</p>
                                   </div>
-                                </div>
+                                </motion.div>
 
                                 {/* Kad 5: Mileage */}
-                                <div className="min-w-[160px] h-[105px] p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-800/70 shrink-0 snap-start flex flex-col justify-between">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Baki Mileage</span>
-                                  <div>
-                                    <p className="text-lg font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalMileage)}</p>
-                                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Tuntutan</p>
-                                  </div>
-                                </div>
+                                <motion.div 
+                                  initial={{ opacity: 0, scale: 0.95 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  transition={{ duration: 0.4, delay: 0.25, ease: "easeOut" }}
+                                  whileTap={{ scale: 0.98 }}
+                                  className="min-w-[160px] h-[120px] p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 shrink-0 snap-start flex flex-col justify-between"
+                                >
+                                  <span className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Baki Mileage</span>
+                                  <p className="text-2xl font-light tracking-tight text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalMileage)}</p>
+                                </motion.div>
                               </div>
-                            </div>
 
+                            </div>
                             {/* 2. SENARAI KES TERKINI DI BAWAH KAD (LINEAR & TUMPUK) */}
-                            <div className="rounded-2xl bg-zinc-50/60 dark:bg-zinc-800/40 border border-zinc-200/50 dark:border-zinc-800/60 p-3.5">
-                              <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-zinc-200/40 dark:border-zinc-800/40">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-200 flex items-center gap-1.5">
-                                  <Clock size={15} className="text-blue-500" />
-                                  Senarai Kes Terkini
+                            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-900/30 p-5 mt-2">
+                              <div className="flex items-center justify-between mb-4">
+                                <h4 className="text-[11px] font-medium uppercase tracking-widest text-zinc-500">
+                                  Kes Terkini
                                 </h4>
                                 <button
                                   onClick={() => setActiveTab('records')}
-                                  className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold"
+                                  className="text-[11px] text-zinc-600 dark:text-zinc-400 font-medium"
                                 >
                                   Semua ({filteredRecords.length})
                                 </button>
                               </div>
 
-                              <div className="space-y-2">
+                              <div className="space-y-1">
                                 {filteredRecords.slice(0, 5).map(record => (
                                   <div
                                     key={record.id}
                                     onClick={() => setStatementRecord(record)}
-                                    className="p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200/40 dark:border-zinc-800/50 flex items-center justify-between active:scale-[0.99] transition-transform cursor-pointer"
+                                    className="p-3 rounded-xl bg-transparent hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50 flex items-center justify-between transition-colors cursor-pointer"
                                   >
                                     <div className="min-w-0 pr-2">
                                       <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate">{record.nama}</p>
-                                      <div className="flex items-center gap-1.5 mt-1">
-                                        {getKesBadge(record.kes)}
-                                        <span className="text-[10px] text-zinc-400 dark:text-zinc-500">&middot; {formatDateDMY(record.tarikh)}</span>
+                                      <div className="flex items-center gap-1.5 mt-0.5">
+                                        <span className="text-[10px] text-zinc-500">{formatDateDMY(record.tarikh)}</span>
                                       </div>
                                     </div>
                                     <div className="text-right shrink-0">
-                                      <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 tabular-nums">{formatRM(record.bakiFeeTerkini)}</p>
-                                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${record.bakiFeeTerkini <= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                      <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums">{formatRM(record.bakiFeeTerkini)}</p>
+                                      <span className={`text-[10px] font-medium ${record.bakiFeeTerkini <= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
                                         {record.bakiFeeTerkini <= 0 ? 'Selesai' : 'Baki'}
                                       </span>
                                     </div>
@@ -4129,8 +4151,8 @@ function AppContent() {
                             </div>
 
                             {/* 3. TINDAKAN PANTAS & BAYARAN PANTAS MOBILE */}
-                            <div className="rounded-2xl bg-zinc-50/60 dark:bg-zinc-800/40 border border-zinc-200/50 dark:border-zinc-800/60 p-3.5 space-y-2.5">
-                              <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 dark:text-zinc-500 block">
+                            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-900/30 p-5 mt-2 space-y-4">
+                              <span className="text-[11px] font-medium uppercase tracking-widest text-zinc-500 block">
                                 Bayaran Pantas Android
                               </span>
                               <div className="grid grid-cols-4 gap-1.5">
@@ -5335,6 +5357,108 @@ function AppContent() {
       </AnimatePresence>
 
       <AnimatePresence>
+        {editingPayment && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:hidden">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-[#ffffff] dark:bg-zinc-900 rounded-xl shadow-2xl border border-[#e4e4e7] dark:border-zinc-800 w-full max-w-md overflow-hidden"
+            >
+              <div className="flex items-center justify-between p-5 border-b border-[#f4f4f5] dark:border-zinc-800 bg-[#fafafa]/50 dark:bg-zinc-900/50">
+                <h3 className="font-semibold text-[#18181b] dark:text-white flex items-center gap-2">
+                  <Edit size={18} className="text-[#52525b] dark:text-zinc-400" />
+                  Kemaskini Pembayaran
+                </h3>
+                <button onClick={() => setEditingPayment(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:hover:text-zinc-300 transition-colors cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-6">
+                <form onSubmit={handleUpdateEditedPayment} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#71717a] dark:text-zinc-400 uppercase tracking-wider mb-2">Tarikh (DD/MM/YYYY)</label>
+                    <input 
+                      type="text"
+                      value={editingPayment.payment.date}
+                      onChange={(e) => setEditingPayment({...editingPayment, payment: {...editingPayment.payment, date: e.target.value}})}
+                      className="w-full px-4 py-2.5 bg-[#ffffff] dark:bg-zinc-950 border border-[#e4e4e7] dark:border-zinc-800 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none text-[#18181b] dark:text-white"
+                      placeholder="Contoh: 15/08/2026"
+                      required
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#71717a] dark:text-zinc-400 uppercase tracking-wider mb-2">Jumlah Fee (RM)</label>
+                      <input 
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={editingPayment.payment.amount || ''}
+                        onChange={(e) => setEditingPayment({...editingPayment, payment: {...editingPayment.payment, amount: parseFloat(e.target.value) || 0}})}
+                        className="w-full px-4 py-2.5 bg-[#ffffff] dark:bg-zinc-950 border border-[#e4e4e7] dark:border-zinc-800 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none text-[#18181b] dark:text-white"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#71717a] dark:text-zinc-400 uppercase tracking-wider mb-2">Jumlah Mileage (RM)</label>
+                      <input 
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={editingPayment.payment.mileageAmount || ''}
+                        onChange={(e) => setEditingPayment({...editingPayment, payment: {...editingPayment.payment, mileageAmount: parseFloat(e.target.value) || 0}})}
+                        className="w-full px-4 py-2.5 bg-[#ffffff] dark:bg-zinc-950 border border-[#e4e4e7] dark:border-zinc-800 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none text-[#18181b] dark:text-white"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#71717a] dark:text-zinc-400 uppercase tracking-wider mb-2">Kaedah Bayaran</label>
+                    <select 
+                      value={editingPayment.payment.method}
+                      onChange={(e) => setEditingPayment({...editingPayment, payment: {...editingPayment.payment, method: e.target.value}})}
+                      className="w-full px-4 py-2.5 bg-[#ffffff] dark:bg-zinc-950 border border-[#e4e4e7] dark:border-zinc-800 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none text-[#18181b] dark:text-white"
+                    >
+                      <option value="Tunai">Tunai</option>
+                      <option value="Transfer">Pindahan Bank (Transfer)</option>
+                      <option value="Cek">Cek</option>
+                      <option value="Lain-lain">Lain-lain</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#71717a] dark:text-zinc-400 uppercase tracking-wider mb-2">Nota Tambahan</label>
+                    <input 
+                      type="text"
+                      value={editingPayment.payment.nota || ''}
+                      onChange={(e) => setEditingPayment({...editingPayment, payment: {...editingPayment.payment, nota: e.target.value}})}
+                      className="w-full px-4 py-2.5 bg-[#ffffff] dark:bg-zinc-950 border border-[#e4e4e7] dark:border-zinc-800 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none text-[#18181b] dark:text-white"
+                      placeholder="Catatan..."
+                    />
+                  </div>
+                  <div className="pt-4 flex gap-3">
+                    <button 
+                      type="button"
+                      onClick={() => setEditingPayment(null)}
+                      className="px-5 py-2.5 text-sm border border-[#e4e4e7] dark:border-zinc-800 rounded-lg hover:bg-[#fafafa] dark:hover:bg-zinc-800 text-[#52525b] dark:text-zinc-300 font-medium transition-all flex-1"
+                    >
+                      Batal
+                    </button>
+                    <button 
+                      type="submit"
+                      className="px-5 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-all flex-1 shadow-sm"
+                    >
+                      Simpan
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
         {deletingRecord && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm print:hidden">
             <motion.div 
@@ -6234,9 +6358,23 @@ function AppContent() {
                   <Printer size={18} className="text-[#52525b] dark:text-zinc-300 " />
                   Pratinjau Penyata Penuh
                 </h3>
-                <button onClick={() => setStatementRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:bg-zinc-800">
-                  <X size={18} />
-                </button>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => { setEditingRecord(statementRecord); setStatementRecord(null); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
+                  >
+                    <Edit size={14} /> Edit Maklumat
+                  </button>
+                  <button 
+                    onClick={() => { setDeletingRecord(statementRecord); setStatementRecord(null); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
+                  >
+                    <Trash2 size={14} /> Padam Rekod
+                  </button>
+                  <button onClick={() => setStatementRecord(null)} className="text-[#a1a1aa] hover:text-[#52525b] dark:text-zinc-300 transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer p-1.5 rounded-md hover:bg-zinc-100 dark:bg-zinc-800 ml-2">
+                    <X size={18} />
+                  </button>
+                </div>
               </div>
  
  <div className="p-4 sm:p-8 overflow-y-auto overflow-x-auto flex-1 bg-zinc-100  flex items-start justify-center print:bg-[#ffffff] print:p-0 print:overflow-visible print:block">
@@ -6353,6 +6491,7 @@ function AppContent() {
  <th className="py-3 px-5 font-semibold text-[#000000] ">Kaedah</th>
  <th className="py-3 px-5 font-semibold text-[#000000] text-right">Fee (RM)</th>
  <th className="py-3 px-5 font-semibold text-[#000000] text-right">Mileage (RM)</th>
+ <th className="py-3 px-5 font-semibold text-[#000000] text-right print:hidden w-24">Tindakan</th>
  </tr>
  </thead>
  <tbody className="divide-y divide-[#d1d5db] ">
@@ -6363,6 +6502,16 @@ function AppContent() {
  <td className="py-3 px-5 text-[#000000] ">{payment.method}</td>
  <td className="py-3 px-5 text-right font-mono font-medium text-[#059669]">{formatRM(payment.amount || 0)}</td>
  <td className="py-3 px-5 text-right font-mono font-medium text-[#059669]">{formatRM(payment.mileageAmount || 0)}</td>
+ <td className="py-3 px-5 text-right print:hidden whitespace-nowrap">
+   <div className="flex justify-end gap-2">
+     <button onClick={() => setEditingPayment({ recordId: statementRecord.id, payment: payment })} className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-50 transition-colors">
+       <Edit size={14} />
+     </button>
+     <button onClick={() => handleDeletePayment(statementRecord.id, payment.id)} className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors">
+       <Trash2 size={14} />
+     </button>
+   </div>
+ </td>
  </tr>
  ))}
  </tbody>
