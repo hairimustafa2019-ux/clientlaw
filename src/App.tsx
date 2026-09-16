@@ -678,13 +678,7 @@ function AppContent() {
     }
   };
 
-  React.useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js')
-        .then(() => console.log('SW registered successfully'))
-        .catch(err => console.error('SW registration failed', err));
-    }
-  }, []);
+
 
   const handleRenameCategory = async (oldName: string, newName: string) => {
     if (!newName.trim() || oldName === newName) return;
@@ -1305,6 +1299,9 @@ function AppContent() {
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const paymentsFileInputRef = useRef<HTMLInputElement>(null);
+  const clientPaymentsFileInputRef = useRef<HTMLInputElement>(null);
+  const [importPaymentsClientId, setImportPaymentsClientId] = useState<string | null>(null);
 
   const handleDownloadTemplate = () => {
     const headers = [
@@ -1635,6 +1632,189 @@ function AppContent() {
         }
       };
       reader.readAsText(file, 'UTF-8');
+    }
+  };
+
+  const handleExportPaymentsCSV = (clientId?: string) => {
+    let dataToExport = [];
+    
+    const recordsToExport = clientId ? records.filter(r => r.id === clientId) : records;
+    
+    for (const record of recordsToExport) {
+      if (record.paymentHistory && record.paymentHistory.length > 0) {
+        for (const payment of record.paymentHistory) {
+          dataToExport.push({
+            'ID Pelanggan': record.id,
+            'Nama Pelanggan': record.nama,
+            'ID Bayaran': payment.id,
+            'Tarikh': payment.date,
+            'Kaedah': payment.method,
+            'Jumlah': payment.amount,
+            'Nota': payment.notes || ''
+          });
+        }
+      }
+    }
+    
+    if (dataToExport.length === 0) {
+      showToast('error', 'Tiada rekod bayaran dijumpai.');
+      return;
+    }
+    
+    const headers = Object.keys(dataToExport[0]);
+    const csvContent = [
+      headers.join(','),
+      ...dataToExport.map(row => headers.map(header => `"${String(row[header as keyof typeof row]).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', clientId ? `bayaran_${clientId}_${new Date().toISOString().split('T')[0]}.csv` : `semua_bayaran_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImportPaymentsCSV = async (event: React.ChangeEvent<HTMLInputElement>, targetClientId?: string) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const parseNumeric = (val: any): number => {
+      if (val === undefined || val === null) return 0;
+      if (typeof val === 'number') return isNaN(val) ? 0 : val;
+      const str = String(val).replace(/RM/gi, '').replace(/\s+/g, '').replace(/,/g, '').trim();
+      const num = parseFloat(str);
+      return isNaN(num) ? 0 : num;
+    };
+
+    try {
+      const text = await file.text();
+      let rawRows = [];
+      if (file.name.endsWith('.csv')) {
+        rawRows = text.split('\n').map(row => {
+          const match = row.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
+          return match ? match.map(item => item.replace(/^"|"$/g, '').trim()) : row.split(',').map(v => v.trim());
+        }).filter(row => row.length > 0 && row.some(cell => cell !== ''));
+      } else {
+        showToast('error', 'Sila muat naik fail CSV sahaja.');
+        return;
+      }
+
+      if (rawRows.length < 2) {
+        showToast('error', 'Fail tidak mengandungi data bayaran.');
+        return;
+      }
+
+      const headers = rawRows[0].map((h: string) => h.toLowerCase().trim());
+      
+      const idPelangganIdx = headers.findIndex(h => h.includes('id pelanggan') || h === 'id');
+      const tarikhIdx = headers.findIndex(h => h.includes('tarikh') || h === 'date');
+      const kaedahIdx = headers.findIndex(h => h.includes('kaedah') || h === 'method');
+      const jumlahIdx = headers.findIndex(h => h.includes('jumlah') || h === 'amount');
+      const notaIdx = headers.findIndex(h => h.includes('nota') || h === 'notes');
+
+      if (tarikhIdx === -1 || jumlahIdx === -1) {
+        showToast('error', 'Fail CSV mesti mengandungi lajur Tarikh dan Jumlah.');
+        return;
+      }
+
+      const paymentsToAdd: { [clientId: string]: PaymentEntry[] } = {};
+      let updatedCount = 0;
+
+      for (let i = 1; i < rawRows.length; i++) {
+        const row = rawRows[i];
+        const rowClientId = idPelangganIdx !== -1 ? row[idPelangganIdx] : targetClientId;
+        
+        if (!rowClientId) continue;
+
+        if (targetClientId && idPelangganIdx !== -1 && rowClientId !== targetClientId) {
+          continue;
+        }
+
+        const amount = parseNumeric(row[jumlahIdx]);
+        if (amount <= 0) continue;
+
+        if (!paymentsToAdd[rowClientId]) {
+          paymentsToAdd[rowClientId] = [];
+        }
+
+        paymentsToAdd[rowClientId].push({
+          id: `pay_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+          date: row[tarikhIdx] || new Date().toISOString().split('T')[0],
+          amount: amount,
+          method: kaedahIdx !== -1 ? row[kaedahIdx] : 'Tunai',
+          nota: notaIdx !== -1 ? row[notaIdx] : ''
+        });
+        updatedCount++;
+      }
+
+      if (updatedCount === 0) {
+        showToast('error', 'Tiada data bayaran yang sah dijumpai dalam fail.');
+        return;
+      }
+
+      const updatedRecords = records.map(record => {
+        if (paymentsToAdd[record.id]) {
+          const newPayments = [...(record.paymentHistory || []), ...paymentsToAdd[record.id]];
+          let currentBalance = record.totalFee;
+          let latestPaymentDate = '';
+          newPayments.sort((a, b) => {
+            const dateA = a.date.includes('/') ? parseDateObj(a.date).getTime() : new Date(a.date).getTime();
+            const dateB = b.date.includes('/') ? parseDateObj(b.date).getTime() : new Date(b.date).getTime();
+            return dateA - dateB;
+          });
+          
+          for (let p of newPayments) {
+            currentBalance -= p.amount;
+            latestPaymentDate = p.date;
+          }
+          
+          let updatedRecord = {
+            ...record,
+            paymentHistory: newPayments,
+            bakiFeeTerkini: currentBalance,
+            bakiSebelum: currentBalance + (newPayments.length > 0 ? newPayments[newPayments.length - 1].amount : 0)
+          };
+          if (latestPaymentDate) {
+            updatedRecord.bayaranTerakhir = newPayments[newPayments.length - 1].amount;
+            updatedRecord.tarikh = latestPaymentDate;
+          }
+          return updatedRecord;
+        }
+        return record;
+      });
+
+      if (db && user) {
+        const batch = writeBatch(db);
+        for (const clientId of Object.keys(paymentsToAdd)) {
+          const record = updatedRecords.find(r => r.id === clientId);
+          if (record) {
+            const docRef = doc(db, `users/${user.uid}/records`, clientId);
+            batch.update(docRef, {
+              paymentHistory: record.paymentHistory,
+              bakiFeeTerkini: record.bakiFeeTerkini,
+              bakiSebelum: record.bakiSebelum,
+              bayaranTerakhir: record.bayaranTerakhir,
+              tarikh: record.tarikh
+            });
+          }
+        }
+        await batch.commit();
+      }
+
+      setRecords(updatedRecords);
+      showToast('success', `${updatedCount} rekod bayaran berjaya diimport!`);
+      
+    } catch (error) {
+      console.error("Error importing payments:", error);
+      showToast('error', 'Gagal memproses fail CSV.');
+    } finally {
+      if (event.target) event.target.value = '';
+      if (paymentsFileInputRef.current) paymentsFileInputRef.current.value = '';
+      if (clientPaymentsFileInputRef.current) clientPaymentsFileInputRef.current.value = '';
+      setImportPaymentsClientId(null);
     }
   };
 
@@ -2631,7 +2811,23 @@ function AppContent() {
         <h4 className="text-sm font-semibold text-[#18181b] dark:text-white  flex items-center gap-2">
           <History size={16} className="text-blue-500"/> Rekod Bayaran
         </h4>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button 
+            onClick={() => handleExportPaymentsCSV(record.id)}
+            className="text-xs bg-teal-50 hover:bg-teal-100 text-teal-700 dark:bg-teal-500/10 dark:hover:bg-teal-500/20 dark:text-teal-400 px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-teal-200 dark:border-teal-800/50"
+            title="Eksport Bayaran (CSV)"
+          >
+            <Download size={12} />
+            <span className="hidden lg:inline">Eksport</span>
+          </button>
+          <button 
+            onClick={() => { setImportPaymentsClientId(record.id); clientPaymentsFileInputRef.current?.click(); }}
+            className="text-xs bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:hover:bg-purple-500/20 dark:text-purple-400 px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-purple-200 dark:border-purple-800/50"
+            title="Import Bayaran (CSV)"
+          >
+            <Upload size={12} />
+            <span className="hidden lg:inline">Import</span>
+          </button>
           <button 
             onClick={() => setStatementRecord(record)}
             className="text-xs bg-zinc-100 hover:bg-zinc-200 text-[#3f3f46] dark:text-zinc-200 darkdark:bg-zinc-800 dark:hover:bg-zinc-700  px-2.5 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm border border-[#e4e4e7] "
@@ -2980,6 +3176,20 @@ function AppContent() {
               onChange={handleImportCSV} 
               className="hidden" 
             />
+            <input 
+              type="file" 
+              accept=".csv" 
+              ref={paymentsFileInputRef} 
+              onChange={(e) => handleImportPaymentsCSV(e)} 
+              className="hidden" 
+            />
+            <input 
+              type="file" 
+              accept=".csv" 
+              ref={clientPaymentsFileInputRef} 
+              onChange={(e) => handleImportPaymentsCSV(e, importPaymentsClientId || undefined)} 
+              className="hidden" 
+            />
 
             {/* Kelompok Fungsi Harian & Pengurusan */}
             <div className="flex items-center bg-zinc-100/80 dark:bg-zinc-900/80 p-1 rounded-xl border border-zinc-200/50 dark:border-zinc-800/50 gap-0.5">
@@ -3082,6 +3292,20 @@ function AppContent() {
                         </div>
                       </button>
 
+                      {/* Eksport Bayaran (CSV) */}
+                      <button
+                        onClick={() => { setIsDataMenuOpen(false); handleExportPaymentsCSV(); }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left hover:bg-zinc-100 dark:hover:bg-zinc-800/60 text-zinc-700 dark:text-zinc-200 transition-colors cursor-pointer group"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-teal-50 dark:bg-teal-950/50 text-teal-600 dark:text-teal-400 flex items-center justify-center shrink-0">
+                          <Download size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Eksport Bayaran (CSV)</p>
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Hanya rekod bayaran klien</p>
+                        </div>
+                      </button>
+
                       {/* 3. Import CSV */}
                       <button
                         onClick={() => { setIsDataMenuOpen(false); fileInputRef.current?.click(); }}
@@ -3092,7 +3316,21 @@ function AppContent() {
                         </div>
                         <div className="min-w-0">
                           <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Import Fail CSV</p>
-                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Masukkan rekod dari CSV</p>
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Masukkan rekod klien CSV</p>
+                        </div>
+                      </button>
+
+                      {/* Import Bayaran (CSV) */}
+                      <button
+                        onClick={() => { setIsDataMenuOpen(false); setImportPaymentsClientId(null); paymentsFileInputRef.current?.click(); }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left hover:bg-zinc-100 dark:hover:bg-zinc-800/60 text-zinc-700 dark:text-zinc-200 transition-colors cursor-pointer group"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                          <Upload size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Import Bayaran (CSV)</p>
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Masukkan rekod bayaran</p>
                         </div>
                       </button>
 
@@ -3340,6 +3578,15 @@ function AppContent() {
                       </div>
                       <ChevronRight size={18} className="text-blue-400" />
                     </button>
+                    <button onClick={handleExportPaymentsCSV} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-teal-50 dark:bg-teal-500/10 rounded-lg text-teal-600 dark:text-teal-400">
+                          <Download size={18} />
+                        </div>
+                        <span className="text-sm font-medium text-teal-700 dark:text-teal-400">Eksport Bayaran (CSV)</span>
+                      </div>
+                      <ChevronRight size={18} className="text-teal-400" />
+                    </button>
                     <button onClick={handleDownloadTemplate} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-emerald-50 dark:bg-emerald-500/10 rounded-lg text-emerald-600 dark:text-emerald-400">
@@ -3349,19 +3596,21 @@ function AppContent() {
                       </div>
                       <ChevronRight size={18} className="text-emerald-400" />
                     </button>
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      onChange={handleImportCSV}
-                      accept=".csv, .xlsx, .xls"
-                      className="hidden"
-                    />
                     <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-zinc-100 darkdark:bg-zinc-800 rounded-lg text-[#52525b] dark:text-[#a1a1aa]">
+                        <div className="p-2 bg-purple-50 dark:bg-purple-900/30 rounded-lg text-purple-600 dark:text-purple-400">
                           <Upload size={18} />
                         </div>
                         <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Import Data (CSV / Excel)</span>
+                      </div>
+                      <ChevronRight size={18} className="text-[#a1a1aa]" />
+                    </button>
+                    <button onClick={() => { setImportPaymentsClientId(null); paymentsFileInputRef.current?.click(); }} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg text-indigo-600 dark:text-indigo-400">
+                          <Upload size={18} />
+                        </div>
+                        <span className="text-sm font-medium text-[#27272a] dark:text-[#e4e4e7]">Import Bayaran (CSV)</span>
                       </div>
                       <ChevronRight size={18} className="text-[#a1a1aa]" />
                     </button>
