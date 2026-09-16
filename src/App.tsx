@@ -6,7 +6,7 @@
 import StandaloneReceipts from './components/StandaloneReceipts';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History, ToggleLeft, ToggleRight, Cloud, RefreshCw, Calendar, AlertCircle, Info, Folder, Edit2, Save } from 'lucide-react';
+import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History, ToggleLeft, ToggleRight, Cloud, RefreshCw, Calendar, AlertCircle, Info, Folder, Edit2, Save, Monitor, Smartphone, Columns, Briefcase, TrendingUp, ChevronLeft, Database, MoreVertical } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { records as initialRecords, CaseRecord, PaymentEntry } from './data';
 import { jsPDF } from 'jspdf';
@@ -15,7 +15,7 @@ import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
 import { auth, db, storage } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query, writeBatch, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, query, writeBatch, getDocs, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 enum OperationType {
@@ -344,6 +344,26 @@ function AppContent() {
   const [paymentSortDirection, setPaymentSortDirection] = useState<'asc' | 'desc'>('desc');
   const [dateSortOrder, setDateSortOrder] = useState<'asc' | 'desc' | null>('desc');
   const [nameSortOrder, setNameSortOrder] = useState<'asc' | 'desc' | null>(null);
+
+  // Dashboard layout view mode: 'dual' for simultaneous Windows & Android, 'windows' for Windows-only, 'android' for Android-only
+  const [dashboardViewMode, setDashboardViewMode] = useState<'dual' | 'windows' | 'android'>('dual');
+  const [isAndroidSidebarOpen, setIsAndroidSidebarOpen] = useState(false);
+  const [isDataMenuOpen, setIsDataMenuOpen] = useState(false);
+  const dataMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutsideDataMenu = (event: MouseEvent) => {
+      if (dataMenuRef.current && !dataMenuRef.current.contains(event.target as Node)) {
+        setIsDataMenuOpen(false);
+      }
+    };
+    if (isDataMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutsideDataMenu);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutsideDataMenu);
+    };
+  }, [isDataMenuOpen]);
 
   const [isNewRecordModalOpen, setIsNewRecordModalOpen] = useState(false);
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
@@ -2512,6 +2532,37 @@ function AppContent() {
     return ['Semua', ...Array.from(list)];
   }, []);
 
+  // Visual badges with distinctive harmonious tints for case categories
+  const getKesBadge = (kes: string) => {
+    const raw = (kes || '').trim();
+    const upper = raw.toUpperCase();
+    
+    let style = "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 border-zinc-200/80 dark:border-zinc-700/80";
+    if (upper.includes('TAAT') || upper.includes('K.TAAT') || upper.includes('NUSYUZ')) {
+      style = "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200/80 dark:border-amber-800/50";
+    } else if (upper.includes('RAYUAN')) {
+      style = "bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200/80 dark:border-purple-800/50";
+    } else if (upper.includes('PUSAKA') || upper.includes('FARAID') || upper.includes('WASIAT')) {
+      style = "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200/80 dark:border-emerald-800/50";
+    } else if (upper.includes('CERAI') || upper.includes('FASAKH') || upper.includes('KHULU') || upper.includes('TAALIK')) {
+      style = "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border-rose-200/80 dark:border-rose-800/50";
+    } else if (upper.includes('HADHANAH') || upper.includes('ANAK') || upper.includes('NAFKAH') || upper.includes('JAGAAN')) {
+      style = "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200/80 dark:border-blue-800/50";
+    } else if (upper.includes('POLIGAMI') || upper.includes('NIKAH') || upper.includes('WALI')) {
+      style = "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 border-indigo-200/80 dark:border-indigo-800/50";
+    } else if (upper.includes('HARTA') || upper.includes('SEPENCARIAN')) {
+      style = "bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300 border-cyan-200/80 dark:border-cyan-800/50";
+    } else if (upper.includes('JENAYAH')) {
+      style = "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300 border-red-200/80 dark:border-red-800/50";
+    }
+
+    return (
+      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold border ${style} shrink-0 tracking-tight`}>
+        {raw || 'Umum'}
+      </span>
+    );
+  };
+
   
   // Export functions removed
 
@@ -2892,96 +2943,36 @@ function AppContent() {
         {/* Top Bar */}
         <header className="h-16 border-b border-[#f4f4f5] dark:border-[#18181b] flex items-center justify-between px-3 sm:px-6 lg:px-8 shrink-0 print:hidden z-10 bg-[#ffffff] dark:bg-zinc-950">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-            {/* Mobile Logo */}
-            <div className="flex items-center gap-1.5 md:hidden shrink-0">
+            {/* Mobile Logo & Drawer Trigger */}
+            <div className="flex items-center gap-2 md:hidden shrink-0">
+              <button 
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="p-2 -ml-1 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg"
+                title="Buka Menu"
+                aria-label="Menu"
+              >
+                <Menu size={20} />
+              </button>
               <img src="https://arleta.site/interactivelink/2510/logo.png" className="h-7 w-auto" alt="Logo" />
             </div>
             <h1 className="text-sm sm:text-base md:text-lg font-semibold text-[#18181b] dark:text-white tracking-tight truncate">
               {activeTab === 'dashboard' ? 'Papan Pemuka' : activeTab === 'records' ? 'Rekod Pelanggan' : activeTab === 'settings' ? 'Tetapan' : 'Paparan Resit'}
             </h1>
           </div>
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
 
-            {user && (
-              <div className={"hidden sm:flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider border transition-colors " + (isOnline ? "bg-emerald-50 dark:bg-emerald-500/10 text-[#059669] dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50" : "bg-amber-50 dark:bg-amber-500/10 text-[#d97706] dark:text-amber-400 border-amber-200 dark:border-amber-800/50")}>
-                <div className={"w-1.5 h-1.5 rounded-full " + (isOnline ? "bg-emerald-500" : "bg-amber-500 animate-pulse")}></div>
-                {isOnline ? 'Auto-Sync' : 'Offline'}
-              </div>
-            )}
-            <button onClick={() => setDarkMode(!darkMode)}
-              className="p-2 text-[#a1a1aa] hover:text-[#18181b] dark:text-white dark:hover:text-white transition-colors rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800" title={darkMode ? "Tukar ke Mod Siang" : "Tukar ke Mod Gelap"}>
-              {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Tindakan Utama: Tambah Klien Baharu */}
+            <button 
+              onClick={() => setIsNewRecordModalOpen(true)}
+              className="p-2 sm:px-3 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium cursor-pointer flex items-center justify-center gap-1.5 shrink-0 transition-all shadow-xs active:scale-95"
+              title="Tambah Klien Baharu"
+              aria-label="Tambah Klien Baharu"
+            >
+              <Plus size={18} className="stroke-[2.5]" />
+              <span className="hidden sm:inline text-xs font-semibold">+ Klien</span>
             </button>
 
-            {!user ? (
-              <button 
-                onClick={handleLogin}
-                className="hidden sm:flex p-2 sm:px-3 sm:py-1.5 text-xs sm:text-sm bg-zinc-900 text-white dark:bg-[#ffffff] dark:text-[#18181b] rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 font-medium cursor-pointer items-center gap-1.5 shrink-0 transition-all">
-                <LogIn size={14} />
-                <span className="hidden sm:inline">Log Masuk</span>
-              </button>
-            ) : (
-              <button 
-                onClick={handleLogout}
-                className="hidden sm:flex p-2 sm:px-3 sm:py-1.5 text-xs sm:text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer items-center gap-1.5 shrink-0 transition-all">
-                <LogOut size={14} />
-                <span className="hidden sm:inline">Log Keluar</span>
-              </button>
-            )}
-            {isInstallable && (
-              <button 
-                onClick={handleInstallApp}
-                className="hidden sm:flex p-2 sm:px-3 sm:py-1.5 text-xs sm:text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer items-center gap-1.5 shrink-0 transition-all">
-                <Download size={14} />
-                <span className="hidden sm:inline">Pasang</span>
-              </button>
-            )}
-            {user && (
-              <button 
-                onClick={handleRefreshData}
-                disabled={isRefreshing}
-                className="hidden xl:flex p-2 sm:px-3 sm:py-1.5 text-xs sm:text-sm text-[#059669] dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-lg font-medium cursor-pointer items-center gap-1.5 disabled:opacity-50 shrink-0 transition-all"
-                title="Semak Semula Data dari Cloud"
-              >
-                {isRefreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                <span className="hidden sm:inline">Refresh</span>
-              </button>
-            )}
-            {user && (
-              <button 
-                onClick={handleBackupToCloud}
-                disabled={isBackingUp}
-                className="hidden xl:flex p-2 sm:px-3 sm:py-1.5 text-xs sm:text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg font-medium cursor-pointer items-center gap-1.5 disabled:opacity-50 shrink-0 transition-all"
-              >
-                {isBackingUp ? <Loader2 size={14} className="animate-spin" /> : <CloudUpload size={14} />}
-                <span className="hidden sm:inline">Backup</span>
-              </button>
-            )}
-            <button 
-              onClick={handleExportDataLengkapExcel}
-              className="hidden xl:flex p-2 sm:px-3 sm:py-1.5 items-center gap-1.5 text-xs sm:text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg font-medium cursor-pointer shrink-0 transition-all">
-              <Download size={14} />
-              <span className="hidden sm:inline">Eksport</span>
-            </button>
-            <button
-              onClick={handleExportDBToDrive}
-              className="hidden 2xl:flex p-2 sm:px-3 sm:py-1.5 items-center gap-1.5 text-xs sm:text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/20 rounded-lg font-medium cursor-pointer shrink-0 transition-all">
-              <Cloud size={14} />
-              <span className="hidden sm:inline">Drive JSON</span>
-            </button>
-            <button 
-              onClick={handleSyncGoogleSheets}
-              disabled={isSyncingSheets}
-              className="hidden 2xl:flex p-2 sm:px-3 sm:py-1.5 items-center gap-1.5 text-xs sm:text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-lg font-medium cursor-pointer disabled:opacity-50 shrink-0 transition-all">
-              {isSyncingSheets ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
-              <span className="hidden sm:inline">Sync Sheets</span>
-            </button>
-            <button 
-              onClick={handleDownloadTemplate}
-              className="hidden 2xl:flex p-2 sm:px-3 sm:py-1.5 items-center gap-1.5 text-xs sm:text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
-              <Download size={14} />
-              <span className="hidden sm:inline">Templat CSV</span>
-            </button>
+            {/* Input fail tersembunyi untuk Import CSV */}
             <input 
               type="file" 
               accept=".csv" 
@@ -2989,28 +2980,229 @@ function AppContent() {
               onChange={handleImportCSV} 
               className="hidden" 
             />
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className="hidden 2xl:flex p-2 sm:px-3 sm:py-1.5 items-center gap-1.5 text-xs sm:text-sm text-[#52525b] dark:text-[#a1a1aa] hover:text-[#18181b] dark:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium cursor-pointer shrink-0 transition-all">
-              <Upload size={14} />
-              <span className="hidden sm:inline">Import</span>
-            </button>
-            <button 
-              onClick={handleFormatData}
-              className="hidden 2xl:flex p-2 sm:px-3 sm:py-1.5 items-center gap-1.5 text-xs sm:text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/20 rounded-lg font-medium cursor-pointer shrink-0 transition-all">
-              <Trash2 size={14} />
-              <span className="hidden sm:inline">Format</span>
-            </button>
-            
-            {/* Prominent New Client Button in Header */}
-            <button 
-              onClick={() => setIsNewRecordModalOpen(true)}
-              className="px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold cursor-pointer flex items-center gap-1.5 shrink-0 transition-all shadow-sm hover:shadow active:scale-95 animate-subtle-pulse"
-              title="Tambah Klien Baharu (New Client)"
-            >
-              <Plus size={16} className="stroke-[2.5]" />
-              <span className="whitespace-nowrap font-semibold">+ Klien Baharu</span>
-            </button>
+
+            {/* Kelompok Fungsi Harian & Pengurusan */}
+            <div className="flex items-center bg-zinc-100/80 dark:bg-zinc-900/80 p-1 rounded-xl border border-zinc-200/50 dark:border-zinc-800/50 gap-0.5">
+              {/* Status Online / Offline */}
+              {user && (
+                <div 
+                  className={`p-1.5 flex items-center justify-center rounded-lg ${isOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500'}`}
+                  title={isOnline ? "Auto-Sync Aktif" : "Mod Luar Talian (Offline)"}
+                >
+                  <span className={`w-2 h-2 rounded-full ${isOnline ? "bg-emerald-500" : "bg-amber-500 animate-pulse"}`} />
+                </div>
+              )}
+
+              {/* Butang Refresh */}
+              {user && (
+                <button 
+                  onClick={handleRefreshData}
+                  disabled={isRefreshing}
+                  className="p-1.5 text-zinc-600 hover:text-emerald-600 dark:text-zinc-400 dark:hover:text-emerald-400 hover:bg-white dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                  title="Muat Semula Data dari Cloud"
+                  aria-label="Refresh Data"
+                >
+                  {isRefreshing ? <Loader2 size={17} className="animate-spin text-emerald-600" /> : <RefreshCw size={17} />}
+                </button>
+              )}
+
+              {/* Butang Sync Google Sheets */}
+              <button 
+                onClick={handleSyncGoogleSheets}
+                disabled={isSyncingSheets}
+                className="p-1.5 text-zinc-600 hover:text-emerald-600 dark:text-zinc-400 dark:hover:text-emerald-400 hover:bg-white dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                title="Segerakkan dengan Google Sheets"
+                aria-label="Sync Sheets"
+              >
+                {isSyncingSheets ? <Loader2 size={17} className="animate-spin text-emerald-600" /> : <Cloud size={17} />}
+              </button>
+
+              {/* MENU LUNGSUR: PENGURUSAN DATA (Backup, Eksport, Import, CSV, Format) */}
+              <div className="relative" ref={dataMenuRef}>
+                <button 
+                  onClick={() => setIsDataMenuOpen(!isDataMenuOpen)}
+                  className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                    isDataMenuOpen
+                      ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-white dark:hover:bg-zinc-800'
+                  }`}
+                  title="Pengurusan Data (Backup, Eksport, Import, CSV, Format)"
+                  aria-label="Pengurusan Data"
+                >
+                  <Database size={16} className="text-blue-600 dark:text-blue-400" />
+                  <span className="hidden md:inline font-semibold">Pengurusan Data</span>
+                  <ChevronDown size={13} className={`hidden md:inline transition-transform duration-200 ${isDataMenuOpen ? 'rotate-180' : ''}`} />
+                  <MoreVertical size={16} className="md:hidden" />
+                </button>
+
+                {/* Dropdown Menu Modal */}
+                <AnimatePresence>
+                  {isDataMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 4, scale: 0.96 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute right-0 mt-2 w-64 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/90 dark:border-zinc-800 shadow-xl p-1.5 z-50 overflow-hidden"
+                    >
+                      <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800/80 mb-1">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                          Pengurusan Data &amp; Fail
+                        </p>
+                      </div>
+
+                      {/* 1. Backup Cloud */}
+                      {user && (
+                        <button
+                          onClick={() => { setIsDataMenuOpen(false); handleBackupToCloud(); }}
+                          disabled={isBackingUp}
+                          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left hover:bg-zinc-100 dark:hover:bg-zinc-800/60 text-zinc-700 dark:text-zinc-200 transition-colors cursor-pointer group"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                            {isBackingUp ? <Loader2 size={16} className="animate-spin text-blue-600" /> : <CloudUpload size={16} />}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Simpan Sandaran (Backup)</p>
+                            <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Muat naik ke Cloud Firestore</p>
+                          </div>
+                        </button>
+                      )}
+
+                      {/* 2. Eksport Excel */}
+                      <button
+                        onClick={() => { setIsDataMenuOpen(false); handleExportDataLengkapExcel(); }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left hover:bg-zinc-100 dark:hover:bg-zinc-800/60 text-zinc-700 dark:text-zinc-200 transition-colors cursor-pointer group"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                          <Download size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Eksport Penuh ke Excel</p>
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Fail hamparan .xlsx lengkap</p>
+                        </div>
+                      </button>
+
+                      {/* 3. Import CSV */}
+                      <button
+                        onClick={() => { setIsDataMenuOpen(false); fileInputRef.current?.click(); }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left hover:bg-zinc-100 dark:hover:bg-zinc-800/60 text-zinc-700 dark:text-zinc-200 transition-colors cursor-pointer group"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                          <Upload size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Import Fail CSV</p>
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Masukkan rekod dari CSV</p>
+                        </div>
+                      </button>
+
+                      {/* 4. Templat CSV */}
+                      <button
+                        onClick={() => { setIsDataMenuOpen(false); handleDownloadTemplate(); }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left hover:bg-zinc-100 dark:hover:bg-zinc-800/60 text-zinc-700 dark:text-zinc-200 transition-colors cursor-pointer group"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                          <FileText size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Muat Turun Templat CSV</p>
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Format lajur piawai</p>
+                        </div>
+                      </button>
+
+                      {/* 5. Sandaran JSON Fail */}
+                      <button
+                        onClick={() => { setIsDataMenuOpen(false); handleExportDBToDrive(); }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left hover:bg-zinc-100 dark:hover:bg-zinc-800/60 text-zinc-700 dark:text-zinc-200 transition-colors cursor-pointer group"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                          <Save size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Sandaran Fail JSON</p>
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Muat turun fail JSON</p>
+                        </div>
+                      </button>
+
+                      {/* Divider */}
+                      <div className="my-1.5 border-t border-zinc-100 dark:border-zinc-800" />
+
+                      {/* 6. Kosongkan / Format Data */}
+                      <button
+                        onClick={() => { setIsDataMenuOpen(false); handleFormatData(); }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left hover:bg-red-50 dark:hover:bg-red-950/30 text-red-600 dark:text-red-400 transition-colors cursor-pointer group"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-red-100/70 dark:bg-red-950/50 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                          <Trash2 size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-red-600 dark:text-red-400">Kosongkan / Format Data</p>
+                          <p className="text-[10px] text-red-500/80 truncate">Padam semua rekod sistem</p>
+                        </div>
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Ikon Tetapan Pantas */}
+              <button 
+                onClick={() => setActiveTab('settings')}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  activeTab === 'settings'
+                    ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                    : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-white dark:hover:bg-zinc-800'
+                }`}
+                title="Tetapan Sistem"
+                aria-label="Tetapan"
+              >
+                <Settings size={17} />
+              </button>
+
+              {/* Tukar Tema (Siang / Gelap) */}
+              <button 
+                onClick={() => setDarkMode(!darkMode)}
+                className="p-1.5 text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-white dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+                title={darkMode ? "Tukar ke Mod Siang" : "Tukar ke Mod Gelap"}
+                aria-label="Tukar Tema"
+              >
+                {darkMode ? <Sun size={17} /> : <Moon size={17} />}
+              </button>
+
+              {/* PWA Pasang */}
+              {isInstallable && (
+                <button 
+                  onClick={handleInstallApp}
+                  className="p-1.5 text-zinc-600 hover:text-blue-600 dark:text-zinc-400 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+                  title="Pasang Aplikasi (PWA)"
+                  aria-label="Pasang Aplikasi"
+                >
+                  <Smartphone size={17} />
+                </button>
+              )}
+
+              {/* Profil Pengguna / Log Masuk / Log Keluar */}
+              {!user ? (
+                <button 
+                  onClick={handleLogin}
+                  className="p-1.5 text-zinc-700 hover:text-blue-600 dark:text-zinc-300 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                  title="Log Masuk Akaun Google"
+                  aria-label="Log Masuk"
+                >
+                  <LogIn size={17} />
+                  <span className="hidden sm:inline text-xs font-semibold">Log Masuk</span>
+                </button>
+              ) : (
+                <button 
+                  onClick={handleLogout}
+                  className="p-1.5 text-zinc-600 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 hover:bg-white dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+                  title={`Log Keluar (${user.email || 'Akaun'})`}
+                  aria-label="Log Keluar"
+                >
+                  <LogOut size={17} />
+                </button>
+              )}
+            </div>
           </div>
         </header>
 
@@ -3231,268 +3423,760 @@ function AppContent() {
                 transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 className="flex-1 flex flex-col overflow-hidden min-h-0"
               >
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-5 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-2 shrink-0 print:hidden">
-                  <div className="flex flex-col gap-2 p-4 bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7] dark:border-zinc-800 rounded-xl shadow-sm hover:shadow-md transition-shadow">
+                {/* Dashboard Header Bar & Device Mode Switcher */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 pb-3 shrink-0 print:hidden border-b border-zinc-100 dark:border-zinc-800/60 bg-white/50 dark:bg-zinc-950/50">
+                  <div>
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center shrink-0">
-                        <FileText size={14} className="text-blue-600 dark:text-blue-400" />
-                      </div>
-                      <div className="text-[10px] font-bold tracking-widest uppercase text-zinc-600 dark:text-zinc-300 truncate">Jumlah Kes</div>
+                      <h2 className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white tracking-tight">
+                        Papan Pemuka Kes
+                      </h2>
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 border border-blue-200/50 dark:border-blue-900/50">
+                        HAIRI MUSTAFA ASSOCIATES
+                      </span>
                     </div>
-                    <div className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">{stats.totalKes}</div>
-                  </div>
-                  
-                  <div className="flex flex-col gap-2 p-4 bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7] dark:border-zinc-800 rounded-xl shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center shrink-0">
-                        <Wallet size={14} className="text-emerald-600 dark:text-emerald-400" />
-                      </div>
-                      <div className="text-[10px] font-bold tracking-widest uppercase text-zinc-600 dark:text-zinc-300 truncate">Total Fee</div>
-                    </div>
-                    <div className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">{formatRM(stats.totalFee)}</div>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                      Susunan responsif serentak untuk paparan Windows (Desktop) dan Android (Mudah Alih)
+                    </p>
                   </div>
 
-                  <div className="flex flex-col gap-2 p-4 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-[#ffffff] dark:bg-zinc-900 flex items-center justify-center shrink-0 shadow-sm">
-                        <CreditCard size={14} className="text-amber-600 dark:text-amber-400" />
-                      </div>
-                      <div className="text-[10px] font-bold tracking-widest uppercase text-amber-800 dark:text-amber-300 truncate">Baki Fee Terkini</div>
-                    </div>
-                    <div className="text-2xl sm:text-3xl font-bold tracking-tight text-amber-800 dark:text-amber-300 mt-1">{formatRM(stats.totalBakiTerkini)}</div>
+                  {/* Device Mode Switcher */}
+                  <div className="flex items-center bg-zinc-100 dark:bg-zinc-900 p-1 rounded-xl border border-zinc-200/60 dark:border-zinc-800/60 self-start sm:self-auto shadow-xs">
+                    <button
+                      onClick={() => setDashboardViewMode('dual')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        dashboardViewMode === 'dual'
+                          ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                          : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                      }`}
+                      title="Paparan Serentak (Windows & Android)"
+                    >
+                      <Columns size={15} />
+                      <span className="hidden sm:inline">Paparan Serentak</span>
+                      <span className="sm:hidden">Serentak</span>
+                    </button>
+                    <button
+                      onClick={() => setDashboardViewMode('windows')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        dashboardViewMode === 'windows'
+                          ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                          : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                      }`}
+                      title="Paparan Windows Sahaja"
+                    >
+                      <Monitor size={15} />
+                      <span className="hidden sm:inline">Windows (Desktop)</span>
+                      <span className="sm:hidden">Windows</span>
+                    </button>
+                    <button
+                      onClick={() => setDashboardViewMode('android')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        dashboardViewMode === 'android'
+                          ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                          : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                      }`}
+                      title="Paparan Android Sahaja"
+                    >
+                      <Smartphone size={15} />
+                      <span className="hidden sm:inline">Android (Mobile)</span>
+                      <span className="sm:hidden">Android</span>
+                    </button>
                   </div>
+                </div>
 
-                  <div className="flex flex-col gap-2 p-4 bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7] dark:border-zinc-800 rounded-xl shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-teal-50 dark:bg-teal-500/10 flex items-center justify-center shrink-0">
-                        <Car size={14} className="text-teal-600 dark:text-teal-400" />
-                      </div>
-                      <div className="text-[10px] font-bold tracking-widest uppercase text-zinc-600 dark:text-zinc-300 truncate">Baki Mileage</div>
-                    </div>
-                    <div className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">{formatRM(stats.totalMileage)}</div>
-                  </div>
+                {/* Dashboard Body Scroll Area */}
+                <div className="flex-1 px-4 sm:px-6 md:px-8 py-5 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto">
+                  {/* MAIN RESPONSIVE CONTAINER (DUAL / WINDOWS / ANDROID) */}
+                  <div className={`w-full ${dashboardViewMode === 'dual' ? 'grid grid-cols-1 2xl:grid-cols-12 gap-6 items-start' : ''}`}>
+                    
+                    {/* ========================================================
+                        BAHAGIAN KIRI: PAPARAN WINDOWS (GRID 3-LAJUR)
+                        - Panel sisi kiri yang ringkas
+                        - Grid 2x2 untuk empat kad data utama (tunggakan di bawah)
+                        - Lajur kanan yang menggabungkan senarai kes terkini & carta bar
+                       ======================================================== */}
+                    {(dashboardViewMode === 'dual' || dashboardViewMode === 'windows') && (
+                      <div className={`${dashboardViewMode === 'dual' ? '2xl:col-span-8 flex flex-col gap-4' : 'w-full flex flex-col gap-4'}`}>
+                        {dashboardViewMode === 'dual' && (
+                          <div className="flex items-center justify-between px-1 pb-1">
+                            <span className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-2">
+                              <Monitor size={16} className="text-blue-600 dark:text-blue-400" />
+                              Paparan Windows (3-Lajur)
+                            </span>
+                            <span className="text-[11px] text-zinc-400 font-medium">Desktop Workplace</span>
+                          </div>
+                        )}
 
-                  <div className="flex flex-col gap-2 p-4 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl shadow-sm hover:shadow-md transition-shadow lg:col-span-1 md:col-span-3 sm:col-span-2 col-span-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-[#ffffff] dark:bg-zinc-900 flex items-center justify-center shrink-0 shadow-sm">
-                          <AlertTriangle size={14} className="text-red-600 dark:text-red-400" />
+                        {/* WINDOWS 3-COLUMN GRID */}
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4.5 items-start">
+                          
+                          {/* LAJUR 1: PANEL SISI KIRI YANG RINGKAS (col-span-12 md:col-span-3) */}
+                          <div className="md:col-span-3 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60 p-4 shadow-xs flex flex-col gap-4">
+                            {/* Firm Identity & Logo */}
+                            <div className="flex items-center gap-3 pb-3 border-b border-zinc-100 dark:border-zinc-800/60">
+                              <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-sm shrink-0 border border-blue-100 dark:border-blue-900/40 shadow-xs">
+                                HM
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-zinc-900 dark:text-white truncate uppercase tracking-tight">
+                                  HAIRI MUSTAFA
+                                </p>
+                                <p className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold truncate uppercase">
+                                  ASSOCIATES
+                                </p>
+                                <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">
+                                  Peguam Syarie
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Compact Navigation Items */}
+                            <div className="space-y-1">
+                              <span className="text-[10px] uppercase font-bold tracking-widest text-zinc-400 dark:text-zinc-500 px-2 block mb-1">
+                                Navigasi Pantas
+                              </span>
+                              <button 
+                                onClick={() => setActiveTab('dashboard')}
+                                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 transition-colors"
+                              >
+                                <PieChart size={17} />
+                                <span>Papan Pemuka</span>
+                              </button>
+                              <button 
+                                onClick={() => setActiveTab('records')}
+                                className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-white transition-colors"
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0 truncate">
+                                  <Users size={17} />
+                                  <span className="truncate">Rekod Pelanggan</span>
+                                </div>
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                                  {filteredRecords.length}
+                                </span>
+                              </button>
+                              <button 
+                                onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }}
+                                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-white transition-colors"
+                              >
+                                <FileText size={17} />
+                                <span>Paparan Resit</span>
+                              </button>
+                              <button 
+                                onClick={() => setActiveTab('settings')}
+                                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-white transition-colors"
+                              >
+                                <Settings size={17} />
+                                <span>Tetapan</span>
+                              </button>
+                            </div>
+
+                              {/* Ringkasan Mileage & Status */}
+                            <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800/60 space-y-2">
+                              <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200/50 dark:border-zinc-800/60 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Car size={16} className="text-zinc-500 dark:text-zinc-400" />
+                                  <span className="text-[11px] font-medium text-zinc-700 dark:text-zinc-300">Baki Mileage</span>
+                                </div>
+                                <span className="text-xs font-bold text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalMileage)}</span>
+                              </div>
+
+                              <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 flex items-center justify-between">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                                  <span className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">Status Sistem</span>
+                                </div>
+                                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Aktif</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* LAJUR 2: GRID 2x2 EMPAT KAD DATA UTAMA (TUNGGAKAN DI BAWAH) (col-span-12 md:col-span-5) */}
+                          <div className="md:col-span-5 flex flex-col gap-4">
+                            {/* Grid 2x2 for Four Main Data Cards */}
+                            <div className="grid grid-cols-2 gap-3.5">
+                              {/* 1. Jumlah Kes (Atas Kiri) */}
+                              <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 shadow-xs hover:shadow transition-all flex flex-col justify-between h-[118px]">
+                                <div>
+                                  <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                    Jumlah Kes
+                                  </span>
+                                </div>
+                                <div>
+                                  <p className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">
+                                    {stats.totalKes}
+                                  </p>
+                                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+                                    Kes Berdaftar
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* 2. Total Fee (Atas Kanan) */}
+                              <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 shadow-xs hover:shadow transition-all flex flex-col justify-between h-[118px]">
+                                <div>
+                                  <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                    Total Fee
+                                  </span>
+                                </div>
+                                <div>
+                                  <p className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">
+                                    {formatRM(stats.totalFee)}
+                                  </p>
+                                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+                                    Nilai Keseluruhan
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* 3. Baki Fee Terkini (Bawah Kiri) */}
+                              <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 shadow-xs hover:shadow transition-all flex flex-col justify-between h-[118px]">
+                                <div>
+                                  <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                    Baki Terkini
+                                  </span>
+                                </div>
+                                <div>
+                                  <p className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">
+                                    {formatRM(stats.totalBakiTerkini)}
+                                  </p>
+                                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+                                    Belum Selesai
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* 4. Tunggakan - DIPINDAHKAN KE BAWAH! (Bawah Kanan) - MERAH SAHAJA */}
+                              <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-red-200/90 dark:border-red-900/60 shadow-xs hover:shadow transition-all flex flex-col justify-between h-[118px]">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-semibold uppercase tracking-wider text-red-600 dark:text-red-400">
+                                    Tunggakan
+                                  </span>
+                                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-400">
+                                    {stats.totalOverdueCases} Kes
+                                  </span>
+                                </div>
+                                <div>
+                                  <p className="text-xl sm:text-2xl font-bold tracking-tight text-red-600 dark:text-red-400 tabular-nums">
+                                    {formatRM(stats.totalOverdueAmount)}
+                                  </p>
+                                  <p className="text-[10px] text-red-500/80 dark:text-red-400/80 mt-0.5">
+                                    &gt;{overdueDays} Hari Tanpa Bayaran
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Tindakan Segera & Bayaran Pantas */}
+                            <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 shadow-xs flex flex-col gap-3">
+                              <div className="flex items-center justify-between">
+                                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
+                                  <Zap size={16} className="text-blue-500" />
+                                  Tindakan Segera
+                                </h3>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2.5">
+                                <button
+                                  onClick={() => setIsNewRecordModalOpen(true)}
+                                  className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 hover:bg-blue-50 dark:hover:bg-blue-950/30 hover:border-blue-200 dark:hover:border-blue-900/40 border border-zinc-200/50 dark:border-zinc-800/60 transition-all text-left flex items-center gap-3 cursor-pointer group"
+                                >
+                                  <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                    <Plus size={18} />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 truncate">+ Klien Baharu</p>
+                                    <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Daftar rekod</p>
+                                  </div>
+                                </button>
+
+                                <button
+                                  onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); }}
+                                  className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 hover:border-emerald-200 dark:hover:border-emerald-900/40 border border-zinc-200/50 dark:border-zinc-800/60 transition-all text-left flex items-center gap-3 cursor-pointer group"
+                                >
+                                  <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                    <CreditCard size={18} />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 truncate">Paparan Resit</p>
+                                    <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Resit am</p>
+                                  </div>
+                                </button>
+                              </div>
+
+                              {/* Bayaran Segera Quick Buttons */}
+                              <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/60">
+                                <p className="text-[10px] uppercase font-semibold text-zinc-400 dark:text-zinc-500 mb-2">
+                                  Bayaran Pantas (Pelanggan Aktif Terkini)
+                                </p>
+                                <div className="grid grid-cols-4 gap-1.5">
+                                  {['50', '100', '200', '500'].map(amount => (
+                                    <button
+                                      key={amount}
+                                      onClick={() => handleDirectPay(amount)}
+                                      className="py-1.5 bg-zinc-100 hover:bg-emerald-50 dark:bg-zinc-800/70 dark:hover:bg-emerald-950/30 text-zinc-700 hover:text-emerald-700 dark:text-zinc-300 dark:hover:text-emerald-400 rounded-lg text-xs font-bold transition-all text-center"
+                                    >
+                                      RM{amount}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* LAJUR 3: LAJUR KANAN MENGGABUNGKAN SENARAI KES TERKINI & CARTA BAR (col-span-12 md:col-span-4) */}
+                          <div className="md:col-span-4 flex flex-col gap-4">
+                            {/* Senarai Kes Terkini */}
+                            <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 shadow-xs flex flex-col">
+                              <div className="flex items-center justify-between mb-3 pb-2 border-b border-zinc-100 dark:border-zinc-800/60">
+                                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-200 flex items-center gap-2">
+                                  <Clock size={16} className="text-blue-500" />
+                                  Kes Terkini
+                                </h3>
+                                <button 
+                                  onClick={() => setActiveTab('records')}
+                                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                                >
+                                  Lihat Semua
+                                </button>
+                              </div>
+
+                              <div className="space-y-2.5">
+                                {filteredRecords.slice(0, 4).map(record => (
+                                  <div 
+                                    key={record.id} 
+                                    onClick={() => setStatementRecord(record)}
+                                    className="p-2.5 rounded-xl bg-zinc-50/70 dark:bg-zinc-800/40 hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-all flex items-center justify-between cursor-pointer group"
+                                  >
+                                    <div className="min-w-0 pr-2">
+                                      <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                                        {record.nama}
+                                      </p>
+                                      <div className="flex items-center gap-1.5 mt-1">
+                                        {getKesBadge(record.kes)}
+                                        <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                                          &middot; {formatDateDMY(record.tarikh)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                      <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 tabular-nums">
+                                        {formatRM(record.bakiFeeTerkini)}
+                                      </p>
+                                      <p className="text-[9px] uppercase tracking-wider text-zinc-400">
+                                        Baki
+                                      </p>
+                                    </div>
+                                  </div>
+                                ))}
+                                {filteredRecords.length === 0 && (
+                                  <p className="text-xs text-zinc-400 text-center py-4">Tiada rekod kes ditemui.</p>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Carta Bar (Baki Fee Mengikut Kes) */}
+                            <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 shadow-xs flex flex-col">
+                              <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-200 flex items-center gap-2">
+                                  <PieChart size={16} className="text-blue-500" />
+                                  Baki Fee Mengikut Kes
+                                </h3>
+                              </div>
+                              <div className="h-44 w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <BarChart data={chartData.slice(0, 5)} margin={{ top: 10, right: 5, left: -15, bottom: 20 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" strokeOpacity={0.4} />
+                                    <XAxis 
+                                      dataKey="name" 
+                                      axisLine={false}
+                                      tickLine={false}
+                                      tick={{ fontSize: 9, fill: '#71717a' }}
+                                      dy={8}
+                                      interval={0}
+                                      angle={-25}
+                                      textAnchor="end"
+                                    />
+                                    <YAxis 
+                                      axisLine={false}
+                                      tickLine={false}
+                                      tick={{ fontSize: 9, fill: '#71717a' }}
+                                      tickFormatter={(val) => `${val >= 1000 ? (val/1000).toFixed(0) + 'k' : val}`}
+                                    />
+                                    <Tooltip 
+                                      cursor={{ fill: 'rgba(59, 130, 246, 0.05)' }}
+                                      contentStyle={{ borderRadius: '10px', fontSize: '11px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
+                                      formatter={(value: number) => [`RM ${value}`, 'Baki Fee']}
+                                    />
+                                    <Bar dataKey="baki" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} />
+                                  </BarChart>
+                                </ResponsiveContainer>
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-[10px] font-bold tracking-widest uppercase text-red-800 dark:text-red-300 truncate">Tunggakan</div>
                       </div>
-                      <div className="text-[10px] font-bold bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400 px-2 py-0.5 rounded-full">{stats.totalOverdueCases} Kes</div>
-                    </div>
-                    <div className="text-2xl sm:text-3xl font-bold tracking-tight text-red-800 dark:text-red-300 mt-1">{formatRM(stats.totalOverdueAmount)}</div>
+                    )}
+
+                    {/* ========================================================
+                        BAHAGIAN KANAN: PAPARAN ANDROID (LINEAR & TUMPUK)
+                        - Panel sisi yang boleh diruntuhkan (collapsible sidebar)
+                        - Barisan kad data tunggal yang boleh dileret secara mendatar
+                        - Senarai kes terkini di bawahnya secara linear dan tumpuk
+                       ======================================================== */}
+                    {(dashboardViewMode === 'dual' || dashboardViewMode === 'android') && (
+                      <div className={`${dashboardViewMode === 'dual' ? '2xl:col-span-4 flex flex-col gap-4' : 'w-full max-w-lg mx-auto flex flex-col gap-4'}`}>
+                        {dashboardViewMode === 'dual' && (
+                          <div className="flex items-center justify-between px-1 pb-1">
+                            <span className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-2">
+                              <Smartphone size={16} className="text-emerald-600 dark:text-emerald-400" />
+                              Paparan Android (Linear &amp; Tumpuk)
+                            </span>
+                            <span className="text-[11px] text-zinc-400 font-medium">Mobile Device</span>
+                          </div>
+                        )}
+
+                        {/* Android Device Mockup Frame Container */}
+                        <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-md overflow-hidden flex flex-col relative">
+                          {/* Android Status Bar */}
+                          <div className="h-6 bg-zinc-100/70 dark:bg-zinc-800/70 px-4 flex items-center justify-between text-[10px] text-zinc-500 dark:text-zinc-400 shrink-0 font-sans border-b border-zinc-200/40 dark:border-zinc-800/40">
+                            <span>09:41</span>
+                            <div className="w-12 h-3 rounded-full bg-zinc-300/60 dark:bg-zinc-700/60 mx-auto" />
+                            <div className="flex items-center gap-1.5">
+                              <span>LTE</span>
+                              <div className="w-2.5 h-2 rounded-xs border border-zinc-400 dark:border-zinc-500">
+                                <div className="w-1.5 h-full bg-emerald-500" />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Android App Bar with Collapsible Sidebar Trigger */}
+                          <div className="h-14 px-4 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800/60 flex items-center justify-between shrink-0">
+                            <div className="flex items-center gap-2.5">
+                              <button
+                                onClick={() => setIsAndroidSidebarOpen(!isAndroidSidebarOpen)}
+                                className="p-2 rounded-xl text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                title="Panel Sisi Boleh Diruntuhkan (Android Menu)"
+                                aria-label="Menu Android"
+                              >
+                                <Menu size={20} />
+                              </button>
+                              <div>
+                                <h4 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-tight">
+                                  HAIRI MUSTAFA
+                                </h4>
+                                <p className="text-[9px] text-zinc-500 dark:text-zinc-400">Pengurusan Kes Android</p>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => setIsNewRecordModalOpen(true)}
+                              className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs active:scale-95 transition-transform"
+                              title="Tambah Klien"
+                            >
+                              <Plus size={16} className="stroke-[2.5]" />
+                            </button>
+                          </div>
+
+                          {/* Panel Sisi Boleh Diruntuhkan (Collapsible Android Sidebar Drawer) */}
+                          <AnimatePresence>
+                            {isAndroidSidebarOpen && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.25 }}
+                                className="overflow-hidden bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200/60 dark:border-zinc-800/60"
+                              >
+                                <div className="p-4 flex flex-col gap-3">
+                                  <div className="flex items-center justify-between pb-2 border-b border-zinc-200/50 dark:border-zinc-800/50">
+                                    <div className="flex items-center gap-2.5">
+                                      <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 font-bold text-xs flex items-center justify-center">
+                                        HM
+                                      </div>
+                                      <div>
+                                        <p className="text-xs font-bold text-zinc-900 dark:text-white">Hairi Mustafa</p>
+                                        <p className="text-[10px] text-zinc-500">Peguam Syarie</p>
+                                      </div>
+                                    </div>
+                                    <button
+                                      onClick={() => setIsAndroidSidebarOpen(false)}
+                                      className="p-1 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+                                    >
+                                      <X size={16} />
+                                    </button>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    <button
+                                      onClick={() => { setActiveTab('dashboard'); setIsAndroidSidebarOpen(false); }}
+                                      className="flex items-center gap-2 p-2 rounded-xl text-xs font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400"
+                                    >
+                                      <PieChart size={16} />
+                                      <span>Papan Pemuka</span>
+                                    </button>
+                                    <button
+                                      onClick={() => { setActiveTab('records'); setIsAndroidSidebarOpen(false); }}
+                                      className="flex items-center gap-2 p-2 rounded-xl text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                    >
+                                      <Users size={16} />
+                                      <span>Rekod Kes</span>
+                                    </button>
+                                    <button
+                                      onClick={() => { setActiveTab('standalone'); setStandaloneInitialRecord(null); setIsAndroidSidebarOpen(false); }}
+                                      className="flex items-center gap-2 p-2 rounded-xl text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                    >
+                                      <FileText size={16} />
+                                      <span>Resit Am</span>
+                                    </button>
+                                    <button
+                                      onClick={() => { setActiveTab('settings'); setIsAndroidSidebarOpen(false); }}
+                                      className="flex items-center gap-2 p-2 rounded-xl text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                    >
+                                      <Settings size={16} />
+                                      <span>Tetapan</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+
+                          {/* Android Content: Linear & Stacked */}
+                          <div className="p-4 flex flex-col gap-4">
+                            {/* 1. BARISAN KAD DATA TUNGGAL YANG BOLEH DILERET SECARA MENDATAR */}
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 dark:text-zinc-500">
+                                  Kad Data Utama (Leret Mendatar)
+                                </span>
+                                <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                                  &larr; Leret &rarr;
+                                </span>
+                              </div>
+
+                              {/* Single Horizontal Swipeable Row */}
+                              <div className="flex overflow-x-auto gap-3 pb-2 pt-0.5 no-scrollbar snap-x scroll-smooth">
+                                {/* Kad 1: Jumlah Kes */}
+                                <div className="min-w-[160px] h-[105px] p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-800/70 shrink-0 snap-start flex flex-col justify-between">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Jumlah Kes</span>
+                                  <div>
+                                    <p className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">{stats.totalKes}</p>
+                                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Kes Berdaftar</p>
+                                  </div>
+                                </div>
+
+                                {/* Kad 2: Total Fee */}
+                                <div className="min-w-[160px] h-[105px] p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-800/70 shrink-0 snap-start flex flex-col justify-between">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Total Fee</span>
+                                  <div>
+                                    <p className="text-lg font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalFee)}</p>
+                                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Nilai Keseluruhan</p>
+                                  </div>
+                                </div>
+
+                                {/* Kad 3: Baki Terkini */}
+                                <div className="min-w-[160px] h-[105px] p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-800/70 shrink-0 snap-start flex flex-col justify-between">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Baki Terkini</span>
+                                  <div>
+                                    <p className="text-lg font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalBakiTerkini)}</p>
+                                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Belum Selesai</p>
+                                  </div>
+                                </div>
+
+                                {/* Kad 4: Tunggakan - MERAH SAHAJA */}
+                                <div className="min-w-[165px] h-[105px] p-3.5 rounded-2xl bg-red-50/40 dark:bg-red-950/20 border border-red-200/80 dark:border-red-900/50 shrink-0 snap-start flex flex-col justify-between">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400">Tunggakan</span>
+                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/60 text-red-700 dark:text-red-300">
+                                      {stats.totalOverdueCases} Kes
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <p className="text-lg font-bold tracking-tight text-red-600 dark:text-red-400 tabular-nums">{formatRM(stats.totalOverdueAmount)}</p>
+                                    <p className="text-[10px] text-red-500/80 dark:text-red-400/80 mt-0.5">&gt;{overdueDays} Hari</p>
+                                  </div>
+                                </div>
+
+                                {/* Kad 5: Mileage */}
+                                <div className="min-w-[160px] h-[105px] p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-800/70 shrink-0 snap-start flex flex-col justify-between">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Baki Mileage</span>
+                                  <div>
+                                    <p className="text-lg font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalMileage)}</p>
+                                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Tuntutan</p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 2. SENARAI KES TERKINI DI BAWAH KAD (LINEAR & TUMPUK) */}
+                            <div className="rounded-2xl bg-zinc-50/60 dark:bg-zinc-800/40 border border-zinc-200/50 dark:border-zinc-800/60 p-3.5">
+                              <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-zinc-200/40 dark:border-zinc-800/40">
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-200 flex items-center gap-1.5">
+                                  <Clock size={15} className="text-blue-500" />
+                                  Senarai Kes Terkini
+                                </h4>
+                                <button
+                                  onClick={() => setActiveTab('records')}
+                                  className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold"
+                                >
+                                  Semua ({filteredRecords.length})
+                                </button>
+                              </div>
+
+                              <div className="space-y-2">
+                                {filteredRecords.slice(0, 5).map(record => (
+                                  <div
+                                    key={record.id}
+                                    onClick={() => setStatementRecord(record)}
+                                    className="p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200/40 dark:border-zinc-800/50 flex items-center justify-between active:scale-[0.99] transition-transform cursor-pointer"
+                                  >
+                                    <div className="min-w-0 pr-2">
+                                      <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate">{record.nama}</p>
+                                      <div className="flex items-center gap-1.5 mt-1">
+                                        {getKesBadge(record.kes)}
+                                        <span className="text-[10px] text-zinc-400 dark:text-zinc-500">&middot; {formatDateDMY(record.tarikh)}</span>
+                                      </div>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                      <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 tabular-nums">{formatRM(record.bakiFeeTerkini)}</p>
+                                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${record.bakiFeeTerkini <= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                        {record.bakiFeeTerkini <= 0 ? 'Selesai' : 'Baki'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                                {filteredRecords.length === 0 && (
+                                  <p className="text-xs text-zinc-400 text-center py-4">Tiada rekod terkini.</p>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* 3. TINDAKAN PANTAS & BAYARAN PANTAS MOBILE */}
+                            <div className="rounded-2xl bg-zinc-50/60 dark:bg-zinc-800/40 border border-zinc-200/50 dark:border-zinc-800/60 p-3.5 space-y-2.5">
+                              <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 dark:text-zinc-500 block">
+                                Bayaran Pantas Android
+                              </span>
+                              <div className="grid grid-cols-4 gap-1.5">
+                                {['50', '100', '200', '500'].map(amount => (
+                                  <button
+                                    key={amount}
+                                    onClick={() => handleDirectPay(amount)}
+                                    className="py-1.5 bg-white dark:bg-zinc-900 hover:bg-emerald-50 text-zinc-700 dark:text-zinc-200 rounded-lg text-xs font-bold border border-zinc-200/40 dark:border-zinc-800/40 text-center"
+                                  >
+                                    RM{amount}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-                <div className={`flex-1 px-4 sm:px-6 md:px-8 pb-20 sm:pb-6 md:pb-8 min-h-0 flex flex-col gap-6 print:hidden overflow-y-auto`}>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 shrink-0 w-full">
-                {/* Recent Cases */}
-                <div className="bg-[#ffffff] dark:bg-zinc-900 border border-[#f4f4f5]  rounded-xl shadow-sm p-6 overflow-hidden">
-                   <div className="flex justify-between items-center mb-6">
-                     <h3 className="text-sm font-semibold text-[#27272a] dark:text-[#e4e4e7] tracking-tight flex items-center gap-2">
-                       <Clock size={16} className="text-blue-500" />
-                       Kes Terkini
-                     </h3>
-                     <button 
-                       onClick={() => { setActiveTab('records'); setIsMobileMenuOpen(false); }}
-                       className="text-xs text-blue-600 hover:text-blue-700 font-medium cursor-pointer"
-                     >
-                       Lihat Semua
-                     </button>
-                   </div>
-                   <div className="space-y-4">
-                     {filteredRecords.slice(0, 5).map(record => (
-                       <div key={record.id} className="flex justify-between items-center py-3 border-b border-[#f4f4f5]  last:border-0 last:pb-0">
-                         <div>
-                           <p className="font-medium text-sm text-[#27272a] dark:text-[#e4e4e7]">{record.nama}</p>
-                           <p className="text-xs text-[#71717a] dark:text-[#a1a1aa] mt-0.5">{record.kes} &middot; {formatDateDMY(record.tarikh)}</p>
-                         </div>
-                         <div className="text-right">
-                           <p className="font-mono text-sm font-semibold text-[#27272a] dark:text-[#e4e4e7]">{formatRM(record.bakiFeeTerkini)}</p>
-                           <p className="text-[10px] text-[#71717a] dark:text-[#a1a1aa] uppercase tracking-wider">Baki Fee</p>
-                         </div>
-                       </div>
-                     ))}
-                     {filteredRecords.length === 0 && (
-                       <p className="text-sm text-[#71717a] dark:text-[#a1a1aa] text-center py-4">Tiada rekod buat masa ini.</p>
-                     )}
-                   </div>
-                </div>
 
-                {/* Quick Actions */}
-                <div className="bg-[#ffffff] dark:bg-zinc-900 border border-[#f4f4f5]  rounded-xl shadow-sm p-6 overflow-hidden">
-                   <h3 className="text-sm font-semibold text-[#27272a] dark:text-[#e4e4e7] tracking-tight flex items-center gap-2 mb-6">
-                     <PieChart size={16} className="text-blue-500" />
-                     Baki Fee Mengikut Kes
-                   </h3>
-                   <div className="h-64 w-full">
-                     <ResponsiveContainer width="100%" height="100%">
-                       <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
-                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
-                         <XAxis 
-                           dataKey="name" 
-                           axisLine={false}
-                           tickLine={false}
-                           tick={{ fontSize: 10, fill: '#71717a' }}
-                           dy={10}
-                           interval={0}
-                           angle={-45}
-                           textAnchor="end"
-                         />
-                         <YAxis 
-                           axisLine={false}
-                           tickLine={false}
-                           tick={{ fontSize: 10, fill: '#71717a' }}
-                           tickFormatter={(value) => `RM${value}`}
-                         />
-                         <Tooltip 
-                           cursor={{ fill: '#f4f4f5' }}
-                           contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                           formatter={(value: number) => [`RM ${value}`, 'Baki Fee']}
-                         />
-                         <Bar dataKey="baki" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={32} />
-                       </BarChart>
-                     </ResponsiveContainer>
-                   </div>
-                </div>
+                  {/* SISTEM PERINGATAN BAKI TERTUNGGAK (FULL WIDTH TABLE) */}
+                  <div className="bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60 rounded-2xl shadow-xs p-5 overflow-hidden">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 pb-3 border-b border-zinc-100 dark:border-zinc-800/60">
+                      <div>
+                        <h3 className="text-sm font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
+                          <AlertTriangle size={18} className="text-amber-500" />
+                          Sistem Peringatan Baki Tertunggak
+                        </h3>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                          Pelanggan dengan baki tertunggak melebihi {overdueDays} hari
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400">Had Tempoh:</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="365"
+                          className="w-18 px-2 py-1 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs font-semibold bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-white text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          value={overdueDays}
+                          onChange={(e) => setOverdueDays(parseInt(e.target.value) || 30)}
+                        />
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400">Hari</span>
+                      </div>
+                    </div>
 
-                {/* Quick Actions */}
-                <div className="bg-[#ffffff] dark:bg-zinc-900 border border-[#f4f4f5]  rounded-xl shadow-sm p-6 overflow-hidden flex flex-col lg:col-span-2">
-                   <div className="flex justify-between items-center mb-6">
-                     <h3 className="text-sm font-semibold text-[#27272a] dark:text-[#e4e4e7] tracking-tight flex items-center gap-2">
-                       <Zap size={16} className="text-blue-500" />
-                       Tindakan Pantas
-                     </h3>
-                   </div>
-                   <div className="grid grid-cols-2 gap-3 sm:gap-4 flex-1">
-                     <button
-                       onClick={() => setIsNewRecordModalOpen(true)}
-                       className="p-5 rounded-xl border border-[#f4f4f5] dark:border-zinc-800 bg-[#fafafa]/50 dark:bg-zinc-900/50 hover:bg-[#fafafa] dark:hover:bg-zinc-800 transition-all text-left flex flex-col gap-4 group cursor-pointer h-full hover:shadow-md hover:-translate-y-1 animate-subtle-pulse"
-                     >
-                       <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-                         <Plus size={20} />
-                       </div>
-                       <div>
-                         <p className="font-semibold text-sm text-[#27272a] dark:text-[#e4e4e7]">+ Klien / Rekod Baharu</p>
-                         <p className="hidden sm:block text-[11px] text-[#71717a] dark:text-[#a1a1aa] mt-1 leading-relaxed">Daftar klien baharu dan butiran kes ke dalam sistem.</p>
-                       </div>
-                     </button>
-                     <button
-                       onClick={() => { { setActiveTab('standalone'); setIsMobileMenuOpen(false); }; setStandaloneInitialRecord(null); }}
-                       className="p-5 rounded-xl border border-[#f4f4f5]  bg-[#fafafa]/50 dark:bg-zinc-900/50 hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800 transition-colors text-left flex flex-col gap-4 group cursor-pointer h-full"
-                     >
-                       <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 text-[#059669] dark:text-emerald-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-                         <CreditCard size={20} />
-                       </div>
-                       <div>
-                         <p className="font-semibold text-sm text-[#27272a] dark:text-[#e4e4e7]">Paparan Resit</p>
-                         <p className="hidden sm:block text-[11px] text-[#71717a] dark:text-[#a1a1aa] mt-1 leading-relaxed">Jana resit pembayaran am tanpa memaut ke rekod kes sedia ada.</p>
-                       </div>
-                     </button>
-                   </div>
-                   
-                   <div className="mt-6 pt-6 border-t border-[#f4f4f5] ">
-                     <div className="flex items-center justify-between mb-3">
-                       <h4 className="text-[11px] font-semibold text-[#71717a] dark:text-[#a1a1aa] uppercase tracking-wider">Bayaran Segera (Pelanggan Aktif Terkini)</h4>
-                     </div>
-                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {['50', '100', '200', '500'].map(amount => (
-                          <button
-                            key={amount}
-                            onClick={() => handleDirectPay(amount)}
-                            className="py-2.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 rounded-lg text-sm font-bold hover:bg-emerald-100 dark:hover:bg-emerald-500/30 transition-colors shadow-sm"
-                          >
-                            RM{amount}
-                          </button>
-                        ))}
-                     </div>
-                   </div>
-                </div>
-              </div>
-              
-              {/* Peringatan Tunggakan Section */}
-              <div className="bg-[#ffffff] dark:bg-zinc-900 border border-[#f4f4f5]  rounded-xl shadow-sm p-6 overflow-hidden">
-                 <div className="flex justify-between items-center mb-6">
-                   <h3 className="text-sm font-semibold text-[#27272a] dark:text-[#e4e4e7] tracking-tight flex items-center gap-2">
-                     <AlertTriangle size={16} className="text-amber-500" />
-                     Sistem Peringatan Baki Tertunggak
-                   </h3>
-                 </div>
-                 <div className="overflow-x-auto">
-                    <table className="w-full text-left text-[13px] whitespace-nowrap">
-                      <thead className="bg-[#fafafa] dark:bg-zinc-900 text-[#71717a] dark:text-[#a1a1aa] uppercase text-[10px] font-bold tracking-wider">
-                        <tr>
-                          <th className="px-4 py-3 rounded-tl-lg">Nama Pelanggan</th>
-                          <th className="px-4 py-3">No. Telefon</th>
-                          <th className="px-4 py-3">Kategori Kes</th>
-                          <th className="px-4 py-3">Tarikh Terakhir Bayaran</th>
-                          <th className="px-4 py-3 text-right">Baki Fee</th>
-                          <th className="px-4 py-3 text-center rounded-tr-lg">Tindakan</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
-                        {(() => {
-                           const now = new Date().getTime();
-                           const overdueMs = overdueDays * 24 * 60 * 60 * 1000;
-                           const overdueRecords = filteredRecords
-                             .filter(r => {
-                               if (r.bakiFeeTerkini <= 0) return false;
-                               let lastDateStr = r.tarikh;
-                               if (r.paymentHistory && r.paymentHistory.length > 0) {
-                                 const sortedHistory = [...r.paymentHistory].sort((a: any, b: any) => parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime());
-                                 lastDateStr = sortedHistory[0].date;
-                               }
-                               const lastDate = parseDateObj(lastDateStr).getTime();
-                               return (now - lastDate) >= overdueMs;
-                             })
-                             .sort((a, b) => b.bakiFeeTerkini - a.bakiFeeTerkini);
-                             
-                           if (overdueRecords.length === 0) {
-                             return (
-                               <tr>
-                                 <td colSpan={5} className="px-4 py-8 text-center text-[#71717a] dark:text-[#a1a1aa]">Tiada tunggakan direkodkan.</td>
-                               </tr>
-                             );
-                           }
-                           
-                           return overdueRecords.map(r => {
-                             let lastPaymentDate = '-';
-                             if (r.paymentHistory && r.paymentHistory.length > 0) {
-                               const sortedHistory = [...r.paymentHistory].sort((a: any, b: any) => parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime());
-                               lastPaymentDate = formatDateDMY(sortedHistory[0].date);
-                             }
-                             return (
-                               <tr key={r.id} className="hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
-                                 <td className="px-4 py-3 font-medium text-[#27272a] dark:text-[#e4e4e7]">
-                                   <div className="flex items-center justify-between group">
-                                     <span>{r.nama}</span>
-                                     <button 
-                                       onClick={(e) => { e.stopPropagation(); setClientProfileName(r.nama); }}
-                                       className="text-[#a1a1aa] hover:text-blue-600 dark:hover:text-blue-400 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
-                                       title="Profil Pelanggan"
-                                     >
-                                       <Users size={14} />
-                                     </button>
-                                   </div>
-                                 </td>
-                                 <td className="px-4 py-3 text-[#52525b] dark:text-[#a1a1aa]">{r.telefon || '-'}</td>
-                                 <td className="px-4 py-3 text-[#52525b] dark:text-[#a1a1aa]">{r.kes}</td>
-                                 <td className="px-4 py-3 text-[#52525b] dark:text-[#a1a1aa]">{lastPaymentDate}</td>
-                                 <td className="px-4 py-3 text-right font-mono font-medium text-red-600 dark:text-red-400">{formatRM(r.bakiFeeTerkini)}</td>
-                                 <td className="px-4 py-3 text-center">
-                                   {r.telefon ? (
-                                      <span className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">{r.telefon}</span>
-                                   ) : <span className="text-[10px] text-[#a1a1aa]">Tiada No. Tel</span>}
-                                 </td>
-                               </tr>
-                             );
-                           });
-                        })()}
-                      </tbody>
-                    </table>
-                 </div>
-              </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-[13px] whitespace-nowrap">
+                        <thead className="bg-zinc-50 dark:bg-zinc-900/80 text-zinc-500 dark:text-zinc-400 uppercase text-[10px] font-bold tracking-wider">
+                          <tr>
+                            <th className="px-4 py-3 rounded-tl-xl">Nama Pelanggan</th>
+                            <th className="px-4 py-3">No. Telefon</th>
+                            <th className="px-4 py-3">Kategori Kes</th>
+                            <th className="px-4 py-3">Tarikh Terakhir Bayaran</th>
+                            <th className="px-4 py-3 text-right">Baki Fee</th>
+                            <th className="px-4 py-3 text-center rounded-tr-xl">Tindakan</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
+                          {(() => {
+                            const now = new Date().getTime();
+                            const overdueMs = overdueDays * 24 * 60 * 60 * 1000;
+                            const overdueRecords = filteredRecords
+                              .filter(r => {
+                                if (r.bakiFeeTerkini <= 0) return false;
+                                let lastDateStr = r.tarikh;
+                                if (r.paymentHistory && r.paymentHistory.length > 0) {
+                                  const sortedHistory = [...r.paymentHistory].sort((a: any, b: any) => parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime());
+                                  lastDateStr = sortedHistory[0].date;
+                                }
+                                const lastDate = parseDateObj(lastDateStr).getTime();
+                                return (now - lastDate) >= overdueMs;
+                              })
+                              .sort((a, b) => b.bakiFeeTerkini - a.bakiFeeTerkini);
+                              
+                            if (overdueRecords.length === 0) {
+                              return (
+                                <tr>
+                                  <td colSpan={6} className="px-4 py-8 text-center text-zinc-400">
+                                    Tiada tunggakan melepasi {overdueDays} hari direkodkan.
+                                  </td>
+                                </tr>
+                              );
+                            }
+                            
+                            return overdueRecords.map(r => {
+                              let lastPaymentDate = '-';
+                              if (r.paymentHistory && r.paymentHistory.length > 0) {
+                                const sortedHistory = [...r.paymentHistory].sort((a: any, b: any) => parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime());
+                                lastPaymentDate = formatDateDMY(sortedHistory[0].date);
+                              }
+                              return (
+                                <tr key={r.id} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/40 transition-colors">
+                                  <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100">
+                                    <div className="flex items-center justify-between group">
+                                      <span>{r.nama}</span>
+                                      <button 
+                                        onClick={(e) => { e.stopPropagation(); setClientProfileName(r.nama); }}
+                                        className="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
+                                        title="Profil Pelanggan"
+                                      >
+                                        <Users size={14} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{r.telefon || '-'}</td>
+                                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{r.kes}</td>
+                                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{lastPaymentDate}</td>
+                                  <td className="px-4 py-3 text-right font-mono font-bold text-red-600 dark:text-red-400">{formatRM(r.bakiFeeTerkini)}</td>
+                                  <td className="px-4 py-3 text-center">
+                                    <button
+                                      onClick={() => setStatementRecord(r)}
+                                      className="px-2.5 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 rounded-lg transition-colors"
+                                    >
+                                      Perincian
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            });
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -3571,22 +4255,32 @@ function AppContent() {
                       onChange={(e) => setSearchTerm(e.target.value)}
                     />
                   </div>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Filter size={14} className="text-[#a1a1aa]" />
+                  <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                    <div className="relative flex-1 sm:w-40">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Filter size={14} className="text-[#a1a1aa]" />
+                      </div>
+                      <select
+                        className="pl-9 pr-8 py-2 appearance-none text-sm border border-[#e4e4e7] rounded-lg w-full bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium text-[#3f3f46] dark:text-zinc-200 transition-all cursor-pointer"
+                        value={filterKes}
+                        onChange={(e) => setFilterKes(e.target.value)}
+                      >
+                        {uniqueKes.map(kes => (
+                          <option key={kes} value={kes}>{kes}</option>
+                        ))}
+                      </select>
+                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                        <ChevronDown size={14} className="text-[#a1a1aa]" />
+                      </div>
                     </div>
-                    <select
-                      className="pl-9 pr-8 py-2 appearance-none text-sm border border-[#e4e4e7]  rounded-lg w-full sm:w-40 bg-[#ffffff] dark:bg-zinc-950 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium text-[#3f3f46] dark:text-zinc-200  transition-all cursor-pointer"
-                      value={filterKes}
-                      onChange={(e) => setFilterKes(e.target.value)}
+                    <button
+                      type="button"
+                      onClick={() => setIsCategoryManagerOpen(true)}
+                      title="Urus Kategori Kes (Tukar Nama / Padam)"
+                      className="p-2 border border-[#e4e4e7] dark:border-zinc-800 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors flex items-center justify-center shrink-0 cursor-pointer"
                     >
-                      {uniqueKes.map(kes => (
-                        <option key={kes} value={kes}>{kes}</option>
-                      ))}
-                    </select>
-                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                      <ChevronDown size={14} className="text-[#a1a1aa]" />
-                    </div>
+                      <Folder size={16} />
+                    </button>
                   </div>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -3702,7 +4396,7 @@ function AppContent() {
                              </div>
                              
                              <div className="flex justify-between items-center mt-1">
-                               <p className="text-[#71717a] dark:text-[#a1a1aa] text-[11px] truncate">{record.kes}</p>
+                               <div className="truncate flex items-center gap-1.5">{getKesBadge(record.kes)}</div>
                                <span className="text-[#d97706] dark:text-amber-500 text-[11px] font-medium shrink-0">
                                  Mil: {formatRM(record.bakiMileage)}
                                </span>
@@ -3924,9 +4618,7 @@ function AppContent() {
   </div>
 </td>
                             <td className=" px-3 sm:px-4 py-3 border-r border-[#f4f4f5] /50">
-                              <span className="text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">
-                                {record.kes}
-                              </span>
+                              {getKesBadge(record.kes)}
                             </td>
                             <td className=" px-3 sm:px-4 py-1.5 border-r border-[#f4f4f5] /50" onClick={(e) => e.stopPropagation()}>
                               <input 
