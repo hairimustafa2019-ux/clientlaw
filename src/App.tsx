@@ -1369,6 +1369,61 @@ function AppContent() {
     document.body.removeChild(link);
   };
 
+  const handleDownloadPaymentsTemplate = () => {
+    const headers = [
+      'ID Pelanggan',
+      'Tarikh',
+      'Kaedah',
+      'Jumlah',
+      'Nota'
+    ];
+    const firstId = records.length > 0 ? records[0].id : '1';
+    const secondId = records.length > 1 ? records[1].id : (records.length > 0 ? records[0].id : '2');
+    
+    const example1 = [
+      firstId,
+      '15/01/2026',
+      'Transfer',
+      '500.00',
+      'Bayaran Bulanan Januari 2026'
+    ];
+    const example2 = [
+      firstId,
+      '15/02/2026',
+      'Transfer',
+      '500.00',
+      'Bayaran Bulanan Februari 2026'
+    ];
+    const example3 = [
+      secondId,
+      '20/01/2026',
+      'Tunai',
+      '300.00',
+      'Ansuran Fee Bulanan'
+    ];
+    const escapeCsvField = (field: string) => {
+      if (field.includes(',') || field.includes('"') || field.includes('\n')) {
+        return `"${field.replace(/"/g, '""')}"`;
+      }
+      return field;
+    };
+    const csvContent = '\uFEFF' + [
+      headers.map(escapeCsvField).join(','),
+      example1.map(escapeCsvField).join(','),
+      example2.map(escapeCsvField).join(','),
+      example3.map(escapeCsvField).join(',')
+    ].join('\n') + '\n';
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "template_bayaran_bulanan_pelanggan.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
 
   const handleImportCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -3448,12 +3503,26 @@ function AppContent() {
                           <FileText size={16} />
                         </div>
                         <div className="min-w-0">
-                          <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Muat Turun Templat CSV</p>
-                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Format lajur piawai</p>
+                          <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Templat Rekod Kes (CSV)</p>
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Format data kes & pelanggan</p>
                         </div>
                       </button>
 
-                      {/* 5. Sandaran JSON Fail */}
+                      {/* 5. Templat Bayaran Bulanan CSV */}
+                      <button
+                        onClick={() => { setIsDataMenuOpen(false); handleDownloadPaymentsTemplate(); }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left hover:bg-zinc-100 dark:hover:bg-zinc-800/60 text-zinc-700 dark:text-zinc-200 transition-colors cursor-pointer group"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                          <CreditCard size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Templat Bayaran Bulanan (CSV)</p>
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">Format rekod bayaran/ansuran</p>
+                        </div>
+                      </button>
+
+                      {/* 6. Sandaran JSON Fail */}
                       <button
                         onClick={() => { setIsDataMenuOpen(false); handleExportDBToDrive(); }}
                         className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left hover:bg-zinc-100 dark:hover:bg-zinc-800/60 text-zinc-700 dark:text-zinc-200 transition-colors cursor-pointer group"
@@ -3697,7 +3766,16 @@ function AppContent() {
                         <div className="p-2 bg-emerald-50 dark:bg-emerald-500/10 rounded-lg text-emerald-600 dark:text-emerald-400">
                           <FileText size={18} />
                         </div>
-                        <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Muat Turun Templat (CSV)</span>
+                        <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Muat Turun Templat Kes (CSV)</span>
+                      </div>
+                      <ChevronRight size={18} className="text-emerald-400" />
+                    </button>
+                    <button onClick={handleDownloadPaymentsTemplate} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#fafafa] dark:hoverdark:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-emerald-50 dark:bg-emerald-500/10 rounded-lg text-emerald-600 dark:text-emerald-400">
+                          <CreditCard size={18} />
+                        </div>
+                        <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Muat Turun Templat Bayaran Bulanan (CSV)</span>
                       </div>
                       <ChevronRight size={18} className="text-emerald-400" />
                     </button>
@@ -3797,13 +3875,7 @@ function AppContent() {
                             {/* Grid 2x2 for Four Main Data Cards */}
                             <div className="grid grid-cols-2 gap-4">
                               {/* 1. Jumlah Kes (Atas Kiri) */}
-                              <motion.div 
-                                initial={{ opacity: 0, y: 15 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.5, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}
-                                whileHover={{ scale: 1.02, y: -2 }}
-                                className="p-6 rounded-3xl bg-zinc-50 dark:bg-zinc-900/40 transition-shadow hover:shadow-lg hover:shadow-zinc-200/50 dark:hover:shadow-black/50 flex flex-col justify-between h-[160px]"
-                              >
+                              <div className="p-6 rounded-3xl bg-zinc-50 dark:bg-zinc-900/40 transition-all flex flex-col justify-between h-[160px]">
                                 <div>
                                   <span className="text-[11px] font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
                                     Jumlah Kes
@@ -3814,16 +3886,10 @@ function AppContent() {
                                     {stats.totalKes}
                                   </p>
                                 </div>
-                              </motion.div>
+                              </div>
 
                               {/* 2. Total Fee (Atas Kanan) */}
-                              <motion.div 
-                                initial={{ opacity: 0, y: 15 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.5, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-                                whileHover={{ scale: 1.02, y: -2 }}
-                                className="p-6 rounded-3xl bg-zinc-50 dark:bg-zinc-900/40 transition-shadow hover:shadow-lg hover:shadow-zinc-200/50 dark:hover:shadow-black/50 flex flex-col justify-between h-[160px]"
-                              >
+                              <div className="p-6 rounded-3xl bg-zinc-50 dark:bg-zinc-900/40 transition-all flex flex-col justify-between h-[160px]">
                                 <div>
                                   <span className="text-[11px] font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
                                     Total Fee
@@ -3834,16 +3900,10 @@ function AppContent() {
                                     {formatRM(stats.totalFee)}
                                   </p>
                                 </div>
-                              </motion.div>
+                              </div>
 
                               {/* 3. Baki Fee Terkini (Bawah Kiri) */}
-                              <motion.div 
-                                initial={{ opacity: 0, y: 15 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.5, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
-                                whileHover={{ scale: 1.02, y: -2 }}
-                                className="p-6 rounded-3xl bg-zinc-50 dark:bg-zinc-900/40 transition-shadow hover:shadow-lg hover:shadow-zinc-200/50 dark:hover:shadow-black/50 flex flex-col justify-between h-[160px]"
-                              >
+                              <div className="p-6 rounded-3xl bg-zinc-50 dark:bg-zinc-900/40 transition-all flex flex-col justify-between h-[160px]">
                                 <div>
                                   <span className="text-[11px] font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
                                     Baki Terkini
@@ -3854,16 +3914,10 @@ function AppContent() {
                                     {formatRM(stats.totalBakiTerkini)}
                                   </p>
                                 </div>
-                              </motion.div>
+                              </div>
 
                               {/* 4. Tunggakan - MERAH SAHAJA */}
-                              <motion.div 
-                                initial={{ opacity: 0, y: 15 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.5, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                                whileHover={{ scale: 1.02, y: -2 }}
-                                className="p-6 rounded-3xl bg-red-50/50 dark:bg-red-950/20 border border-red-100/50 dark:border-red-900/20 transition-shadow hover:shadow-lg hover:shadow-red-500/10 dark:hover:shadow-red-900/20 flex flex-col justify-between h-[160px]"
-                              >
+                              <div className="p-6 rounded-3xl bg-red-50/50 dark:bg-red-950/20 border border-red-100/50 dark:border-red-900/20 transition-all flex flex-col justify-between h-[160px]">
                                 <div className="flex items-center justify-between">
                                   <span className="text-[11px] font-medium uppercase tracking-widest text-red-600 dark:text-red-400">
                                     Tunggakan
@@ -3877,7 +3931,7 @@ function AppContent() {
                                     {stats.totalOverdueCases} kes &gt;{overdueDays} hari
                                   </p>
                                 </div>
-                              </motion.div>
+                              </div>
                             </div>
 
                             {/* Tindakan Segera & Bayaran Pantas */}
@@ -4043,49 +4097,25 @@ function AppContent() {
                               {/* Single Horizontal Swipeable Row */}
                               <div className="flex overflow-x-auto gap-4 pb-4 pt-1 no-scrollbar snap-x scroll-smooth">
                                 {/* Kad 1: Jumlah Kes */}
-                                <motion.div 
-                                  initial={{ opacity: 0, scale: 0.95 }}
-                                  animate={{ opacity: 1, scale: 1 }}
-                                  transition={{ duration: 0.4, delay: 0.05, ease: "easeOut" }}
-                                  whileTap={{ scale: 0.98 }}
-                                  className="min-w-[150px] h-[120px] p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 shrink-0 snap-start flex flex-col justify-between"
-                                >
+                                <div className="min-w-[150px] h-[120px] p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 shrink-0 snap-start flex flex-col justify-between">
                                   <span className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Jumlah Kes</span>
                                   <p className="text-3xl font-light tracking-tight text-zinc-900 dark:text-white tabular-nums">{stats.totalKes}</p>
-                                </motion.div>
+                                </div>
 
                                 {/* Kad 2: Total Fee */}
-                                <motion.div 
-                                  initial={{ opacity: 0, scale: 0.95 }}
-                                  animate={{ opacity: 1, scale: 1 }}
-                                  transition={{ duration: 0.4, delay: 0.1, ease: "easeOut" }}
-                                  whileTap={{ scale: 0.98 }}
-                                  className="min-w-[160px] h-[120px] p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 shrink-0 snap-start flex flex-col justify-between"
-                                >
+                                <div className="min-w-[160px] h-[120px] p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 shrink-0 snap-start flex flex-col justify-between">
                                   <span className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Total Fee</span>
                                   <p className="text-2xl font-light tracking-tight text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalFee)}</p>
-                                </motion.div>
+                                </div>
 
                                 {/* Kad 3: Baki Terkini */}
-                                <motion.div 
-                                  initial={{ opacity: 0, scale: 0.95 }}
-                                  animate={{ opacity: 1, scale: 1 }}
-                                  transition={{ duration: 0.4, delay: 0.15, ease: "easeOut" }}
-                                  whileTap={{ scale: 0.98 }}
-                                  className="min-w-[160px] h-[120px] p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 shrink-0 snap-start flex flex-col justify-between"
-                                >
+                                <div className="min-w-[160px] h-[120px] p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 shrink-0 snap-start flex flex-col justify-between">
                                   <span className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Baki Terkini</span>
                                   <p className="text-2xl font-light tracking-tight text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalBakiTerkini)}</p>
-                                </motion.div>
+                                </div>
 
                                 {/* Kad 4: Tunggakan - MERAH SAHAJA */}
-                                <motion.div 
-                                  initial={{ opacity: 0, scale: 0.95 }}
-                                  animate={{ opacity: 1, scale: 1 }}
-                                  transition={{ duration: 0.4, delay: 0.2, ease: "easeOut" }}
-                                  whileTap={{ scale: 0.98 }}
-                                  className="min-w-[170px] h-[120px] p-5 rounded-2xl bg-red-50/50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/30 shrink-0 snap-start flex flex-col justify-between"
-                                >
+                                <div className="min-w-[170px] h-[120px] p-5 rounded-2xl bg-red-50/50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/30 shrink-0 snap-start flex flex-col justify-between">
                                   <div className="flex items-center justify-between">
                                     <span className="text-[10px] font-medium uppercase tracking-widest text-red-600 dark:text-red-400">Tunggakan</span>
                                   </div>
@@ -4093,22 +4123,16 @@ function AppContent() {
                                     <p className="text-2xl font-light tracking-tight text-red-600 dark:text-red-400 tabular-nums">{formatRM(stats.totalOverdueAmount)}</p>
                                     <p className="text-[10px] text-red-500/80 dark:text-red-400/80 font-medium mt-0.5">{stats.totalOverdueCases} kes &gt;{overdueDays} hari</p>
                                   </div>
-                                </motion.div>
+                                </div>
 
                                 {/* Kad 5: Mileage */}
-                                <motion.div 
-                                  initial={{ opacity: 0, scale: 0.95 }}
-                                  animate={{ opacity: 1, scale: 1 }}
-                                  transition={{ duration: 0.4, delay: 0.25, ease: "easeOut" }}
-                                  whileTap={{ scale: 0.98 }}
-                                  className="min-w-[160px] h-[120px] p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 shrink-0 snap-start flex flex-col justify-between"
-                                >
+                                <div className="min-w-[160px] h-[120px] p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 shrink-0 snap-start flex flex-col justify-between">
                                   <span className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Baki Mileage</span>
                                   <p className="text-2xl font-light tracking-tight text-zinc-900 dark:text-white tabular-nums">{formatRM(stats.totalMileage)}</p>
-                                </motion.div>
+                                </div>
                               </div>
-
                             </div>
+
                             {/* 2. SENARAI KES TERKINI DI BAWAH KAD (LINEAR & TUMPUK) */}
                             <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-900/30 p-5 mt-2">
                               <div className="flex items-center justify-between mb-4">
