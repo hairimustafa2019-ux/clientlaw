@@ -6,7 +6,7 @@
 import StandaloneReceipts from './components/StandaloneReceipts';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History, ToggleLeft, ToggleRight, Cloud, RefreshCw, Calendar, AlertCircle, Info, Folder, Edit2, Save, Monitor, Smartphone, Columns, Briefcase, TrendingUp, ChevronLeft, Database, MoreVertical } from 'lucide-react';
+import { Search, Settings, Menu, Car, Users, FileText, CreditCard, Wallet, MapPin, ChevronDown, Filter, ChevronRight, X, Printer, CheckCircle, Download, Loader2, PieChart, Edit, Trash2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Upload, LogOut, LogIn, CloudUpload, Moon, Sun, Home, Clock, Zap, Plus, History, ToggleLeft, ToggleRight, Cloud, RefreshCw, Calendar, AlertCircle, Info, Folder, Edit2, Save, Monitor, Smartphone, Columns, Briefcase, TrendingUp, ChevronLeft, Database, MoreVertical, Wrench } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { records as initialRecords, CaseRecord, PaymentEntry } from './data';
 import { jsPDF } from 'jspdf';
@@ -140,6 +140,32 @@ const formatDateISO = (dateStr: string | Date | any): string => {
   const month = (d.getMonth() + 1).toString().padStart(2, '0');
   const day = d.getDate().toString().padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+export interface FeeAuditResult {
+  totalFee: number;
+  totalPaid: number;
+  expectedBaki: number;
+  currentBaki: number;
+  difference: number;
+  hasMismatch: boolean;
+}
+
+export const getRecordFeeAudit = (record: CaseRecord): FeeAuditResult => {
+  const totalFee = Number(record.totalFee) || 0;
+  const totalPaid = (record.paymentHistory || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const expectedBaki = Math.max(0, Math.round((totalFee - totalPaid) * 100) / 100);
+  const currentBaki = Math.round((Number(record.bakiFeeTerkini) || 0) * 100) / 100;
+  const difference = Math.round((currentBaki - expectedBaki) * 100) / 100;
+  const hasMismatch = Math.abs(difference) >= 0.01;
+  return {
+    totalFee,
+    totalPaid,
+    expectedBaki,
+    currentBaki,
+    difference,
+    hasMismatch
+  };
 };
 
 
@@ -2326,6 +2352,127 @@ function AppContent() {
     }
   };
 
+  const handleQuickFixFee = async (recordId: string) => {
+    const target = records.find(r => r.id === recordId);
+    if (!target) return;
+    const audit = getRecordFeeAudit(target);
+    if (!audit.hasMismatch) {
+      showToast('info', 'Baki Fee Sudah Tepat', `Baki fee untuk ${target.nama} sudah tepat mengikut rekod bayaran.`);
+      return;
+    }
+
+    let latestPaymentAmount = target.bayaranTerakhir;
+    let lastDate = target.tarikh;
+    let bakiSebelum = audit.totalFee;
+
+    if (target.paymentHistory && target.paymentHistory.length > 0) {
+      const sorted = [...target.paymentHistory].sort((a: any, b: any) => {
+        return parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime();
+      });
+      latestPaymentAmount = sorted[0].amount || sorted[0].mileageAmount || 0;
+      lastDate = sorted[0].date;
+      bakiSebelum = audit.expectedBaki + (Number(sorted[0].amount) || 0);
+    }
+
+    const updatedRecord: CaseRecord = {
+      ...target,
+      bakiFeeTerkini: audit.expectedBaki,
+      bayaranTerakhir: latestPaymentAmount,
+      tarikh: lastDate,
+      bakiSebelum: bakiSebelum,
+      userId: user ? user.uid : ""
+    };
+
+    const updatedRecords = records.map(r => r.id === recordId ? updatedRecord : r);
+    setRecords(updatedRecords);
+    localStorage.setItem('hma_case_records', JSON.stringify(updatedRecords));
+
+    if (user) {
+      const targetPath = `users/${user.uid}/records/${target.id}`;
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'records', target.id), updatedRecord);
+        silentBackupToCloud(updatedRecords);
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.WRITE, targetPath);
+      }
+    }
+
+    if (statementRecord && statementRecord.id === target.id) {
+      setStatementRecord(updatedRecord);
+    }
+
+    showToast(
+      'success',
+      `Quick Fix Berjaya (${target.nama})`,
+      `Baki fee telah dibetulkan daripada ${formatRM(audit.currentBaki)} ke ${formatRM(audit.expectedBaki)} (Total Fee: ${formatRM(audit.totalFee)} - Bayaran: ${formatRM(audit.totalPaid)})`
+    );
+  };
+
+  const handleQuickFixAll = async () => {
+    const mismatched = records.filter(r => getRecordFeeAudit(r).hasMismatch);
+    if (mismatched.length === 0) {
+      showToast('info', 'Semua Baki Fee Tepat', 'Tiada ketidakpadanan baki fee dikesan dalam senarai rekod.');
+      return;
+    }
+
+    if (!window.confirm(`Terdapat ${mismatched.length} rekod dengan ketidakpadanan antara baki fee terkini dan rekod bayaran.\n\nAdakah anda pasti ingin mengira semula baki fee bagi kesemua ${mismatched.length} rekod ini secara automatik?`)) {
+      return;
+    }
+
+    const updatedRecords = records.map(target => {
+      const audit = getRecordFeeAudit(target);
+      if (!audit.hasMismatch) return target;
+
+      let latestPaymentAmount = target.bayaranTerakhir;
+      let lastDate = target.tarikh;
+      let bakiSebelum = audit.totalFee;
+
+      if (target.paymentHistory && target.paymentHistory.length > 0) {
+        const sorted = [...target.paymentHistory].sort((a: any, b: any) => {
+          return parseDateObj(b.date).getTime() - parseDateObj(a.date).getTime();
+        });
+        latestPaymentAmount = sorted[0].amount || sorted[0].mileageAmount || 0;
+        lastDate = sorted[0].date;
+        bakiSebelum = audit.expectedBaki + (Number(sorted[0].amount) || 0);
+      }
+
+      return {
+        ...target,
+        bakiFeeTerkini: audit.expectedBaki,
+        bayaranTerakhir: latestPaymentAmount,
+        tarikh: lastDate,
+        bakiSebelum: bakiSebelum,
+        userId: user ? user.uid : ""
+      };
+    });
+
+    setRecords(updatedRecords);
+    localStorage.setItem('hma_case_records', JSON.stringify(updatedRecords));
+
+    if (user) {
+      try {
+        const batch = writeBatch(db);
+        mismatched.forEach(target => {
+          const up = updatedRecords.find(r => r.id === target.id);
+          if (up) {
+            batch.set(doc(db, 'users', user.uid, 'records', target.id), up);
+          }
+        });
+        await batch.commit();
+        silentBackupToCloud(updatedRecords);
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/records`);
+      }
+    }
+
+    if (statementRecord) {
+      const up = updatedRecords.find(r => r.id === statementRecord.id);
+      if (up) setStatementRecord(up);
+    }
+
+    showToast('success', 'Quick Fix Selesai!', `${mismatched.length} rekod telah berjaya dikira semula dan dikemaskini.`);
+  };
+
   const handleDirectPay = (amount: string) => {
     // Find most recent active customer (has baki)
     const activeRecords = [...records].reverse().filter(r => (r.bakiFeeTerkini > 0 || (r.bakiMileage && r.bakiMileage > 0)));
@@ -2849,6 +2996,10 @@ function AppContent() {
     }, { totalFee: 0, totalBakiTerkini: 0, totalMileage: 0, totalKes: filteredRecords.length, totalOverdueCases: 0, totalOverdueAmount: 0 });
   }, [filteredRecords, overdueDays]);
 
+  const mismatchedRecordsCount = useMemo(() => {
+    return records.filter(r => getRecordFeeAudit(r).hasMismatch).length;
+  }, [records]);
+
 // Compute chart data for balances by category
   const chartData = useMemo(() => {
     const totals: Record<string, number> = {};
@@ -2907,7 +3058,9 @@ function AppContent() {
   // Export functions removed
 
 
-    const renderExpandedDetails = (record: any) => (
+    const renderExpandedDetails = (record: any) => {
+      const feeAudit = getRecordFeeAudit(record);
+      return (
 <div className="p-4 sm:p-6 m-2 sm:m-4 bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7]  rounded-xl shadow-sm">
   <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8">
     <div>
@@ -2964,6 +3117,26 @@ function AppContent() {
             </button>
           </div>
         </div>
+        {feeAudit.hasMismatch && (
+          <div className="pt-2.5 mt-2.5 p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-lg text-xs space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                <AlertTriangle size={13} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                Ketidakpadanan Baki
+              </span>
+              <button
+                onClick={() => handleQuickFixFee(record.id)}
+                className="px-2 py-1 text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded flex items-center gap-1 shadow-xs cursor-pointer transition-colors"
+                title="Kira semula baki fee berdasarkan sejarah bayaran"
+              >
+                <Zap size={11} className="fill-white" /> Quick Fix
+              </button>
+            </div>
+            <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
+              Baki semasa <span className="font-mono font-semibold">{formatRM(record.bakiFeeTerkini)}</span> tidak sepadan dengan jumlah bayaran <span className="font-mono font-semibold">{formatRM(feeAudit.totalPaid)}</span>. Sepatutnya: <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{formatRM(feeAudit.expectedBaki)}</span>.
+            </p>
+          </div>
+        )}
       </div>
     </div>
     <div>
@@ -3182,6 +3355,7 @@ function AppContent() {
   </div>
 </div>
   );
+};
 
   if (!authReady) {
     return (
@@ -4458,16 +4632,52 @@ function AppContent() {
                     <FileText size={14} />
                     <span className="hidden sm:inline">Eksport CSV</span>
                   </button>
+
+                  {mismatchedRecordsCount > 0 && (
+                    <button 
+                      onClick={handleQuickFixAll}
+                      className="px-3 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-lg shadow-sm hover:shadow flex items-center gap-1.5 transition-all shrink-0 cursor-pointer animate-pulse"
+                      title={`Kira semula baki fee berdasarkan sejarah bayaran untuk ${mismatchedRecordsCount} rekod tidak sepadan`}
+                    >
+                      <Zap size={14} className="fill-white" />
+                      <span>Quick Fix Baki ({mismatchedRecordsCount})</span>
+                    </button>
+                  )}
                   
                 </div>
               </div>
+
+              {mismatchedRecordsCount > 0 && (
+                <div className="p-3 sm:px-4 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                    <div>
+                      <span className="font-semibold text-amber-900 dark:text-amber-200">
+                        Ketidakpadanan Baki Dikesan:
+                      </span>{' '}
+                      <span className="text-amber-700 dark:text-amber-400">
+                        Terdapat {mismatchedRecordsCount} rekod dengan baki fee yang tidak sepadan dengan jumlah sejarah bayaran.
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleQuickFixAll}
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-medium rounded-lg text-xs flex items-center gap-1.5 shadow-sm transition-all shrink-0 cursor-pointer"
+                  >
+                    <Zap size={12} className="fill-white" />
+                    <span>Quick Fix Semua ({mismatchedRecordsCount})</span>
+                  </button>
+                </div>
+              )}
 
               <div className="overflow-auto flex-1 bg-[#fafafa]/50 md:bg-[#ffffff] dark:bg-zinc-950/50 md:dark:bg-zinc-950 p-3 sm:p-4 md:p-0">
                 {/* Mobile View: List */}
                 <div className="md:hidden bg-[#ffffff] dark:bg-zinc-900 border border-[#e4e4e7]  rounded-xl shadow-sm overflow-hidden mb-4 divide-y divide-zinc-200 dark:divide-zinc-800">
                   <AnimatePresence mode="popLayout">
                   {filteredRecords.length > 0 ? (
-                    filteredRecords.map((record) => (
+                    filteredRecords.map((record) => {
+                      const feeAudit = getRecordFeeAudit(record);
+                      return (
                       <motion.div 
                         layout
                         initial={{ opacity: 0, y: 10 }}
@@ -4480,8 +4690,8 @@ function AppContent() {
                       >
                         <div className="flex items-start gap-3">
                           <div className="pt-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                             <input
-                                type="checkbox"
+                             <input 
+                                type="checkbox" 
                                 className="cursor-pointer rounded border-[#e4e4e7]  w-4 h-4 text-blue-600 focus:ring-blue-500 transition-colors"
                                checked={selectedRecords.includes(record.id)}
                                onChange={(e) => {
@@ -4509,6 +4719,16 @@ function AppContent() {
                                  <span className={`font-bold text-[13px] sm:text-sm leading-tight ${record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-[#27272a] dark:text-[#e4e4e7]'}`}>
                                    {formatRM(record.bakiFeeTerkini)}
                                  </span>
+                                 {feeAudit.hasMismatch && (
+                                   <button 
+                                     onClick={(e) => { e.stopPropagation(); handleQuickFixFee(record.id); }}
+                                     className="text-[10px] bg-amber-500 hover:bg-amber-600 text-white px-1.5 py-0.5 rounded font-bold uppercase cursor-pointer flex items-center gap-0.5 font-sans shadow-xs transition-colors animate-pulse"
+                                     title={`Quick Fix: Kira semula baki fee ke ${formatRM(feeAudit.expectedBaki)}`}
+                                   >
+                                     <Zap size={10} className="fill-white" />
+                                     <span>Fix</span>
+                                   </button>
+                                 )}
                                  <button 
                                    onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }}
                                    className="text-[10px] bg-blue-100 hover:bg-blue-200 text-blue-700 dark:bg-blue-500/20 dark:hover:bg-blue-500/30 dark:text-blue-400 px-1.5 py-0.5 rounded font-bold uppercase cursor-pointer flex items-center font-sans shadow-sm transition-colors"
@@ -4523,7 +4743,7 @@ function AppContent() {
                                <div className="truncate flex items-center gap-1.5">{getKesBadge(record.kes)}</div>
                                <span className="text-[#d97706] dark:text-amber-500 text-[11px] font-medium shrink-0">
                                  Mil: {formatRM(record.bakiMileage)}
-                               </span>
+                                </span>
                              </div>
 
                              <div className="flex justify-between items-center mt-1.5">
@@ -4551,6 +4771,15 @@ function AppContent() {
                               className="overflow-hidden"
                             >
                                <div className="mt-4 pt-3 border-t border-[#f4f4f5] /50 flex flex-wrap gap-2 w-full">
+                                 {feeAudit.hasMismatch && (
+                                   <button 
+                                     onClick={(e) => { e.stopPropagation(); handleQuickFixFee(record.id); }} 
+                                     className="flex-1 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:hover:bg-amber-500/25 dark:text-amber-300 rounded-lg text-[13px] font-semibold flex items-center justify-center gap-1 transition-colors border border-amber-300 dark:border-amber-700/60 cursor-pointer shadow-xs animate-pulse"
+                                     title={`Ketidakpadanan dikesan! Kira semula baki fee kepada ${formatRM(feeAudit.expectedBaki)}`}
+                                   >
+                                     <Zap size={13} className="fill-amber-500 text-amber-600 dark:text-amber-400" /> Quick Fix
+                                   </button>
+                                 )}
                                  <button onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }} className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-400 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer hover:shadow-md hover:-translate-y-0.5 animate-subtle-pulse">
                                    <Plus size={14} /> Bayaran
                                  </button>
@@ -4580,7 +4809,8 @@ function AppContent() {
                           )}
                         </AnimatePresence>
                       </motion.div>
-                    ))
+                    );
+                  })
                   ) : (
                     <motion.div 
                       initial={{ opacity: 0 }} 
@@ -4687,6 +4917,7 @@ function AppContent() {
                           }
                           const lastDate = parseDateObj(lastDateStr).getTime();
                           const isOverdue = record.bakiFeeTerkini > 0 && (now - lastDate) >= overdueMs;
+                          const feeAudit = getRecordFeeAudit(record);
                           
                           return (
                           <motion.tbody 
@@ -4774,6 +5005,16 @@ function AppContent() {
                                 <span className={record.bakiFeeTerkini > 2000 ? 'text-red-600 dark:text-red-400' : 'text-[#27272a] dark:text-[#e4e4e7]'}>
                                   {formatRM(record.bakiFeeTerkini)}
                                 </span>
+                                {feeAudit.hasMismatch && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleQuickFixFee(record.id); }}
+                                    className="ml-1 text-[10px] bg-amber-500 hover:bg-amber-600 text-white px-1.5 py-0.5 rounded font-bold uppercase tracking-wide cursor-pointer flex items-center gap-1 shrink-0 font-sans transition-all shadow-xs animate-pulse"
+                                    title={`Ketidakpadanan dikesan! Baki rekod: ${formatRM(record.bakiFeeTerkini)}, sepatutnya: ${formatRM(feeAudit.expectedBaki)} (Total Fee: ${formatRM(feeAudit.totalFee)} - Bayaran: ${formatRM(feeAudit.totalPaid)}). Klik untuk Quick Fix.`}
+                                  >
+                                    <Zap size={10} className="fill-white" />
+                                    <span>Quick Fix</span>
+                                  </button>
+                                )}
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); setPaymentRecord(record); }}
                                   className="ml-1 text-[10px] bg-blue-100 hover:bg-blue-200 text-blue-700 dark:bg-blue-500/20 dark:hover:bg-blue-500/30 dark:text-blue-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide cursor-pointer flex items-center shrink-0 font-sans transition-colors"
@@ -4788,6 +5029,17 @@ function AppContent() {
                             </td>
                             <td className="px-3 sm:px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-center gap-1.5">
+                                {feeAudit.hasMismatch && (
+                                  <button 
+                                    onClick={() => handleQuickFixFee(record.id)}
+                                    className="text-amber-800 dark:text-amber-200 bg-amber-100 hover:bg-amber-200 dark:bg-amber-500/20 dark:hover:bg-amber-500/30 px-2 py-1.5 rounded-lg text-xs font-semibold transition-colors border border-amber-300 dark:border-amber-700/60 flex items-center gap-1 shrink-0 shadow-xs cursor-pointer animate-pulse"
+                                    title={`Ketidakpadanan baki fee dikesan! Klik untuk kira semula kepada ${formatRM(feeAudit.expectedBaki)} berdasarkan rekod bayaran.`}
+                                  >
+                                    <Zap size={13} className="text-amber-600 dark:text-amber-400 fill-amber-500" />
+                                    <span>Quick Fix</span>
+                                  </button>
+                                )}
+
                                 <button 
                                   onClick={() => setMileageAdjustmentRecord(record)}
                                   className="text-teal-700 dark:text-teal-300 bg-teal-50 hover:bg-teal-100 dark:bg-teal-500/10 dark:hover:bg-teal-500/20 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-teal-200 dark:border-teal-800/50 flex items-center gap-1 shrink-0 shadow-sm cursor-pointer"
